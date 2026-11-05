@@ -164,6 +164,7 @@ func (e *Engine) Start() error {
 	e.running.Store(true)
 	e.netMu.Lock()
 	e.refreshNetLocked()
+	e.log.Info("physical network", "v4", e.def4.Name, "gw4", e.def4.Gateway, "v6", e.def6.Name, "gw6", e.def6.Gateway)
 	if e.def4.Index == 0 && e.def6.Index == 0 {
 		e.log.Warn("no default route: direct connections fail until the network is up")
 	}
@@ -384,6 +385,7 @@ func (e *Engine) DialDirect(ctx context.Context, _ netip.Addr, dst netip.AddrPor
 	v6 := dst.Addr().Unmap().Is6()
 	ctl, err := e.bindControl(v6)
 	if err != nil {
+		e.log.Debug("direct dial refused", "dst", dst, "err", err)
 		return nil, err
 	}
 	d := net.Dialer{Control: ctl}
@@ -391,7 +393,11 @@ func (e *Engine) DialDirect(ctx context.Context, _ netip.Addr, dst netip.AddrPor
 	if v6 {
 		network = "tcp6"
 	}
-	return d.DialContext(ctx, network, netip.AddrPortFrom(dst.Addr().Unmap(), dst.Port()).String())
+	c, err := d.DialContext(ctx, network, netip.AddrPortFrom(dst.Addr().Unmap(), dst.Port()).String())
+	if err != nil {
+		e.log.Debug("direct dial failed", "dst", dst, "err", err)
+	}
+	return c, err
 }
 
 func (e *Engine) listenUDP(v6 bool) (*net.UDPConn, error) {

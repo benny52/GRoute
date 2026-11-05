@@ -140,8 +140,56 @@ type defaultRoute struct {
 // go through skip (our utun).
 func readDefaults(skip int) (v4, v6 defaultRoute) {
 	v4 = findDefault(syscall.AF_INET, skip)
+	if v4.Index == 0 {
+		v4 = routeGetDefault(false, skip)
+	}
 	v6 = findDefault(syscall.AF_INET6, skip)
+	if v6.Index == 0 {
+		v6 = routeGetDefault(true, skip)
+	}
 	return
+}
+
+// routeGetDefault asks route(8) for the default route: what the routing
+// socket dump did not give.
+func routeGetDefault(v6 bool, skip int) defaultRoute {
+	args := []string{"-n", "get"}
+	if v6 {
+		args = append(args, "-inet6")
+	}
+	out, err := exec.Command("/sbin/route", append(args, "default")...).Output()
+	if err != nil {
+		return defaultRoute{}
+	}
+	return parseRouteGet(string(out), skip)
+}
+
+func parseRouteGet(out string, skip int) defaultRoute {
+	var d defaultRoute
+	for _, line := range strings.Split(out, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		switch strings.TrimSpace(k) {
+		case "gateway":
+			if a, err := netip.ParseAddr(v); err == nil {
+				d.Gateway = a.WithZone("")
+			}
+		case "interface":
+			d.Name = v
+		}
+	}
+	if d.Name == "" {
+		return defaultRoute{}
+	}
+	i, err := net.InterfaceByName(d.Name)
+	if err != nil || i.Index == skip {
+		return defaultRoute{}
+	}
+	d.Index = i.Index
+	return d
 }
 
 const rtfIfScope = 0x1000000 // RTF_IFSCOPE
