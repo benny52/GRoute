@@ -290,10 +290,12 @@ export interface ProxyInput {
   username: string;
   password: string;
   udp?: '' | 'on' | 'off'; // socks-udp: SOCKS5 UDP ASSOCIATE; ''/absent = default (on here, off for LAN)
+  source?: string; // "sub:<id>": kept for a subscription's server
 }
 
 export interface ProxyView extends ProxyInput {
   profileName: string;
+  sourceName?: string; // the subscription a proxy is kept for
   state: 'off' | 'waiting' | 'listening' | 'error';
   error?: string;
   active: number;
@@ -528,6 +530,20 @@ export interface Subscription {
   infoAt?: string;
   info: SubInfo | null;
   supportUrl?: string;
+  // A local proxy for every server (null/absent: off), the form's
+  // password, and the proxies made: how many and their ports.
+  proxies?: { port: number; lan?: boolean; username?: string } | null;
+  proxyPassword: string;
+  proxyCount: number;
+  proxyFrom: number;
+  proxyTo: number;
+}
+
+export interface SubProxiesInput {
+  port: number;
+  lan: boolean;
+  username: string;
+  password: string;
 }
 
 export interface SubPreview {
@@ -628,6 +644,7 @@ interface GUI {
   UpdateSubscription(id: string): Promise<MergeStats>;
   RollbackSubscription(id: string): Promise<MergeStats>;
   DeleteSubscription(id: string): Promise<void>;
+  SetSubscriptionProxies(id: string, p: SubProxiesInput | null): Promise<void>;
   GeoInfo(): Promise<GeoInfo>;
   UpdateGeo(force: boolean): Promise<{ changed: boolean; notes: string[] }>;
   RollbackGeo(): Promise<void>;

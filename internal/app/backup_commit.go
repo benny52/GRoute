@@ -141,6 +141,9 @@ func (c *Controller) installLoadedLocked(ls []loaded) (dnsErr error) {
 			c.subs, c.subsBroken = l.subs, l.err
 			for _, s := range l.subs {
 				c.Redactor.SetGroup("sub:"+s.ID, urlSecrets(s.URL)...)
+				if s.Proxies != nil {
+					c.Redactor.SetGroup("subproxy:"+s.ID, s.Proxies.Password)
+				}
 			}
 		case "prefs.json":
 			c.prefs, c.prefsBroken = l.prefs, l.err
@@ -172,6 +175,11 @@ func (c *Controller) installLoadedLocked(ls []loaded) (dnsErr error) {
 	}
 	c.updateNamesLocked()
 	c.recomputeLoadErrLocked()
+	// Subscription proxies follow the servers loaded (a restore, a file
+	// edited by hand).
+	if err := c.syncSubProxiesLocked(); err != nil {
+		c.Log.Error("subscription proxies not saved", "err", err)
+	}
 	return dnsErr
 }
 

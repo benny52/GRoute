@@ -112,7 +112,9 @@ func fastProbes(t *testing.T) {
 	t.Helper()
 	every, retry, timeout, direct := vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout, vlessDirectWait
 	vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout, vlessDirectWait = 100*time.Millisecond, 50*time.Millisecond, time.Second, 200*time.Millisecond
-	t.Cleanup(func() { vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout, vlessDirectWait = every, retry, timeout, direct })
+	t.Cleanup(func() {
+		vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout, vlessDirectWait = every, retry, timeout, direct
+	})
 }
 
 func TestVLESSConnectsThroughXray(t *testing.T) {

@@ -245,6 +245,61 @@
     if (n && n.trim()) edit(s, { name: n.trim() });
   }
 
+  // Proxies for the servers: a local proxy for every server of the
+  // subscription, kept in step with it by HyRoute.
+  let pf = $state<{ id: string; port: number; lan: boolean; username: string; password: string } | null>(null);
+  let pfError = $state('');
+  let pfBusy = $state(false);
+  let pfCopied = $state('');
+
+  function openProxies(s: Subscription) {
+    pfError = '';
+    pf = {
+      id: s.id,
+      port: s.proxies?.port ?? 20000,
+      lan: !!s.proxies?.lan,
+      username: s.proxies?.username ?? '',
+      password: s.proxyPassword ?? '',
+    };
+  }
+
+  function genPassword(): string {
+    const a = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const b = new Uint32Array(16);
+    crypto.getRandomValues(b);
+    return Array.from(b, (x) => a[x % a.length]).join('');
+  }
+
+  async function saveProxies(on: boolean) {
+    if (!pf) return;
+    pfBusy = true;
+    pfError = '';
+    try {
+      await api.SetSubscriptionProxies(pf.id, on ? { port: +pf.port, lan: pf.lan, username: pf.username.trim(), password: pf.password } : null);
+      pf = null;
+      await load();
+    } catch (e) {
+      pfError = errText(e);
+    }
+    pfBusy = false;
+  }
+
+  // copyProxies copies "name — socks5://…" for every proxy of the
+  // subscription, one per line.
+  async function copyProxies(s: Subscription) {
+    try {
+      const all = (await api.Proxies()).filter((p) => p.source === 'sub:' + s.id);
+      const auth = (p: { username: string; password: string }) =>
+        p.username ? `${encodeURIComponent(p.username)}:${encodeURIComponent(p.password)}@` : '';
+      const lines = all.map((p) => `${p.name} — socks5://${auth(p)}127.0.0.1:${p.port}`);
+      await api.CopyText(lines.join('\n'));
+      pfCopied = s.id;
+      setTimeout(() => (pfCopied = ''), 1500);
+    } catch (e) {
+      error = errText(e);
+    }
+  }
+
   async function remove(s: Subscription) {
     if (!confirm(`Удалить подписку «${hide(s.name)}»? Профили, которые используют правила, останутся как ручные, остальные будут удалены.`)) return;
     await step('del', () => api.DeleteSubscription(s.id));
@@ -365,8 +420,55 @@
           {#if s.hasPrevious}<button onclick={() => rollback(s)} disabled={busy !== ''} title="Вернуть предыдущую успешную версию">Откатить</button>{/if}
           <button onclick={() => rename(s)}>Переименовать</button>
           <button onclick={() => changeURL(s)}>Сменить ссылку</button>
+          <button onclick={() => (pf?.id === s.id ? (pf = null) : openProxies(s))} title="Свой локальный прокси (SOCKS5 и HTTP) для каждого сервера подписки">
+            {s.proxies ? `Прокси: ${s.proxyCount}` : 'Прокси для серверов'}
+          </button>
           <button class="danger" onclick={() => remove(s)}>Удалить</button>
         </div>
+        {#if s.proxies && s.proxyCount > 0}
+          <div class="meta small">
+            <span>Прокси для серверов: {s.proxyCount}, порты {s.proxyFrom}{s.proxyTo !== s.proxyFrom ? `–${s.proxyTo}` : ''}{s.proxies.lan ? ', доступны из локальной сети' : ''}</span>
+            <button class="ghost small-btn" onclick={() => copyProxies(s)}>{pfCopied === s.id ? 'Скопировано' : 'Скопировать список'}</button>
+          </div>
+        {/if}
+        {#if pf && pf.id === s.id}
+          <div class="pf">
+            <p class="muted small">
+              У каждого сервера подписки будет свой порт на этом компьютере (SOCKS5 и HTTP на одном порту), начиная с первого. Новые
+              серверы подписки получат прокси сами, у пропавших прокси исчезнут, порт за сервером сохраняется. Прокси работают, пока HyRoute
+              подключён, и каждый запускает свой сервер — при 30 серверах это 30 процессов Hysteria или Xray. Настроить или выключить
+              отдельный прокси можно на странице «Прокси».
+            </p>
+            <div class="pf-grid">
+              <label for="pf-port">Первый порт</label>
+              <input id="pf-port" type="number" min="1024" max="65535" bind:value={pf.port} style="width: 120px" />
+              <span></span>
+              <label class="check"><input type="checkbox" bind:checked={pf.lan} /> Доступны из локальной сети (телефон, другой компьютер)</label>
+              <label for="pf-user">Логин и пароль</label>
+              <div class="pf-auth">
+                <input id="pf-user" bind:value={pf.username} placeholder="логин" autocomplete="off" />
+                <input bind:value={pf.password} placeholder="пароль" autocomplete="new-password" />
+                <button
+                  onclick={() => {
+                    if (!pf) return;
+                    if (!pf.username) pf.username = 'hyroute';
+                    pf.password = genPassword();
+                  }}>Придумать</button
+                >
+              </div>
+              {#if pf.lan}
+                <span></span>
+                <p class="muted small">Из локальной сети — только с паролем и на портах до 49151. Windows пустит подключения только из домашней или рабочей сети.</p>
+              {/if}
+            </div>
+            {#if pfError}<div class="note error small">{hide(pfError)}</div>{/if}
+            <div class="actions">
+              <button class="primary" onclick={() => saveProxies(true)} disabled={pfBusy}>{s.proxies ? 'Сохранить' : 'Включить'}</button>
+              {#if s.proxies}<button class="danger" onclick={() => saveProxies(false)} disabled={pfBusy}>Выключить и удалить прокси</button>{/if}
+              <button onclick={() => (pf = null)}>Отмена</button>
+            </div>
+          </div>
+        {/if}
         <div class="meta small">
           <span>Обновлено: {fmtDateTime(s.lastUpdate)}{#if s.viaVPN} <span class="muted" title="Сервер подписки не ответил напрямую (возможно, его блокирует сеть), и HyRoute скачал её через основной сервер">через VPN</span>{/if}</span>
           <span>Профилей: {s.profiles}{s.missing ? ` (нет в подписке: ${s.missing})` : ''}</span>
@@ -410,4 +512,10 @@
   .name { font-weight: 600; }
   .meta { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 0 30px; }
   .note.small { margin: 6px 0 0; }
+  .pf { margin: 8px 0 0 30px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); display: grid; gap: 8px; }
+  .pf p { margin: 0; }
+  .pf .actions { margin: 0; }
+  .pf-grid { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+  .pf-auth { display: flex; gap: 6px; }
+  .pf-auth input { flex: 1; min-width: 0; }
 </style>

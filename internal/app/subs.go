@@ -329,6 +329,12 @@ type SubView struct {
 	Missing   int       `json:"missing"`
 	NextAt    time.Time `json:"nextAt"`
 	Info      *SubInfo  `json:"info"` // subinfo: nil when the panel reports nothing
+	// Proxies for the servers: the password of the form (Proxies hides it
+	// from JSON on disk), how many there are and their ports.
+	ProxyPassword string `json:"proxyPassword"`
+	ProxyCount    int    `json:"proxyCount"`
+	ProxyFrom     int    `json:"proxyFrom"`
+	ProxyTo       int    `json:"proxyTo"`
 }
 
 func (c *Controller) Subscriptions() []SubView {
@@ -349,6 +355,10 @@ func (c *Controller) Subscriptions() []SubView {
 			}
 		}
 		v.NextAt = nextAt(s)
+		if s.Proxies != nil {
+			v.ProxyPassword = s.Proxies.Password
+		}
+		v.ProxyCount, v.ProxyFrom, v.ProxyTo = c.subProxySummaryLocked(s.ID)
 		out = append(out, v)
 	}
 	return out
@@ -826,10 +836,16 @@ func (c *Controller) profileUsedLocked(id string) bool {
 }
 
 // proxyRefsLocked lists local proxies that name profile id explicitly.
+// The proxy a subscription keeps for its own server does not count: it
+// goes with the server.
 func (c *Controller) proxyRefsLocked(id string) []string {
 	var out []string
+	src := ""
+	if srv := c.profiles.Find(id); srv != nil {
+		src = srv.Source
+	}
 	for _, p := range c.proxies {
-		if p.Profile == id {
+		if p.Profile == id && (p.Source == "" || p.Source != src) {
 			out = append(out, "прокси «"+p.Name+"»")
 		}
 	}

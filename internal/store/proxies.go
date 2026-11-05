@@ -27,6 +27,9 @@ type LocalProxy struct {
 	UDP      UDPMode `json:"udp,omitempty"`
 	Username string  `json:"username"`
 	Password string  `json:"-"`
+	// Source is "sub:<id>" for a proxy HyRoute keeps for a server of that
+	// subscription (Subscription.Proxies), "" for one the user added.
+	Source string `json:"source,omitempty"`
 }
 
 // UDPMode is the SOCKS5 UDP ASSOCIATE switch of a local proxy: "" (the

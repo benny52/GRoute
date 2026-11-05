@@ -293,6 +293,11 @@ func (c *Controller) saveProfilesLocked(next *store.Profiles) error {
 	c.syncGroupsLocked()
 	c.updateNamesLocked()
 	c.applyRoutingLocked()
+	// The servers are saved: a proxy that cannot follow them is logged,
+	// not a failure of the change.
+	if err := c.syncSubProxiesLocked(); err != nil {
+		c.Log.Error("subscription proxies not saved", "err", err)
+	}
 	return nil
 }
 

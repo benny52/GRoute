@@ -30,6 +30,8 @@ type ProxyView struct {
 	store.LocalProxy
 	Password    string `json:"password"` // store.LocalProxy hides it from JSON on disk
 	ProfileName string `json:"profileName"`
+	// SourceName: the subscription a proxy is kept for ("" for the user's).
+	SourceName string `json:"sourceName,omitempty"`
 	// State: off | waiting (not connected) | listening | error
 	State  string `json:"state"`
 	Error  string `json:"error,omitempty"`
@@ -77,7 +79,11 @@ func (c *Controller) Proxies() []ProxyView {
 	connected := sess != nil
 	names := map[string]string{}
 	targets := map[string]string{}
+	sources := map[string]string{}
 	for _, p := range list {
+		if p.Source != "" {
+			sources[p.ID] = c.sourceNameLocked(p.Source)
+		}
 		targets[p.ID] = c.proxyProfileLocked(p)
 		if n := c.targetNameLocked(targets[p.ID]); n != "" {
 			names[p.ID] = n
@@ -87,7 +93,7 @@ func (c *Controller) Proxies() []ProxyView {
 	c.proxyMu.Lock()
 	out := make([]ProxyView, 0, len(list))
 	for _, p := range list {
-		v := ProxyView{LocalProxy: p, Password: p.Password, ProfileName: names[p.ID], State: "off", Addresses: []string{}, UDPEffective: p.UDPOn()}
+		v := ProxyView{LocalProxy: p, Password: p.Password, ProfileName: names[p.ID], SourceName: sources[p.ID], State: "off", Addresses: []string{}, UDPEffective: p.UDPOn()}
 		switch r := c.proxyRuns[p.ID]; {
 		case !p.Enabled:
 		case r != nil && r.srv != nil:
@@ -251,13 +257,18 @@ func (c *Controller) SaveProxy(in ProxyInput) (ProxyView, error) {
 	}
 	next := append([]store.LocalProxy(nil), c.proxies...)
 	if p.ID == "" {
-		p.ID = newID()
+		p.ID, p.Source = newID(), ""
 		next = append(next, p)
 	} else {
 		i := proxyIndex(next, p.ID)
 		if i < 0 {
 			c.mu.Unlock()
 			return ProxyView{}, errors.New("прокси не найден")
+		}
+		// A subscription's proxy stays its server's (its name follows the
+		// server); the rest is the user's to change.
+		if src := next[i].Source; src != "" {
+			p.Source, p.Profile, p.Name = src, next[i].Profile, next[i].Name
 		}
 		next[i] = p
 	}
@@ -288,6 +299,11 @@ func (c *Controller) DeleteProxy(id string) error {
 	if i < 0 {
 		c.mu.Unlock()
 		return errors.New("прокси не найден")
+	}
+	if src := c.proxies[i].Source; src != "" {
+		name := c.sourceNameLocked(src)
+		c.mu.Unlock()
+		return fmt.Errorf("этот прокси HyRoute держит для сервера подписки «%s»: выключите его или отключите прокси у подписки на странице «Подписки»", name)
 	}
 	next := append(append([]store.LocalProxy(nil), c.proxies[:i]...), c.proxies[i+1:]...)
 	if err := c.saveProxiesLocked(next); err != nil {

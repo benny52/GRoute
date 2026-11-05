@@ -61,7 +61,7 @@
   }
 
   function edit(p: ProxyView) {
-    editing = { id: p.id, name: p.name, enabled: p.enabled, profile: p.profile, port: p.port, lan: p.lan, username: p.username, password: p.password, udp: p.udp ?? '' };
+    editing = { id: p.id, name: p.name, enabled: p.enabled, profile: p.profile, port: p.port, lan: p.lan, username: p.username, password: p.password, udp: p.udp ?? '', source: p.source };
     editingFrom = JSON.stringify(editing);
     showPass = false;
   }
@@ -171,7 +171,10 @@
           <input type="checkbox" checked={p.enabled} onchange={(e) => settle(e, () => toggle(p), () => p.enabled)} /><span></span>
         </label>
         <div class="grow">
-          <div class="name"><b>{p.name}</b> <span class="dot {tone(p)}"></span> <span class="muted small">{stateText[p.state]}</span></div>
+          <div class="name">
+            <b>{p.name}</b> <span class="dot {tone(p)}"></span> <span class="muted small">{stateText[p.state]}</span>
+            {#if p.source}<span class="badge" title="HyRoute держит этот прокси для сервера подписки: он появляется и исчезает вместе с сервером">подписка «{hide(p.sourceName ?? '')}»</span>{/if}
+          </div>
           <div class="muted small">
             через {via(p)}
             {#if p.username && p.password}· с паролем{:else}· без пароля{/if}
@@ -180,7 +183,7 @@
           </div>
         </div>
         <button class="icon" onclick={() => edit(p)} title="Изменить"><Icon name="edit" size={16} /></button>
-        <button class="icon danger" onclick={() => remove(p)} title="Удалить"><Icon name="trash" size={16} /></button>
+        {#if !p.source}<button class="icon danger" onclick={() => remove(p)} title="Удалить"><Icon name="trash" size={16} /></button>{/if}
       </div>
       {#if p.error}<div class="note error small">{hide(p.error)}</div>{/if}
       {#if p.udpError}<div class="note error small">{hide(p.udpError)}</div>{/if}
@@ -231,11 +234,15 @@
         <button class="icon" onclick={() => (editing = null)}><Icon name="x" /></button>
       </div>
       <div class="form">
+        {#if editing.source}
+          <span></span>
+          <p class="muted small">Прокси сервера подписки: название и сервер у него от подписки, порт, пароль и доступ можно менять.</p>
+        {/if}
         <label for="pn">Название</label>
-        <input id="pn" bind:value={editing.name} placeholder="Например, «Binance — Япония»" />
+        <input id="pn" bind:value={editing.name} placeholder="Например, «Binance — Япония»" disabled={!!editing.source} />
 
         <label for="ps">Через сервер</label>
-        <select id="ps" bind:value={editing.profile}>
+        <select id="ps" bind:value={editing.profile} disabled={!!editing.source}>
           <option value="">Основной{main ? ` — ${mainText(main)}` : ''}</option>
           <TargetOptions current={editing.profile} />
         </select>

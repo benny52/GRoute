@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -165,5 +166,22 @@ func TestSubscriptionsFileV1Compat(t *testing.T) {
 	}
 	if err != nil || string(raw) != "https://p.example/sub/tok" {
 		t.Fatalf("%q %v", raw, err)
+	}
+}
+
+// The password of a subscription's proxies is sealed like its URL.
+func TestSubscriptionProxyPasswordSealed(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	in := []Subscription{{ID: "a", Name: "A", URL: "https://panel.example/sub/x", Proxies: &SubProxies{Port: 20000, LAN: true, Username: "u", Password: "proxy-secret"}}}
+	if err := s.SaveSubscriptions(in); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir, "subscriptions.json"))
+	if strings.Contains(string(raw), `"proxy-secret"`) || !strings.Contains(string(raw), `"sealedProxyPassword"`) {
+		t.Fatalf("%s", raw)
+	}
+	out, err := s.LoadSubscriptions()
+	if err != nil || out[0].Proxies == nil || *out[0].Proxies != *in[0].Proxies {
+		t.Fatalf("%+v %v", out, err)
 	}
 }

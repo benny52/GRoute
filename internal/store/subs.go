@@ -42,6 +42,18 @@ type Subscription struct {
 	// plain; the app checks it on every use.
 	InfoAt  time.Time `json:"infoAt,omitzero"`
 	Support string    `json:"supportUrl,omitempty"`
+	// Proxies, when set, gives every server of the subscription a local
+	// proxy of its own (LocalProxy.Source).
+	Proxies *SubProxies `json:"proxies,omitempty"`
+}
+
+// SubProxies is how a subscription's proxies are made: ports from Port up,
+// and the same network access and login for all.
+type SubProxies struct {
+	Port     int    `json:"port"`
+	LAN      bool   `json:"lan,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"-"` // sealed (storedSub.SealedProxyPassword)
 }
 
 // maxSupportURL bounds Subscription.Support read from the file.
@@ -49,7 +61,8 @@ const maxSupportURL = 2048
 
 type storedSub struct {
 	Subscription
-	SealedURL string `json:"sealedURL"`
+	SealedURL           string `json:"sealedURL"`
+	SealedProxyPassword string `json:"sealedProxyPassword,omitempty"`
 }
 
 func (s *Store) LoadSubscriptions() ([]Subscription, error) {
@@ -76,6 +89,18 @@ func (s *Store) LoadSubscriptions() ([]Subscription, error) {
 			return nil, fmt.Errorf("подписка %q: ссылку не удалось расшифровать (файл от другого пользователя или компьютера?): %w", st.Name, err)
 		}
 		st.Subscription.URL = string(raw)
+		if st.Proxies != nil && st.SealedProxyPassword != "" {
+			raw, err := base64.StdEncoding.DecodeString(st.SealedProxyPassword)
+			if err == nil {
+				raw, err = unseal(raw)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("подписка %q: пароль её прокси не удалось расшифровать: %w", st.Name, err)
+			}
+			p := *st.Proxies
+			p.Password = string(raw)
+			st.Proxies = &p
+		}
 		if len(st.Support) > maxSupportURL {
 			st.Support = "" // a bound only: validity is checked on use
 		}
@@ -93,7 +118,15 @@ func (s *Store) SaveSubscriptions(list []Subscription) error {
 		if err != nil {
 			return fmt.Errorf("seal subscription URL: %w", err)
 		}
-		out = append(out, storedSub{Subscription: sub, SealedURL: base64.StdEncoding.EncodeToString(sealed)})
+		st := storedSub{Subscription: sub, SealedURL: base64.StdEncoding.EncodeToString(sealed)}
+		if sub.Proxies != nil && sub.Proxies.Password != "" {
+			sp, err := seal([]byte(sub.Proxies.Password))
+			if err != nil {
+				return fmt.Errorf("seal subscription proxy password: %w", err)
+			}
+			st.SealedProxyPassword = base64.StdEncoding.EncodeToString(sp)
+		}
+		out = append(out, st)
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
