@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +40,10 @@ type winHost struct {
 	// menubar: the peers that are the menu bar icon (they asked
 	// "client.menubar"): events go to them, dialogs never.
 	menubar map[*uirpc.Peer]bool
-	ln      net.Listener
+	// app is the HyRoute.app the newest window runs from (client.app):
+	// an update replaces it.
+	app string
+	ln  net.Listener
 }
 
 var errNoWindow = errors.New("окно HyRoute закрыто")
@@ -113,6 +117,15 @@ func (h *winHost) serve(c *net.UnixConn) {
 	p := uirpc.New(c, c)
 	p.OnCall = h.answer
 	p.OnEvent = func(name string, args []json.RawMessage) {
+		if name == "client.app" && len(args) == 1 {
+			var p string
+			if json.Unmarshal(args[0], &p) == nil && filepath.IsAbs(p) && filepath.Base(p) == "HyRoute.app" {
+				h.mu.Lock()
+				h.app = p
+				h.mu.Unlock()
+			}
+			return
+		}
 		if name == "client.menubar" {
 			h.mu.Lock()
 			if h.menubar == nil {
@@ -159,6 +172,13 @@ func (h *winHost) current() *uirpc.Peer {
 }
 
 func (h *winHost) isOpen() bool { return h.current() != nil }
+
+// appPath is the HyRoute.app to update ("" when no window said).
+func (h *winHost) appPath() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.app
+}
 
 func (h *winHost) call(method string, args ...any) (json.RawMessage, error) {
 	p := h.current()

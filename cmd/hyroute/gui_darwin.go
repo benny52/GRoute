@@ -5,17 +5,21 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/lardan099/hyroute/internal/app"
 	"github.com/lardan099/hyroute/internal/core"
 	"github.com/lardan099/hyroute/internal/uirpc"
+	"github.com/lardan099/hyroute/internal/update"
 )
 
 // GUI serves the windows connected to the service (hub_darwin.go): every
@@ -111,8 +115,80 @@ func (g *GUI) OpenSubscriptionSupport(id string) error {
 	return g.win.openPath(u)
 }
 
+// reconnectMarker in the data folder tells the next service to connect
+// (it was connected before an update).
+const reconnectMarker = "reconnect-after-update"
+
+// ApplyAppUpdate installs the verified package: the service's files from
+// the new bundle, the bundle itself over the app the window runs from,
+// then the service exits and launchd starts the new one. The windows and
+// the menu bar icon start their new versions.
 func (g *GUI) ApplyAppUpdate() error {
-	return errors.New("обновите HyRoute для macOS, скачав новую версию со страницы релизов")
+	dir, ver, err := g.ctl.ReadyUpdate()
+	if err != nil {
+		return err
+	}
+	bundle := filepath.Join(dir, update.AppBundle)
+	exe := filepath.Join(bundle, "Contents", "MacOS", "HyRoute")
+	if err := installFiles(exe, filepath.Join(bundle, "Contents", "Resources")); err != nil {
+		return fmt.Errorf("файлы службы не обновлены: %w", err)
+	}
+	target := g.win.appPath()
+	if target != "" {
+		if err := replaceBundle(bundle, target); err != nil {
+			g.ctl.Log.Warn("HyRoute.app not replaced: the service is updated, the app stays as it was", "app", target, "err", err)
+			target = ""
+		}
+	}
+	g.ctl.StopNetModes()
+	g.ctl.BeginExit() // no connect from here to the exit
+	if routingOn(g.ctl.Status()) {
+		os.WriteFile(filepath.Join(g.dataDir, reconnectMarker), nil, 0o600)
+	}
+	g.ctl.Log.Info("installing update: the service restarts with the new version", "to", ver)
+	g.ctl.HoldKillSwitch()
+	g.ctl.Disconnect()
+	g.win.notify("service.updated", target)
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		g.quit() // launchd starts the new service (KeepAlive)
+	}()
+	return nil
+}
+
+// replaceBundle puts the new HyRoute.app in the place of the one at
+// target (a HyRoute.app the window ran from): copied beside it first, then
+// swapped, the old one removed.
+func replaceBundle(src, target string) error {
+	if filepath.Base(target) != update.AppBundle || !filepath.IsAbs(target) {
+		return errors.New("не HyRoute.app")
+	}
+	if fi, err := os.Lstat(target); err != nil || !fi.IsDir() {
+		return errors.New("HyRoute.app не найден")
+	}
+	tmp, old := target+".new", target+".old"
+	os.RemoveAll(tmp)
+	os.RemoveAll(old)
+	if out, err := exec.Command("/usr/bin/ditto", src, tmp).CombinedOutput(); err != nil {
+		os.RemoveAll(tmp)
+		return fmt.Errorf("ditto: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	// The app stays its user's, as the user put it there.
+	if fi, err := os.Stat(target); err == nil {
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			exec.Command("/usr/sbin/chown", "-R", fmt.Sprintf("%d:%d", st.Uid, st.Gid), tmp).Run()
+		}
+	}
+	if err := os.Rename(target, old); err != nil {
+		os.RemoveAll(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		os.Rename(old, target)
+		return err
+	}
+	os.RemoveAll(old)
+	return nil
 }
 
 func (g *GUI) System() SystemInfo {

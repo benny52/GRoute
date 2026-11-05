@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -128,7 +129,28 @@ func runWindow() {
 	go startMenubar()
 	b := &Bridge{peer: peer}
 	peer.OnCall = b.answer
+	// The service updates this app: it is told where it runs from.
+	if exe, err := os.Executable(); err == nil {
+		if exe, err = filepath.EvalSymlinks(exe); err == nil {
+			peer.Notify("client.app", filepath.Dir(filepath.Dir(filepath.Dir(exe))))
+		}
+	}
 	peer.OnEvent = func(name string, args []json.RawMessage) {
+		if name == "service.updated" {
+			// The new version opens once the service is back.
+			var app string
+			if len(args) > 0 {
+				json.Unmarshal(args[0], &app)
+			}
+			b.closing.Store(true)
+			if app != "" {
+				exec.Command("/bin/sh", "-c", `sleep 4; /usr/bin/open "$0"`, app).Start()
+			}
+			if ctx := b.context(); ctx != nil {
+				runtime.Quit(ctx)
+			}
+			return
+		}
 		ctx := b.context()
 		if ctx == nil {
 			return

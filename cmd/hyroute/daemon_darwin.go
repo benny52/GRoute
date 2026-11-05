@@ -17,6 +17,7 @@ import (
 	"github.com/lardan099/hyroute/internal/hysteria"
 	"github.com/lardan099/hyroute/internal/killswitch"
 	"github.com/lardan099/hyroute/internal/procinfo"
+	"github.com/lardan099/hyroute/internal/release"
 	"github.com/lardan099/hyroute/internal/session"
 	"github.com/lardan099/hyroute/internal/store"
 	"github.com/lardan099/hyroute/internal/sysdns"
@@ -85,8 +86,16 @@ func runDaemon(verbose, stub bool) {
 	}
 	ctl.Version = version
 	ctl.Device = deviceInfo
-	coreMgr := &core.Manager{Dir: filepath.Join(dataDir, "core"), Bundled: hysteriaPath, Version: hysteria.ExeVersion}
+	// The cores: the bundled copies or updates (darwin builds of this Mac's
+	// architecture, core/kinds_darwin.go), in root's data folder.
+	client := &release.Client{UserAgent: "HyRoute/" + version}
+	coreMgr := &core.Manager{Dir: filepath.Join(dataDir, "core"), Bundled: hysteriaPath, Client: client, Version: hysteria.ExeVersion}
+	xrayMgr := &core.Manager{Kind: core.Xray, Dir: filepath.Join(dataDir, "xray"), Bundled: xrayPath, Client: client,
+		Version: hysteria.XrayVersion, Test: ctl.TestXray}
+	ctl.Base.Hysteria, ctl.Base.Xray = coreMgr.Path, xrayMgr.Path
 	ctl.CoreVersion = func() string { return coreMgr.Info().Version }
+	ctl.Updater = &app.Updater{Repo: updateRepo, Dir: filepath.Join(dataDir, "updates"), Core: coreMgr, Xray: xrayMgr, Client: client}
+	os.RemoveAll(ctl.Updater.Dir) // staging of an earlier run
 	ctl.ListRunning = procinfo.ListRunning
 	ctl.KillSwitch = &killswitch.Switch{GID: gid, StateDir: dataDir}
 	ctl.InitKillSwitch()
@@ -103,9 +112,18 @@ func runDaemon(verbose, stub bool) {
 	schedCtx, stopSched := context.WithCancel(context.Background())
 	defer stopSched()
 	go ctl.RunScheduler(schedCtx)
+	go ctl.RunUpdateChecks(schedCtx)
 	go ctl.RunGeoUpdates(schedCtx)
 	go ctl.RunStats(schedCtx)
-	go ctl.RunNetModes(schedCtx, app.NetStartDecide)
+	// After an update the new service connects again if the old one was
+	// connected; otherwise the network rules or «Подключаться при запуске»
+	// decide.
+	mode := app.NetStartDecide
+	if os.Remove(filepath.Join(dataDir, reconnectMarker)) == nil {
+		mode = app.NetStartRestore
+		go ctl.ConnectAtStart("connecting again: HyRoute was updated and was connected before")
+	}
+	go ctl.RunNetModes(schedCtx, mode)
 
 	if err := gui.win.listen(); err != nil {
 		fatal(fmt.Errorf("socket %s: %w", sockPath, err))

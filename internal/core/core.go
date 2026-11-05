@@ -67,7 +67,7 @@ var Hysteria = Kind{
 		var out []string
 		if h, has := r.Asset("hashes.txt"); has {
 			if list, err := c.Fetch(ctx, h.URL); err == nil {
-				if s := release.SumFor(list, AssetName); s != "" {
+				if s := release.SumFor(list, a.Name); s != "" {
 					out = append(out, s)
 				}
 			}
@@ -410,6 +410,11 @@ func (m *Manager) Install(ctx context.Context, u Update, progress func(done, tot
 		sum, err = m.downloadMember(ctx, u, dir, dst, progress)
 	}
 	if err != nil {
+		os.RemoveAll(dir)
+		return err
+	}
+	// A downloaded exe has no execute bit (macOS needs one).
+	if err := os.Chmod(dst, 0o755); err != nil {
 		os.RemoveAll(dir)
 		return err
 	}

@@ -28,9 +28,13 @@ const (
 	UpdaterExe = "hyroute-updater.exe"
 )
 
+// Platform is the platform part of the release asset's name: the
+// Windows package, or the macOS app (package_darwin.go).
+var Platform = "windows-amd64"
+
 // ZipName is the release asset for a version ("v0.5.0").
 func ZipName(version string) string {
-	return "HyRoute-" + strings.TrimPrefix(version, "v") + "-windows-amd64.zip"
+	return "HyRoute-" + strings.TrimPrefix(version, "v") + "-" + Platform + ".zip"
 }
 
 // Manifest lists the package files and their SHA256 (inside the zip,
@@ -86,6 +90,9 @@ func Check(ctx context.Context, c *release.Client, repo, current, channel string
 // Stage downloads the package into root\<version>, verifies it and
 // extracts it into root\<version>\files. It returns that directory.
 func Stage(ctx context.Context, c *release.Client, a Available, root string, progress func(done, total int64)) (string, error) {
+	if Platform == PlatformMac {
+		return stageApp(ctx, c, a, root, progress)
+	}
 	dir := filepath.Join(root, a.Version)
 	os.RemoveAll(dir)
 	zipPath := filepath.Join(dir, "package.zip")
@@ -154,6 +161,9 @@ func extract(zipPath, dst string) error {
 
 // Verify checks every file of the manifest in dir.
 func Verify(dir string) (Manifest, error) {
+	if Platform == PlatformMac {
+		return VerifyApp(dir)
+	}
 	var m Manifest
 	b, err := os.ReadFile(filepath.Join(dir, ManifestName))
 	if err != nil {

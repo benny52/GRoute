@@ -25,10 +25,12 @@ import (
 	"image/color"
 	"image/png"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"fyne.io/systray"
@@ -154,6 +156,14 @@ func (m *menubar) connectLoop() {
 				m.kick()
 			case "menubar.openWindow":
 				openWindow()
+			case "service.updated":
+				// The service restarts with a new version: so does the icon,
+				// from the service's (new) copy.
+				go func() {
+					time.Sleep(5 * time.Second)
+					exe := serviceDir + "/HyRoute"
+					syscall.Exec(exe, []string{exe, "--menubar"}, os.Environ())
+				}()
 			case "refused":
 				refused.Store(true)
 			}

@@ -88,6 +88,34 @@ func installService() error {
 	}
 	// Stop the old service first: its files are replaced.
 	exec.Command("/bin/launchctl", "bootout", "system/"+serviceLabel).Run()
+	if err := installFiles(exe, res); err != nil {
+		return err
+	}
+	if err := os.WriteFile(servicePlist, []byte(plistText), 0o644); err != nil {
+		return err
+	}
+	os.Chown(servicePlist, 0, 0)
+	if out, err := exec.Command("/bin/launchctl", "bootstrap", "system", servicePlist).CombinedOutput(); err != nil {
+		return fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	// The menu bar icon: for every user at login, and now for the one at
+	// the screen (its old copy goes first).
+	if err := os.WriteFile(menubarPlist, []byte(menubarText), 0o644); err != nil {
+		return err
+	}
+	os.Chown(menubarPlist, 0, 0)
+	if uid := consoleUID(); uid != "" {
+		exec.Command("/bin/launchctl", "bootout", "gui/"+uid+"/"+menubarLabel).Run()
+		exec.Command("/bin/launchctl", "bootstrap", "gui/"+uid, menubarPlist).Run()
+	}
+	return nil
+}
+
+// installFiles copies HyRoute (exe) and the cores and hyroutectl (from
+// the bundle's Resources, res) into the service's folder, and links
+// hyroutectl on the PATH. Used by the install and by an update, which the
+// running service applies itself before launchd restarts it.
+func installFiles(exe, res string) error {
 	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
 		return err
 	}
@@ -116,23 +144,6 @@ func installService() error {
 				os.Symlink(filepath.Join(serviceDir, "hyroutectl"), hyroutectlLink)
 			}
 		}
-	}
-	if err := os.WriteFile(servicePlist, []byte(plistText), 0o644); err != nil {
-		return err
-	}
-	os.Chown(servicePlist, 0, 0)
-	if out, err := exec.Command("/bin/launchctl", "bootstrap", "system", servicePlist).CombinedOutput(); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-	// The menu bar icon: for every user at login, and now for the one at
-	// the screen (its old copy goes first).
-	if err := os.WriteFile(menubarPlist, []byte(menubarText), 0o644); err != nil {
-		return err
-	}
-	os.Chown(menubarPlist, 0, 0)
-	if uid := consoleUID(); uid != "" {
-		exec.Command("/bin/launchctl", "bootout", "gui/"+uid+"/"+menubarLabel).Run()
-		exec.Command("/bin/launchctl", "bootstrap", "gui/"+uid, menubarPlist).Run()
 	}
 	return nil
 }
