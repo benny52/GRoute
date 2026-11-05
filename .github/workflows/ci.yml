@@ -50,10 +50,6 @@ jobs:
       # The server manager's remote tests run GNU tools: it manages Linux
       # servers.
       - run: go test $(go list ./... | grep -v /srvmgr/remote)
-      - name: TUN engine (root, real utun)
-        run: |
-          go test -c -o "$RUNNER_TEMP/session.test" ./internal/session
-          sudo HYROUTE_TUN_TEST=1 "$RUNNER_TEMP/session.test" -test.run TUNSession -test.v -test.timeout 180s
       # HyRoute.app (universal) from this commit, for testers: the run's
       # artifacts.
       - name: App bundle
@@ -64,6 +60,10 @@ jobs:
           path: dist/HyRoute-*-macos-universal.zip
           if-no-files-found: error
           retention-days: 14
+      - name: TUN engine (root, real utun)
+        run: |
+          go test -c -o "$RUNNER_TEMP/session.test" ./internal/session
+          sudo HYROUTE_TUN_TEST=1 "$RUNNER_TEMP/session.test" -test.run TUNSession -test.v -test.timeout 180s
   linux:
     runs-on: ubuntu-latest
     steps:

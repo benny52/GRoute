@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lardan099/hyroute/internal/flows"
 	"github.com/lardan099/hyroute/internal/hysteria"
 	"github.com/lardan099/hyroute/internal/rules"
 	"github.com/lardan099/hyroute/internal/settings"
@@ -35,7 +36,10 @@ func TestTUNSession(t *testing.T) {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	profiles := []hysteria.Profile{{ID: "p1", Name: "stub"}}
-	s, err := Start(Config{Stub: true, Settings: &settings.Settings{}, Rules: compile(rules.Tunnel), Profiles: profiles, Log: log})
+	onDecision := func(v flows.View) {
+		t.Logf("decision: %s pid %d %s %s -> %s route %s rule %q outcome %q attrib %s", v.Proto, v.PID, v.Process, v.Src, v.Dst, v.Route, v.Rule, v.Outcome, v.Attrib)
+	}
+	s, err := Start(Config{Stub: true, Settings: &settings.Settings{}, Rules: compile(rules.Tunnel), Profiles: profiles, Log: log, OnDecision: onDecision})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,9 +53,14 @@ func TestTUNSession(t *testing.T) {
 
 	curl := func() {
 		t.Helper()
-		out, err := exec.Command("curl", "-sS", "-m", "20", "-o", "/dev/null", "-w", "%{http_code}", "https://example.com/").CombinedOutput()
+		out, err := exec.Command("curl", "-sS", "-4", "-m", "20", "-o", "/dev/null", "-w", "%{http_code}", "https://example.com/").CombinedOutput()
 		if err != nil || strings.TrimSpace(string(out)) != "200" {
-			t.Fatalf("curl: %v %s", err, out)
+			v, _ := exec.Command("curl", "-v", "-4", "-m", "20", "-o", "/dev/null", "https://example.com/").CombinedOutput()
+			t.Logf("curl -v: %s", v)
+			for _, f := range append(s.Flows().Active(time.Now()), s.Flows().Closed()...) {
+				t.Logf("flow: %+v", f)
+			}
+			t.Fatalf("curl: %v %s; stats %+v", err, out, s.Stats())
 		}
 	}
 	dig := func() {
