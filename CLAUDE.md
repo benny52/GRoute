@@ -39,7 +39,10 @@ docs/GUIDE.md. The users speak Russian: answer in Russian, UI text is Russian.
 - Share links (hysteria2://, hy2://), their passwords, pins, SNI, server IPs,
   subscription URLs or hosts of the users. Test links live in `.dev/`
   (gitignored). Mask auth and obfs passwords in every log line.
-- Release tags are created by the maintainer.
+- Releases: the maintainer delegated tagging to Claude. Tag (annotated,
+  "HyRoute X.Y.Z") only a commit of main whose CI is green, with its
+  docs/release-notes/vX.Y.Z.txt in place; a published tag is never moved
+  or reused (a fix goes into the next version).
 - Details of an unfixed vulnerability: they go through the private channel
   in SECURITY.md, not into issues, commits or docs.
 
