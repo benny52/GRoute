@@ -143,6 +143,12 @@ func (g *GUI) RollbackSubscription(id string) (app.MergeStats, error) {
 
 func (g *GUI) DeleteSubscription(id string) error { return g.ctl.DeleteSubscription(id) }
 
+// SetSubscriptionProxies turns a subscription's proxies (one per server)
+// on, or off with nil.
+func (g *GUI) SetSubscriptionProxies(id string, in *app.SubProxiesInput) error {
+	return g.ctl.SetSubscriptionProxies(id, in)
+}
+
 // CopyText puts text on the clipboard (navigator.clipboard is not
 // reliable in the WebView).
 func (g *GUI) CopyText(text string) error { return g.win.clipboardSet(text) }
