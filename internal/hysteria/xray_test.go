@@ -77,8 +77,18 @@ func fakeXray(mode string) {
 	}
 }
 
-func vlessProfile() Profile {
-	return Profile{Host: "198.51.100.1", Ports: "443", Protocol: ProtoVLESS,
+// vlessProfile is a server whose port answers (a local listener): the
+// direct check of a failed run must not depend on the network the tests
+// run in.
+func vlessProfile(t *testing.T) Profile {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	return Profile{Host: "127.0.0.1", Ports: port, Protocol: ProtoVLESS,
 		VLESS: vless.Settings{ID: testUUID, Security: "tls", SNI: "vpn.example"}}
 }
 
@@ -95,7 +105,7 @@ func newXraySupervisor(t *testing.T, mode string, probe string) (*Supervisor, ch
 	s := &Supervisor{
 		Exe:       exe,
 		RunDir:    t.TempDir(),
-		Profile:   vlessProfile(),
+		Profile:   vlessProfile(t),
 		Redactor:  &logx.Redactor{},
 		ProbeURLs: []string{probe},
 		OnStatus:  func(st Status) { ch <- st },
