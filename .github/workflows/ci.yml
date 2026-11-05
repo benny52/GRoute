@@ -47,7 +47,9 @@ jobs:
           go-version: '1.27.x'
           check-latest: true
       - run: go vet ./...
-      - run: go test ./...
+      # The server manager's remote tests run GNU tools: it manages Linux
+      # servers.
+      - run: go test $(go list ./... | grep -v /srvmgr/remote)
       - name: TUN engine (root, real utun)
         run: |
           go test -c -o "$RUNNER_TEMP/session.test" ./internal/session

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	goruntime "runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -387,6 +388,9 @@ func TestUpstreamResetReachesApp(t *testing.T) {
 // packet-level Direct does; if the address is gone, the connection is
 // reset rather than sent from another one.
 func TestDirectDialsFromAppAddress(t *testing.T) {
+	if goruntime.GOOS == "darwin" {
+		t.Skip("macOS has only 127.0.0.1 on lo0 (and its engine dials from the physical interface)")
+	}
 	f, _ := sniffFixture(t, rules.Direct)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
