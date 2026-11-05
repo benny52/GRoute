@@ -32,6 +32,10 @@ const (
 	// DNS: the relay answers DNS messages itself (dns: TCP to port 53
 	// while a DNS policy is on).
 	DNS
+	// Direct: the route is already Direct; the relay dials the destination
+	// itself. Only a TUN engine reflects such flows (Options.ReflectDirect):
+	// a packet it read cannot go on to the network unchanged.
+	Direct
 )
 
 // FlowKey is the application's TCP 4-tuple as seen on the outbound packet.

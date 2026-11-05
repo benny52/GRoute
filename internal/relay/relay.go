@@ -385,6 +385,9 @@ func (s *Server) handle(c net.Conn) {
 
 	client := &appConn{Conn: c, s: s, rec: e.Rec}
 	action, profile := rules.Tunnel, e.Profile
+	if e.Mode == nat.Direct {
+		action, profile = rules.Direct, ""
+	}
 	var head []byte
 	host := ""       // name the route is decided by
 	remoteName := "" // name the tunnel may resolve instead of the IP

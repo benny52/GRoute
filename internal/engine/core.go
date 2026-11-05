@@ -69,10 +69,18 @@ type Options struct {
 	// and over a kill switch block (a crash, an update, a reconnect). Decided
 	// without its domain, such a connection could go on direct.
 	ResetUnknownDomain bool
-	UDPIdle            time.Duration // default 60s
-	DNSIdle            time.Duration // default 10s (UDP to port 53)
-	PendingTimeout     time.Duration // default 100ms
-	IPHelperAfter      time.Duration // default 20ms
+	// ReflectDirect: a TUN engine (macOS). A packet it read from the TUN
+	// device cannot go on to the network unchanged: the system routed it
+	// to the device. So TCP decided Direct goes through the relay too (a
+	// nat.Direct entry; the relay dials from the physical interface), a
+	// connection the engine holds no state for is reset (the application
+	// reconnects through the engine), and Inject of an outbound packet
+	// means "send it direct", which the platform does for UDP only.
+	ReflectDirect  bool
+	UDPIdle        time.Duration // default 60s
+	DNSIdle        time.Duration // default 10s (UDP to port 53)
+	PendingTimeout time.Duration // default 100ms
+	IPHelperAfter  time.Duration // default 20ms
 }
 
 // Stats are exposed to the UI.
@@ -488,10 +496,28 @@ func (c *Core) tcpOut(p *packet.Packet, addr *divert.Address) {
 	// dns: a SYN to a private DNS server the policy intercepts goes on to
 	// newFlow.
 	if c.excluded(p.DstIP()) && !(p.IsSYN() && p.DstPort() == 53 && c.DNSPol.Load() != nil && c.dnsTarget(p.Dst(), true) != dnsNone) {
+		if c.Opt.ReflectDirect {
+			c.reflectExcluded(p, addr, key, now)
+			return
+		}
 		c.Inject(p.Buf, addr)
 		return
 	}
 	if !p.IsSYN() {
+		if c.Opt.ReflectDirect {
+			// Opened before the engine (routed by the old default route)
+			// or forgotten: it cannot join the relay midway.
+			if p.TCPFlags()&packet.FlagRST == 0 {
+				c.mu.Lock()
+				if len(c.gone) < goneMax {
+					c.gone[key] = now.Add(goneTTL)
+				}
+				c.mu.Unlock()
+				c.UntrackedReset.Add(1)
+				c.resetApp(p, addr)
+			}
+			return
+		}
 		c.untrackedOut(p, addr, key, now)
 		return
 	}
@@ -1030,6 +1056,20 @@ func (c *Core) applyTCP(p *packet.Packet, addr *divert.Address, key nat.FlowKey,
 	}
 	switch res.Action {
 	case rules.Direct:
+		if c.Opt.ReflectDirect {
+			ent, err := c.NAT.Insert(&nat.Entry{Flow: key, PID: pid, Mode: nat.Direct, Rec: rec, Meta: proc}, now)
+			if err != nil {
+				c.finish(rec, rules.Direct, "rst: reflect key collision")
+				c.rejectSYN(p, addr, key, now)
+				return true
+			}
+			c.NAT.TouchPacket(ent, p, true, addr, now)
+			c.Passed.Add(1)
+			c.finish(rec, rules.Direct, "reflected: direct")
+			nat.ReflectToRelay(p, c.Opt.RelayPort)
+			c.injectInbound(p, addr)
+			return false
+		}
 		rec.Recv.Store(-1) // inbound of Direct flows is not intercepted
 		c.mu.Lock()
 		c.tcp[key] = &tcpFlow{rec: rec, last: now}
@@ -1131,6 +1171,28 @@ func (c *Core) applyUDP(p *packet.Packet, addr *divert.Address, key nat.FlowKey,
 	c.udp[key] = uf
 	c.mu.Unlock()
 	c.udpApply(uf, p, addr, key)
+}
+
+// reflectExcluded sends a SYN to an excluded address (ReflectDirect: one
+// the routes still lead into the TUN device) through the relay, Direct and
+// without a record, as the kernel filter's exclusion lets it pass on
+// Windows. Other segments of such a connection follow its NAT entry; one
+// without an entry is reset.
+func (c *Core) reflectExcluded(p *packet.Packet, addr *divert.Address, key nat.FlowKey, now time.Time) {
+	if !p.IsSYN() {
+		if p.TCPFlags()&packet.FlagRST == 0 {
+			c.resetApp(p, addr)
+		}
+		return
+	}
+	ent, err := c.NAT.Insert(&nat.Entry{Flow: key, Mode: nat.Direct}, now)
+	if err != nil {
+		c.resetApp(p, addr)
+		return
+	}
+	c.NAT.TouchPacket(ent, p, true, addr, now)
+	nat.ReflectToRelay(p, c.Opt.RelayPort)
+	c.injectInbound(p, addr)
 }
 
 func (c *Core) injectInbound(p *packet.Packet, addr *divert.Address) {

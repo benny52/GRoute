@@ -492,3 +492,37 @@ func TestCloseWaitBounded(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// A nat.Direct entry (a TUN engine's Direct flow) is dialed direct at
+// once: no sniff, no tunnel.
+func TestDirectEntryDialsDirect(t *testing.T) {
+	f := newFixture(t)
+	dialed := make(chan netip.AddrPort, 1)
+	f.relay.DialDirect = func(ctx context.Context, _ netip.Addr, dst netip.AddrPort) (net.Conn, error) {
+		dialed <- dst
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", dst.String())
+	}
+	c := f.dialEntry(t, &nat.Entry{Mode: nat.Direct})
+	defer c.Close()
+	if _, err := c.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "ping" {
+		t.Fatalf("%q %v", buf, err)
+	}
+	if dst := <-dialed; dst != f.echo.Addr().(*net.TCPAddr).AddrPort() {
+		t.Fatalf("dialed %v", dst)
+	}
+	select {
+	case a := <-f.seen:
+		t.Fatalf("went through the tunnel to %v", a)
+	default:
+	}
+	c.Close()
+	if r := <-f.done; r.Route != "direct" || f.relay.Direct.Load() != 1 {
+		t.Fatalf("%+v", r)
+	}
+}

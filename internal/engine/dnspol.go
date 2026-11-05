@@ -173,7 +173,7 @@ func (c *Core) dnsHold(a netip.Addr) bool {
 
 // ownHysteria: a hysteria.exe or xray.exe (VLESS) HyRoute started.
 func (c *Core) ownHysteria(proc *procinfo.Info) bool {
-	return c.SelfPID != 0 && proc != nil && (proc.Name == "hysteria.exe" || proc.Name == "xray.exe") && proc.Parent != nil && proc.Parent.PID == c.SelfPID
+	return c.SelfPID != 0 && proc != nil && ownCoreName(proc.Name) && proc.Parent != nil && proc.Parent.PID == c.SelfPID
 }
 
 // own reports HyRoute's own traffic: its process, or a Hysteria it started
@@ -917,4 +917,14 @@ func (c *Core) maintainDNS(now time.Time) {
 		c.kickedAt.Store(now.UnixNano())
 		c.SysDNS.Kick()
 	}
+}
+
+// ownCoreName: the executable names of the cores HyRoute starts (Windows,
+// macOS).
+func ownCoreName(name string) bool {
+	switch name {
+	case "hysteria.exe", "xray.exe", "hysteria", "xray":
+		return true
+	}
+	return false
 }

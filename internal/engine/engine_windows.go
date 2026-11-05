@@ -475,9 +475,9 @@ next:
 
 func (e *Engine) filter(serverIPs []netip.Addr) string {
 	return divert.MainFilter(divert.FilterOptions{
-		RelayPort: e.cfg.Options.RelayPort,
+		RelayPort: e.Opt.RelayPort,
 		ServerIPs: serverIPs,
-		TCPOnly:   e.cfg.Options.TCPOnly,
+		TCPOnly:   e.Opt.TCPOnly,
 		DNS:       e.dnsCapture, // dns
 	})
 }
