@@ -70,16 +70,34 @@ func (g *GUI) SetAutostart(on bool) error {
 }
 
 func (g *GUI) BrowseExe() (string, error) {
+	// No filter: Wails turns "*.app" into a file type that bundles, being
+	// folders, never match, and every program is greyed out. Bundles are
+	// picked as files (packages are not opened as folders); what was
+	// picked is checked here.
 	p, err := g.win.openFile(runtime.OpenDialogOptions{
 		Title:                      "Выберите программу",
 		DefaultDirectory:           "/Applications",
 		TreatPackagesAsDirectories: false,
-		Filters:                    []runtime.FileFilter{{DisplayName: "Программы", Pattern: "*.app"}},
 	})
 	if err != nil || p == "" {
 		return p, err
 	}
+	if !isProgram(p) {
+		return "", errors.New("это не программа: выберите программу (.app) или исполняемый файл")
+	}
 	return appExecutable(p), nil
+}
+
+// isProgram: an application bundle or an executable file.
+func isProgram(p string) bool {
+	fi, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	if fi.IsDir() {
+		return strings.HasSuffix(p, ".app")
+	}
+	return fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0
 }
 
 // appExecutable is the program a .app bundle starts
