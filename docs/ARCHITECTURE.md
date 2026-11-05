@@ -1,10 +1,12 @@
 # Архитектура HyRoute
 
-HyRoute — клиент Hysteria 2 и VLESS для Windows, который решает, какой трафик идёт
-через VPN, а какой напрямую, по программам, сайтам, адресам и портам. Этот
-документ — обзор: из чего состоит программа, как через неё идёт трафик и
-какие правила она соблюдает. Подробности по каждой части — в
-[`docs/architecture/`](architecture/).
+HyRoute — клиент Hysteria 2 и VLESS для Windows и macOS, который решает, какой
+трафик идёт через VPN, а какой напрямую, по программам, сайтам, адресам и
+портам. Этот документ — обзор: из чего состоит программа, как через неё идёт
+трафик и какие правила она соблюдает. Ниже описан Windows; macOS использует всё
+то же выше уровня пакетов, а перехват (utun вместо WinDivert), процессы и kill
+switch (pf) у него свои — [macos.md](architecture/macos.md). Подробности по
+каждой части — в [`docs/architecture/`](architecture/).
 
 Проверено по документации Hysteria 2 (Full Client Config, URI Scheme), исходникам
 `apernet/hysteria` app/v2.12.3 и `basil00/WinDivert` v2.2.2.
@@ -101,7 +103,7 @@ HyRoute. Данные WebView2 лежат не здесь, а в `%LOCALAPPDATA%
 | `build`, `frontend` | встроенные в exe `build/deps.json` и иконка; собранный интерфейс |
 | `internal/app` | контроллер: серверы, подписки, группы, правила, подключение, статус, проверки, DNS, «Сети», статистика, обновления, резервная копия |
 | `internal/session` | одно подключение: relay, движок и Hysteria вместе |
-| `internal/engine`, `engine/nat` | решения по пакетам, NAT, UDP-сессии, DNS-политики в движке; хэндлы WinDivert, горячая замена, watchdog |
+| `internal/engine`, `engine/nat` | решения по пакетам, NAT, UDP-сессии, DNS-политики в движке; хэндлы WinDivert, горячая замена, watchdog; на macOS — устройство utun и прямой UDP |
 | `internal/divert`, `internal/packet` | биндинги WinDivert без cgo, фильтры; разбор, переписывание и сборка пакетов |
 | `internal/attrib`, `internal/procinfo` | чей пакет: таблица сокетов, IP Helper; PID → путь, дерево процессов |
 | `internal/relay`, `internal/sniff`, `internal/socks5` | relay TCP; SNI и HTTP Host; клиент SOCKS5 |
@@ -111,7 +113,8 @@ HyRoute. Данные WebView2 лежат не здесь, а в `%LOCALAPPDATA%
 | `internal/hy2uri` | модель, разбор и запись ссылок `hysteria2://` (общий с менеджером серверов) |
 | `internal/vless`, `internal/subfmt` | VLESS: настройки, ссылки `vless://`, конфиг Xray; подписки в виде конфигов Clash, sing-box и Xray |
 | `internal/localproxy`, `internal/fwrule` | локальные SOCKS5/HTTP-прокси; правила брандмауэра Windows |
-| `internal/killswitch` | kill switch на WFP |
+| `internal/killswitch` | kill switch: WFP на Windows, pf на macOS |
+| `internal/uirpc` | протокол между окном и основным процессом (на macOS — службой) |
 | `internal/flows`, `internal/stats`, `internal/logx` | «Соединения»; статистика; журналы, маскирование секретов, Privacy mode |
 | `internal/store`, `internal/settings`, `internal/backup` | файлы данных; файл правил; формат резервной копии |
 | `internal/netmode`, `internal/netwatch` | правила сетей; чтение сетей Windows |
@@ -132,9 +135,10 @@ HyRoute. Данные WebView2 лежат не здесь, а в `%LOCALAPPDATA%
   Репозиторий обновлений — `main.updateRepo` в `cmd/hyroute` (по умолчанию этот), другой
   задаётся при сборке: `-X main.updateRepo=owner/repo`.
 - Релиз собирает `.github/workflows/release.yml` по тегу `v*`:
-  `HyRoute-<версия>-windows-amd64.zip` и `SHA256SUMS`, а также пакеты HyRoute Server
+  `HyRoute-<версия>-windows-amd64.zip`, `HyRoute-<версия>-macos-universal.zip`
+  (`scripts/build-macos.sh`) и `SHA256SUMS`, а также пакеты HyRoute Server
   (`scripts/build-server.sh`) и `install-server.sh`; их суммы — в том же `SHA256SUMS`.
-- Тесты не требуют драйвера и идут на Linux и Windows: `go test ./...`
+- Тесты не требуют драйвера и идут на Linux, Windows и macOS: `go test ./...`
   ([что покрыто](architecture/testing.md)).
 
 ## Подробно
@@ -152,4 +156,5 @@ HyRoute. Данные WebView2 лежат не здесь, а в `%LOCALAPPDATA%
 | [backup.md](architecture/backup.md) | резервная копия: формат, разделы, план, применение, отмена |
 | [networks.md](architecture/networks.md) | «Сети»: чтение сети, идентичность, асимметричное решение |
 | [cli.md](architecture/cli.md) | hyroutectl: канал, права, протокол, режимы; расширение для браузера |
+| [macos.md](architecture/macos.md) | macOS: utun, атрибуция, служба и окно, kill switch на pf, обновления |
 | [testing.md](architecture/testing.md) | что покрыто тестами |
