@@ -48,7 +48,9 @@ func (c *Controller) startLocked(recovering bool) error {
 		return fmt.Errorf("settings.json не загружен: с правилами по умолчанию весь трафик пошёл бы напрямую. Исправьте или удалите файл и перезапустите HyRoute. Ошибка: %v", err)
 	}
 	cfg := c.Base
+	c.proxyAwake, c.runRouted = nil, nil // proxy-only servers start asleep
 	set, want, _ := c.routingLocked()
+	c.runRouted = c.routedLocked()
 	st := *c.settings
 	cfg.Settings, cfg.Rules, cfg.Profiles = &st, set, want
 	c.dnsSessionLocked(&cfg) // dns
@@ -168,6 +170,7 @@ func (c *Controller) disconnectLocked(release bool) {
 	c.mu.Lock()
 	s := c.sess
 	c.sess, c.startErr = nil, ""
+	c.proxyAwake, c.runRouted = nil, nil
 	c.dnsPause = time.Time{}     // dns
 	live := c.statLive.Swap(nil) // stats
 	// Until the next start, unless the user turns routing off: its
@@ -255,20 +258,27 @@ type Status struct {
 	ProxiesDown []string `json:"proxiesDown,omitempty"`
 }
 
-// proxyOnlyLocked: the profiles that run only for enabled local proxies:
-// no rule, fallback, the main target or a group of theirs sends traffic to
-// them (c.mu held).
-func (c *Controller) proxyOnlyLocked() map[string]bool {
+// routedLocked: the profiles the rules (their servers, fallbacks, the
+// main target, the members of their groups) send traffic to (c.mu held).
+func (c *Controller) routedLocked() map[string]bool {
+	routed := map[string]bool{}
 	if c.set == nil {
-		return nil
+		return routed
 	}
 	set := *c.set
 	set.Main = c.mainTargetLocked()
-	routed := map[string]bool{}
 	for _, id := range set.Profiles() {
 		routed[id] = true
 	}
 	c.expandGroupsLocked(routed)
+	return routed
+}
+
+// proxyOnlyLocked: the profiles that run only for enabled local proxies:
+// no rule, fallback, the main target or a group of theirs sends traffic to
+// them (c.mu held).
+func (c *Controller) proxyOnlyLocked() map[string]bool {
+	routed := c.routedLocked()
 	out := map[string]bool{}
 	for _, p := range c.proxies {
 		if id := c.proxyProfileLocked(p); p.Enabled && !routed[id] {

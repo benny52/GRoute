@@ -40,6 +40,9 @@ type Hooks struct {
 	LogLine      func(hysteria.LogLine)
 	// RedactGroup is the redactor group for this runner's secrets.
 	RedactGroup string
+	// Received: the bytes received through the endpoint so far (traffic
+	// that came back shows the server works without a check of its own).
+	Received func() int64
 }
 
 // Factory creates a runner for a profile.
@@ -228,6 +231,7 @@ func (m *Manager) newEndpoint(key string, p hysteria.Profile, test bool) *Endpoi
 			}
 		},
 		RedactGroup: "profile:" + key,
+		Received:    func() int64 { return e.recv.Load() },
 	})
 	return e
 }

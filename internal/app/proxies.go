@@ -50,6 +50,9 @@ type ProxyView struct {
 	UDPTotal     int64  `json:"udpTotal"`           // UDP sessions served
 	UDPDropped   int64  `json:"udpDropped"`         // datagrams dropped
 	UDPError     string `json:"udpError,omitempty"` // LAN: the shared UDP port did not open (retrying)
+	// Asleep: the proxy listens, its server is stopped until a connection
+	// starts it (proxysleep.go).
+	Asleep bool `json:"asleep,omitempty"`
 	// AuthFailures: wrong logins or passwords since the proxy opened.
 	AuthFailures int64  `json:"authFailures"`
 	UDPBlocked   string `json:"udpBlocked,omitempty"` // "server" | "group": the target cannot carry UDP now
@@ -80,11 +83,15 @@ func (c *Controller) Proxies() []ProxyView {
 	names := map[string]string{}
 	targets := map[string]string{}
 	sources := map[string]string{}
+	asleep := map[string]bool{}
+	only := c.proxyOnlyLocked()
 	for _, p := range list {
 		if p.Source != "" {
 			sources[p.ID] = c.sourceNameLocked(p.Source)
 		}
 		targets[p.ID] = c.proxyProfileLocked(p)
+		id := targets[p.ID]
+		asleep[p.ID] = connected && only[id] && !groups.IsGroupID(id) && c.proxyAwake[id] == nil
 		if n := c.targetNameLocked(targets[p.ID]); n != "" {
 			names[p.ID] = n
 		}
@@ -98,6 +105,7 @@ func (c *Controller) Proxies() []ProxyView {
 		case !p.Enabled:
 		case r != nil && r.srv != nil:
 			v.State = "listening"
+			v.Asleep = asleep[p.ID]
 			v.Sent, v.Recv = r.srv.Sent.Load(), r.srv.Recv.Load()
 			proxyUDPView(&v, r.srv)
 			if r.udpErr != "" {
@@ -474,24 +482,30 @@ func (c *Controller) proxyDialer(p store.LocalProxy) localproxy.Dialer {
 		if groups.IsGroupID(id) {
 			return c.proxyGroupDial(ctx, s, p, id, dst)
 		}
+		hold := c.proxyWake(ctx, s, id) // a sleeping server starts
 		ep := s.Endpoint(id)
 		if ep == nil {
+			hold()
 			return nil, errors.New("сервер прокси не запущен")
 		}
 		if !ep.Available() {
+			hold()
 			ep.NoteRejected()
 			c.proxyRecord(p, 6, dst, id, "", false, "rst: tunnel unavailable") // stats
 			return nil, socks5.ReplyError(1)
 		}
 		conn, err := ep.Dial(ctx, dst)
 		if err != nil {
+			hold()
 			if !proxyDialStopped(ctx) { // stats
 				ep.NoteRejected()
 				c.proxyRecord(p, 6, dst, id, "", false, "rst: socks5 connect failed")
 			}
 			return nil, err
 		}
-		return c.newTunnelConn(conn, ep, c.proxyRecord(p, 6, dst, id, "", false, "proxied")), nil
+		tc := c.newTunnelConn(conn, ep, c.proxyRecord(p, 6, dst, id, "", false, "proxied"))
+		tc.hold = hold
+		return tc, nil
 	}
 }
 
@@ -500,9 +514,10 @@ func (c *Controller) proxyDialer(p store.LocalProxy) localproxy.Dialer {
 // nil in tests that build one by hand).
 type tunnelConn struct {
 	net.Conn
-	ep  *tunnels.Endpoint
-	rec *flows.Record
-	fc  *flowCloser
+	ep   *tunnels.Endpoint
+	rec  *flows.Record
+	fc   *flowCloser
+	hold func() // keeps a proxy's server awake until Close (nil: none)
 }
 
 func (c *Controller) newTunnelConn(conn net.Conn, ep *tunnels.Endpoint, rec *flows.Record) *tunnelConn {
@@ -530,6 +545,9 @@ func (t *tunnelConn) Write(b []byte) (int, error) {
 // Close closes the connection and, once, its record.
 func (t *tunnelConn) Close() error {
 	t.fc.close()
+	if t.hold != nil {
+		t.hold()
+	}
 	return t.Conn.Close()
 }
 
@@ -698,6 +716,13 @@ func (c *Controller) proxyUDPDialer(p store.LocalProxy) localproxy.UDPDialer {
 			return nil, errors.New("HyRoute не подключён")
 		}
 		member, group, failover := id, "", false
+		hold := c.proxyWake(ctx, s, id) // a sleeping server starts
+		served := false
+		defer func() {
+			if !served {
+				hold()
+			}
+		}()
 		abandon := func() {} // every committed pick is used by a flow or abandoned
 		if groups.IsGroupID(id) {
 			pk, ok := c.groupsRT.ChooseUDP(id, groups.Hint{App: "proxy:" + p.ID}, func(m string) bool {
@@ -744,7 +769,8 @@ func (c *Controller) proxyUDPDialer(p store.LocalProxy) localproxy.UDPDialer {
 		// One statistics record per association: it has many destinations,
 		// so the record has none.
 		rec := c.proxyRecord(p, 17, socks5.Addr{}, member, group, failover, "proxied")
-		return &tunnelUDP{a: a, ep: ep, rec: rec, fc: &flowCloser{rec: rec, reg: c.proxyFlows}}, nil
+		served = true
+		return &tunnelUDP{a: a, ep: ep, rec: rec, fc: &flowCloser{rec: rec, reg: c.proxyFlows}, hold: hold}, nil
 	}
 }
 
@@ -778,10 +804,11 @@ func (c *Controller) warnProxyUDP(p store.LocalProxy, msg string, args ...any) {
 // tunnelUDP counts a proxy UDP association into its server's traffic and
 // its statistics record (payload bytes), as tunnelConn does for TCP.
 type tunnelUDP struct {
-	a   *socks5.UDPAssoc
-	ep  *tunnels.Endpoint
-	rec *flows.Record
-	fc  *flowCloser
+	a    *socks5.UDPAssoc
+	ep   *tunnels.Endpoint
+	rec  *flows.Record
+	fc   *flowCloser
+	hold func() // keeps a proxy's server awake until Close (nil: none)
 }
 
 func (t *tunnelUDP) WriteTo(b []byte, dst socks5.Addr) error {
@@ -805,6 +832,9 @@ func (t *tunnelUDP) ReadFrom(b []byte) (int, socks5.Addr, error) {
 // Close ends the association and, once, its record.
 func (t *tunnelUDP) Close() error {
 	t.fc.close()
+	if t.hold != nil {
+		t.hold()
+	}
 	return t.a.Close()
 }
 

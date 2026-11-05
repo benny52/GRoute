@@ -172,7 +172,11 @@
         </label>
         <div class="grow">
           <div class="name">
-            <b>{p.name}</b> <span class="dot {tone(p)}"></span> <span class="muted small">{stateText[p.state]}</span>
+            <b>{p.name}</b> <span class="dot {tone(p)}"></span> <span class="muted small"
+              >{#if p.asleep}<span title="Никто не пользуется этим прокси: его сервер остановлен и не тратит трафик. Первое соединение запустит его за 1–3 секунды."
+                  >работает · сервер спит</span
+                >{:else}{stateText[p.state]}{/if}</span
+            >
             {#if p.source}<span class="badge" title="HyRoute держит этот прокси для сервера подписки: он появляется и исчезает вместе с сервером">подписка «{hide(p.sourceName ?? '')}»</span>{/if}
           </div>
           <div class="muted small">

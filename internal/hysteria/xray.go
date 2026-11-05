@@ -75,8 +75,17 @@ func (s *Supervisor) watchVLESS(ctx context.Context, addr, server string, kick c
 	}
 	c := s.SOCKS()
 	connected, fails := false, 0
+	var seen int64 // s.Received at the last check
 	for {
-		err := s.probeVLESS(ctx, c)
+		var err error
+		if got := s.received(); connected && fails == 0 && got > seen {
+			// Answers came back through the server since the last check:
+			// it works, and a check of its own would only cost traffic.
+			seen = got
+		} else {
+			err = s.probeVLESS(ctx, c)
+			seen = s.received()
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -126,27 +135,37 @@ func (s *Supervisor) watchVLESS(ctx context.Context, addr, server string, kick c
 	}
 }
 
-// probeVLESS sends an HTTP request through the tunnel to every probe URL
-// at once; one answer is enough.
+func (s *Supervisor) received() int64 {
+	if s.Received == nil {
+		return 0
+	}
+	return s.Received()
+}
+
+// probeVLESS sends an HTTP request through the tunnel to the first probe
+// URL and, only when that fails, to the others at once; one answer is
+// enough. Each request is a new connection to the server (its handshake
+// is most of the traffic), so the others are not asked while the first
+// answers.
 func (s *Supervisor) probeVLESS(ctx context.Context, c socks5.Client) error {
 	urls := s.ProbeURLs
 	if len(urls) == 0 {
 		urls = DefaultProbeURLs
 	}
+	first := probeHTTP(ctx, c, urls[0])
+	if first == nil || len(urls) == 1 || ctx.Err() != nil {
+		return first
+	}
+	urls = urls[1:]
 	pctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errs := make(chan error, len(urls))
 	for _, u := range urls {
 		go func() { errs <- probeHTTP(pctx, c, u) }()
 	}
-	var first error
 	for range urls {
-		err := <-errs
-		if err == nil {
+		if err := <-errs; err == nil {
 			return nil
-		}
-		if first == nil {
-			first = err
 		}
 	}
 	return first

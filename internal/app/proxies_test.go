@@ -80,21 +80,38 @@ func TestLocalProxies(t *testing.T) {
 		t.Fatalf("duplicate port: %v", err)
 	}
 
-	// Connecting starts the proxy's server (no rule uses it) and opens
-	// the port.
+	// Connecting opens the port; the proxy's server (no rule uses it)
+	// sleeps until the proxy's first connection starts it.
+	defer func(w time.Duration) { proxyWakeWait = w }(proxyWakeWait)
+	proxyWakeWait = 100 * time.Millisecond
 	if err := c.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	if got := ids((*started)[0].cfg.Profiles); got != "NL" {
+	if got := ids((*started)[0].cfg.Profiles); got != "" {
 		t.Fatalf("profiles started: %s", got)
 	}
 	v = c.Proxies()[0]
-	if v.State != "listening" {
+	if v.State != "listening" || !v.Asleep {
 		t.Fatalf("%+v", v)
 	}
 	cl := socks5.Client{Server: "127.0.0.1:" + itoa(port), Username: "u", Password: "p"}
 	if _, err := cl.Connect(t.Context(), socks5.Addr{Host: "example.com", Port: 443}); err == nil {
 		t.Fatal("dial without a running server succeeded")
+	}
+	if got := ids((*started)[0].profiles); got != "NL" {
+		t.Fatalf("a proxy connection did not start its server: %s", got)
+	}
+	if v := c.Proxies()[0]; v.Asleep {
+		t.Fatalf("%+v", v)
+	}
+	// Idle for proxySleepAfter, it sleeps again.
+	c.sleepProxies(time.Now().Add(proxySleepAfter - time.Second))
+	if got := ids((*started)[0].profiles); got != "NL" {
+		t.Fatalf("slept too early: %s", got)
+	}
+	c.sleepProxies(time.Now().Add(proxySleepAfter + time.Second))
+	if got := ids((*started)[0].profiles); got != "" {
+		t.Fatalf("still running: %s", got)
 	}
 
 	// The saved password survives a reload.

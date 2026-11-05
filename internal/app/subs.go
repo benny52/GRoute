@@ -924,6 +924,7 @@ func (c *Controller) RunScheduler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
+			c.sleepProxies(now)
 			c.mu.Lock()
 			var ids []string
 			for _, s := range c.subs {

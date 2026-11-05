@@ -16,6 +16,7 @@ import (
 	"github.com/lardan099/hyroute/internal/dnspolicy"
 	"github.com/lardan099/hyroute/internal/dnsproxy"
 	"github.com/lardan099/hyroute/internal/flows"
+	"github.com/lardan099/hyroute/internal/groups"
 	"github.com/lardan099/hyroute/internal/hysteria"
 	"github.com/lardan099/hyroute/internal/logx"
 	"github.com/lardan099/hyroute/internal/procinfo"
@@ -171,7 +172,9 @@ type Controller struct {
 	proxies                    []store.LocalProxy
 	proxyMu                    sync.Mutex // guards proxyRuns, proxyFW; taken after mu, never before
 	proxyRuns                  map[string]*proxyRun
-	proxyFW                    *proxyPorts // nil: the rules are unknown
+	proxyAwake                 map[string]*proxyUse // proxysleep.go; c.mu, reset per session
+	runRouted                  map[string]bool      // the profiles the rules used when the session last got them (c.mu)
+	proxyFW                    *proxyPorts          // nil: the rules are unknown
 	// recoverDelay: how long after an engine failure the automatic
 	// reconnect waits (tests change it).
 	recoverDelay time.Duration
@@ -309,8 +312,21 @@ func (c *Controller) routingLocked() (*rules.Set, []hysteria.Profile, []string) 
 		used[id] = true
 	}
 	for _, p := range c.proxies {
-		if p.Enabled {
-			used[c.proxyProfileLocked(p)] = true
+		// A server only proxies use runs while they use it (proxysleep.go).
+		id := c.proxyProfileLocked(p)
+		if !p.Enabled {
+			continue
+		}
+		if !used[id] && !groups.IsGroupID(id) && c.proxyAwake[id] == nil && c.runRouted[id] {
+			// It ran for the rules until now: it sleeps once its proxies
+			// are idle, not at once under a connection of theirs.
+			if c.proxyAwake == nil {
+				c.proxyAwake = map[string]*proxyUse{}
+			}
+			c.proxyAwake[id] = &proxyUse{last: time.Now()}
+		}
+		if used[id] || groups.IsGroupID(id) || c.proxyAwake[id] != nil {
+			used[id] = true
 		}
 	}
 	usedGroups := c.expandGroupsLocked(used)
@@ -333,6 +349,7 @@ func (c *Controller) applyRoutingLocked() {
 		return
 	}
 	set, want, _ := c.routingLocked()
+	c.runRouted = c.routedLocked()
 	c.applyDNSLocked() // dns: before SetRules starts a new server's Hysteria
 	c.sess.SetRules(set, want)
 }

@@ -55,6 +55,7 @@ func RunnerFactory(cfg Config) tunnels.Factory {
 			LogLine:      h.LogLine,
 			OnStatus:     h.OnStatus,
 			SetServerIPs: h.SetServerIPs,
+			Received:     h.Received,
 		}
 	}
 }

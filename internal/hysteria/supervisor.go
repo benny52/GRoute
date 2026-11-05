@@ -80,6 +80,10 @@ type Supervisor struct {
 	// ProbeURLs are the plain-HTTP addresses a VLESS run checks the
 	// server with (DefaultProbeURLs when empty).
 	ProbeURLs []string
+	// Received: the bytes received through this run's endpoint so far
+	// (nil: unknown). A VLESS run skips its periodic check while answers
+	// keep coming back through it.
+	Received func() int64
 
 	mu        sync.Mutex
 	status    Status

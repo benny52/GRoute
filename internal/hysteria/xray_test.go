@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -335,5 +336,65 @@ func TestXrayVersionAndTestReason(t *testing.T) {
 	}
 	if r := xrayTestReason(nil, errors.New("exit status 1")); r != "exit status 1" {
 		t.Fatalf("%q", r)
+	}
+}
+
+// While answers keep coming back through the server (Received grows),
+// the periodic check is skipped; once they stop, it runs again.
+func TestVLESSSkipsCheckWhileTrafficFlows(t *testing.T) {
+	fastProbes(t)
+	var hits atomic.Int64
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer web.Close()
+	s, ch, _ := newXraySupervisor(t, "ok", web.URL+"/")
+	var recv, flowing atomic.Int64
+	flowing.Store(1)
+	s.Received = func() int64 { return recv.Add(flowing.Load()) }
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+	waitState(t, ch, Connected)
+	n := hits.Load()
+	time.Sleep(10 * vlessProbeEvery)
+	if got := hits.Load(); got != n {
+		t.Fatalf("checked %d times while traffic came back", got-n)
+	}
+	flowing.Store(0)
+	time.Sleep(10 * vlessProbeEvery)
+	if hits.Load() == n {
+		t.Fatal("no check once the traffic stopped")
+	}
+}
+
+// The first probe URL answers: the others are not asked.
+func TestProbeFirstURLFirst(t *testing.T) {
+	var first, second atomic.Int64
+	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		first.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer a.Close()
+	b := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		second.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer b.Close()
+	srv := &socks5.Server{}
+	if err := srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	c := socks5.Client{Server: srv.Addr()}
+	s := &Supervisor{ProbeURLs: []string{a.URL + "/", b.URL + "/"}}
+	if err := s.probeVLESS(t.Context(), c); err != nil || first.Load() != 1 || second.Load() != 0 {
+		t.Fatalf("%v first %d second %d", err, first.Load(), second.Load())
+	}
+	a.Close()
+	if err := s.probeVLESS(t.Context(), c); err != nil || second.Load() != 1 {
+		t.Fatalf("the others were not asked when the first failed: %v %d", err, second.Load())
 	}
 }
