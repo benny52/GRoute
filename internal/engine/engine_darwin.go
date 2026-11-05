@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -66,8 +67,11 @@ type Engine struct {
 	hostRoutes map[netip.Addr]defaultRoute
 	serverIPs  []netip.Addr
 	routes6    bool
-	dnsCapture bool
-	dnsRoutes  []netip.Addr
+	// scoped4 and scoped6 are the scoped default routes HyRoute added on
+	// the physical interface (see syncScopedLocked).
+	scoped4, scoped6 defaultRoute
+	dnsCapture       bool
+	dnsRoutes        []netip.Addr
 
 	bound4, bound6 atomic.Int32 // physical interface indexes for IP_BOUND_IF
 
@@ -184,6 +188,7 @@ func (e *Engine) Start() error {
 // routeAllLocked adds the routes that send the internet into the device,
 // after the server routes (already known servers keep reaching Hysteria).
 func (e *Engine) routeAllLocked() error {
+	e.syncScopedLocked()
 	e.syncHostRoutesLocked()
 	if e.dnsCapture {
 		e.syncDNSRoutesLocked()
@@ -216,6 +221,53 @@ func (e *Engine) refreshNetLocked() bool {
 	e.bound4.Store(int32(v4.Index))
 	e.bound6.Store(int32(v6.Index))
 	return changed
+}
+
+// syncScopedLocked keeps a default route scoped to the physical interface.
+// A socket bound to an interface (IP_BOUND_IF) looks its routes up in that
+// interface's scope; macOS has a scoped default for every interface but
+// the primary one, whose sockets look up the unscoped routes, and those
+// lead into the device. Without it the relay's Direct dials and the
+// forwarder's UDP fail with "network is unreachable".
+func (e *Engine) syncScopedLocked() {
+	sync := func(have *defaultRoute, want defaultRoute, v6 bool) {
+		if *have == want {
+			return
+		}
+		if have.Index != 0 {
+			run("/sbin/route", scopedArgs("delete", *have, v6)...)
+		}
+		*have = defaultRoute{}
+		if want.Index == 0 {
+			return
+		}
+		err := run("/sbin/route", scopedArgs("add", want, v6)...)
+		switch {
+		case err == nil:
+			*have = want // ours: removed with the device
+		case strings.Contains(err.Error(), "File exists"):
+			// The system's own (a secondary interface): not ours to remove.
+		default:
+			e.log.Warn("scoped default route not added; direct connections may fail", "err", err)
+		}
+	}
+	sync(&e.scoped4, e.def4, false)
+	sync(&e.scoped6, e.def6, true)
+}
+
+func scopedArgs(op string, via defaultRoute, v6 bool) []string {
+	fam := "-inet"
+	if v6 {
+		fam = "-inet6"
+	}
+	args := []string{"-q", "-n", op, fam, "-ifscope", via.Name, "default"}
+	switch {
+	case via.Gateway.IsValid() && via.Gateway.Is6() && via.Gateway.IsLinkLocalUnicast():
+		return append(args, via.Gateway.String()+"%"+via.Name)
+	case via.Gateway.IsValid():
+		return append(args, via.Gateway.String())
+	}
+	return append(args, "-interface", via.Name)
 }
 
 // SetServerIPs routes the servers' addresses through the physical
@@ -544,6 +596,7 @@ func (e *Engine) watchNetwork() {
 	if e.refreshNetLocked() {
 		e.log.Info("network changed", "v4", e.def4.Name, "gw4", e.def4.Gateway, "v6", e.def6.Name)
 		e.fwd.reset()
+		e.syncScopedLocked()
 		e.syncHostRoutesLocked()
 		e.SysDNS.Kick()
 	}
@@ -581,6 +634,8 @@ func (e *Engine) teardown() {
 		e.delHostRoute(ip, via)
 	}
 	e.hostRoutes = map[netip.Addr]defaultRoute{}
+	e.def4, e.def6 = defaultRoute{}, defaultRoute{}
+	e.syncScopedLocked()
 	if e.dev != nil {
 		for _, a := range e.dnsRoutes {
 			run("/sbin/route", "-q", "-n", "delete", famFlag(a), "-host", a.String(), "-interface", e.dev.name)
