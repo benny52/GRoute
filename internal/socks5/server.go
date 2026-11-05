@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -185,7 +186,9 @@ func (s *Server) connect(c net.Conn, dst Addr) {
 }
 
 // associate relays UDP datagrams for one client until the control
-// connection closes.
+// connection closes. The client talks to a socket on the control
+// connection's address (loopback for the stub); the remotes to another one
+// on any address: a socket bound to loopback cannot reach them.
 func (s *Server) associate(c net.Conn) {
 	pc, err := net.ListenUDP("udp", &net.UDPAddr{IP: c.LocalAddr().(*net.TCPAddr).IP})
 	if err != nil {
@@ -193,35 +196,56 @@ func (s *Server) associate(c net.Conn) {
 		return
 	}
 	defer pc.Close()
+	out, err := net.ListenUDP("udp", nil)
+	if err != nil {
+		reply(c, 1, Addr{})
+		return
+	}
+	defer out.Close()
 	reply(c, 0, AddrFromAddrPort(pc.LocalAddr().(*net.UDPAddr).AddrPort()))
 	_ = c.SetDeadline(time.Time{})
 	go func() {
 		io.Copy(io.Discard, c)
 		pc.Close()
+		out.Close()
 	}()
-	var client *net.UDPAddr
+	var client atomic.Pointer[net.UDPAddr]
+	go func() {
+		// Replies from the remotes: wrapped and sent to the client.
+		buf := make([]byte, 65535)
+		for {
+			n, from, err := out.ReadFromUDPAddrPort(buf)
+			if err != nil {
+				return
+			}
+			to := client.Load()
+			if to == nil {
+				continue
+			}
+			from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
+			hdr, _ := AppendAddr([]byte{0, 0, 0}, AddrFromAddrPort(from))
+			pc.WriteToUDP(append(hdr, buf[:n]...), to)
+		}
+	}()
 	buf := make([]byte, 65535)
 	for {
 		n, from, err := pc.ReadFromUDP(buf)
 		if err != nil {
 			return
 		}
-		if client == nil || (from.IP.Equal(client.IP) && from.Port == client.Port) {
-			client = from
-			dst, payload, err := ParseUDPHeader(buf[:n])
-			if err != nil {
-				continue
-			}
-			ua, err := net.ResolveUDPAddr("udp", dst.String())
-			if err != nil {
-				continue
-			}
-			pc.WriteToUDP(payload, ua)
+		if cur := client.Load(); cur != nil && !(from.IP.Equal(cur.IP) && from.Port == cur.Port) {
+			continue // only the first sender is the client
+		}
+		client.Store(from)
+		dst, payload, err := ParseUDPHeader(buf[:n])
+		if err != nil {
 			continue
 		}
-		// Reply from a remote: wrap and send to the client.
-		hdr, _ := AppendAddr([]byte{0, 0, 0}, AddrFromAddrPort(from.AddrPort()))
-		pc.WriteToUDP(append(hdr, buf[:n]...), client)
+		ua, err := net.ResolveUDPAddr("udp", dst.String())
+		if err != nil {
+			continue
+		}
+		out.WriteToUDP(payload, ua)
 	}
 }
 
