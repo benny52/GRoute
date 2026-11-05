@@ -55,7 +55,8 @@
   const hasCurrent = $derived(!!active?.id && (m.networks ?? []).some((k) => k.id.toUpperCase() === active!.id.toUpperCase()));
   const currentBlock = $derived.by(() => {
     if (!active) return 'Нет подключения к сети';
-    if (!active.id || !active.identified) return 'Windows ещё не опознала эту сеть — подождите или нажмите «Обновить»';
+    if (!active.id || !active.identified)
+      return ui.mac ? 'HyRoute ещё не узнал роутер этой сети — подождите или нажмите «Обновить»' : 'Windows ещё не опознала эту сеть — подождите или нажмите «Обновить»';
     if (hasCurrent) return 'Эта сеть уже в списке';
     return '';
   });
@@ -184,7 +185,10 @@
         {/each}
         <button class="mini" onclick={addCurrent} disabled={ro || !!currentBlock} title={currentBlock}>Добавить текущую</button>
       </div>
-      <p class="hint">Windows узнаёт сеть по роутеру — так же, как решает, общедоступная она или частная. Надёжнее имени Wi-Fi.</p>
+      <p class="hint">
+        {#if ui.mac}HyRoute узнаёт сеть по её роутеру. Надёжнее имени Wi-Fi.{:else}Windows узнаёт сеть по роутеру — так же, как решает, общедоступная она
+          или частная. Надёжнее имени Wi-Fi.{/if}
+      </p>
     </div>
 
     <div class="cond">
@@ -220,11 +224,14 @@
       </div>
       {#if ssidNote}<p class="hint warn-t">{hide(ssidNote)}</p>{/if}
       <p class="hint">
-        Точное совпадение, с учётом регистра. Имя Wi-Fi может взять любая точка доступа. В Windows 11 запрос имени Wi-Fi считается доступом к
-        расположению: HyRoute появится в «Недавней активности» расположения.
+        Точное совпадение, с учётом регистра. Имя Wi-Fi может взять любая точка доступа.{#if ui.mac}
+          Новые версии macOS не сообщают имя Wi-Fi службам: тогда условие не сработает, используйте «Именно эта сеть».{:else}
+          В Windows 11 запрос имени Wi-Fi считается доступом к расположению: HyRoute появится в «Недавней активности» расположения.{/if}
       </p>
     </div>
 
+    <!-- macOS has no network names and categories of its own. -->
+    {#if !ui.mac || m.names?.length}
     <div class="cond">
       <div class="ch">Имя сети Windows</div>
       <div class="chips">
@@ -257,7 +264,9 @@
         <button class="mini" onclick={currentName} disabled={ro || !active?.name}>Текущее</button>
       </div>
     </div>
+    {/if}
 
+    {#if !ui.mac || m.categories?.length}
     <div class="cond">
       <div class="ch">Тип сети</div>
       <div class="checks">
@@ -274,6 +283,7 @@
         {/each}
       </div>
     </div>
+    {/if}
 
     <div class="cond">
       <div class="ch">Подключение</div>

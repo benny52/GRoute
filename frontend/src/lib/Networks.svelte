@@ -121,7 +121,9 @@
   // private network, connect elsewhere. Only for a network Windows has
   // identified: the name of one it has not («Идентификация…») may be shared
   // by other networks.
-  const forThisBlock = $derived(!active ? '' : !active.id || !active.identified ? 'Windows ещё не опознала эту сеть — подождите или нажмите «Обновить»' : '');
+  const forThisBlock = $derived(
+    !active ? '' : !active.id || !active.identified ? (ui.mac ? 'HyRoute ещё не узнал роутер этой сети — подождите или нажмите «Обновить»' : 'Windows ещё не опознала эту сеть — подождите или нажмите «Обновить»') : '',
+  );
   function forThisNetwork() {
     const a = active;
     if (!a || forThisBlock) return;
@@ -283,12 +285,12 @@
         <div class="netname"><Icon name={kindIcon(active)} size={18} /> <b>{hideNet(active.name) || 'Сеть без имени'}</b></div>
         <div class="kv">
           {#if active.adapter === 'wifi' && (active.ssid || active.ssidDenied)}
-            <span class="k">Wi-Fi</span><span>{active.ssidDenied ? 'Windows не сообщает имя Wi-Fi' : hideNet(active.ssid)}</span>
+            <span class="k">Wi-Fi</span><span>{active.ssidDenied ? (ui.mac ? 'macOS не сообщает имя Wi-Fi' : 'Windows не сообщает имя Wi-Fi') : hideNet(active.ssid)}</span>
           {/if}
-          <span class="k">Тип сети</span><span>{categoryText(active)}</span>
+          {#if !ui.mac}<span class="k">Тип сети</span><span>{categoryText(active)}</span>{/if}
           <span class="k">Подключение</span><span>{netAdapterLabel[active.adapter]} · {hideNet(active.adapterName)}</span>
           <span class="k">Подходит</span><span>{matchText}</span>
-          <span class="k">Windows опознала сеть</span><span>{active.identified ? 'да' : 'ещё нет'}</span>
+          <span class="k">{ui.mac ? 'Роутер опознан' : 'Windows опознала сеть'}</span><span>{active.identified ? 'да' : 'ещё нет'}</span>
           {#if lastAt}
             <span class="k">Последнее действие</span>
             <span>
@@ -304,7 +306,7 @@
         <div class="note info small">После обновления или переноса HyRoute вернул прежнее состояние — правила сетей снова сработают при смене сети.</div>
       {/if}
       {#if view.state.pending && cfg.enabled}
-        <p class="muted small">Сеть определяется — отключение и смена профиля правил ждут, пока Windows её опознает.</p>
+        <p class="muted small">Сеть определяется — отключение и смена профиля правил ждут, пока {ui.mac ? 'HyRoute узнает её роутер' : 'Windows её опознает'}.</p>
       {/if}
       {#if !cfg.enabled}<div class="note info small">Правила сетей выключены.</div>{/if}
       {#if view.current.error}
@@ -315,8 +317,13 @@
       {/if}
       {#if active?.ssidDenied && view.usesSSID}
         <div class="note warn small">
-          Windows не даёт HyRoute имя Wi-Fi. В Windows 11 24H2 и новее включите «Параметры → Конфиденциальность и защита → Расположение → Разрешить
-          классическим приложениям доступ к расположению». Пока HyRoute сравнивает имя Wi-Fi с именем сети в Windows.
+          {#if ui.mac}
+            macOS не сообщает службе HyRoute имя Wi-Fi, поэтому условия «Имя Wi-Fi» не срабатывают. Узнавать сеть по роутеру можно условием «Именно эта
+            сеть».
+          {:else}
+            Windows не даёт HyRoute имя Wi-Fi. В Windows 11 24H2 и новее включите «Параметры → Конфиденциальность и защита → Расположение → Разрешить
+            классическим приложениям доступ к расположению». Пока HyRoute сравнивает имя Wi-Fi с именем сети в Windows.
+          {/if}
         </div>
       {/if}
       <div class="row btns">

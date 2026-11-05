@@ -116,6 +116,20 @@ browser extension is written to `/Library/Application Support/HyRoute`,
 its native messaging host manifests into the browsers' system-wide
 folders.
 
+## Networks
+
+`internal/netwatch/netwatch_darwin.go` serves «Сети»: the active network
+is the interface and router of the unscoped default route (routing
+socket dump; HyRoute's 0/1 routes are not default routes), its hardware
+port (`networksetup -listallhardwareports`: Wi-Fi, Ethernet, iPhone USB…)
+and the router's MAC from the ARP table (`arp -n`, nothing is sent). The
+network's ID («Именно эта сеть») is a hash of that MAC shaped like an NLM
+ID (`macNetID`), so the MAC is not stored; it is identified once the MAC
+is known. The Wi-Fi name comes from `ipconfig getsummary` when macOS does
+not redact it (`ErrSSIDDenied` otherwise). macOS has no network names or
+categories. Changes come from the routing socket (interface, address and
+non-host route messages), coalesced half a second.
+
 ## Updates
 
 The cores update from their darwin assets (`core/kinds_darwin.go`).

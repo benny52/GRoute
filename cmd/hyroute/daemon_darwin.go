@@ -16,6 +16,7 @@ import (
 	"github.com/lardan099/hyroute/internal/core"
 	"github.com/lardan099/hyroute/internal/hysteria"
 	"github.com/lardan099/hyroute/internal/killswitch"
+	"github.com/lardan099/hyroute/internal/netwatch"
 	"github.com/lardan099/hyroute/internal/procinfo"
 	"github.com/lardan099/hyroute/internal/release"
 	"github.com/lardan099/hyroute/internal/session"
@@ -101,6 +102,7 @@ func runDaemon(verbose, stub bool) {
 	os.RemoveAll(ctl.Updater.Dir) // staging of an earlier run
 	dropStaleAppCopy()
 	ctl.ListRunning = procinfo.ListRunning
+	ctl.NetWatcher = netwatch.New() // «Сети»: the network the Mac is on
 	ctl.KillSwitch = &killswitch.Switch{GID: gid, StateDir: dataDir}
 	ctl.InitKillSwitch()
 

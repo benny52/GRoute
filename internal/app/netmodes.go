@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -1377,6 +1378,9 @@ func (c *Controller) CurrentSSID() (string, error) {
 	}
 	s, err := c.NetWatcher.SSID(a.AdapterID)
 	if errors.Is(err, netmode.ErrSSIDDenied) {
+		if runtime.GOOS == "darwin" {
+			return "", sentenceError("macOS не сообщает службе HyRoute имя Wi-Fi. Узнавать эту сеть можно по роутеру: условие «Именно эта сеть».")
+		}
 		return "", sentenceError("Windows не даёт HyRoute имя Wi-Fi. В Windows 11 24H2 и новее включите «Параметры → Конфиденциальность и защита → Расположение → Разрешить классическим приложениям доступ к расположению».")
 	}
 	if err != nil {
