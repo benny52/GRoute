@@ -94,6 +94,12 @@ func (c *Controller) Diagnostics(system []string, privacy bool) string {
 		if p.Obfs != "" {
 			flags = append(flags, "obfs "+p.Obfs)
 		}
+		if p.Protocol == "vless" {
+			flags = append(flags, "VLESS "+p.Transport)
+			if p.Flow != "" {
+				flags = append(flags, p.Flow)
+			}
+		}
 		used := "не используется"
 		if len(p.UsedBy) > 0 {
 			used = "правила: " + strings.Join(p.UsedBy, ", ")

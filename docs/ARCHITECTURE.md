@@ -1,6 +1,6 @@
 # Архитектура HyRoute
 
-HyRoute — клиент Hysteria 2 для Windows, который решает, какой трафик идёт
+HyRoute — клиент Hysteria 2 и VLESS для Windows, который решает, какой трафик идёт
 через VPN, а какой напрямую, по программам, сайтам, адресам и портам. Этот
 документ — обзор: из чего состоит программа, как через неё идёт трафик и
 какие правила она соблюдает. Подробности по каждой части — в
@@ -19,7 +19,7 @@ HyRoute — клиент Hysteria 2 для Windows, который решает,
                                    ├─ Напрямую ─► пакет уходит в сеть как есть
                                    ├─ Блок ─────► RST программе / пакет отброшен
                                    └─ VPN ──────► отражается в локальный relay
-                                                    └─► SOCKS5 hysteria.exe ─► сервер
+                                                    └─► SOCKS5 hysteria.exe (VLESS: xray.exe) ─► сервер
 ```
 
 - **Перехват.** WinDivert ловит только исходящие пакеты; входящие прямых
@@ -61,7 +61,8 @@ HyRoute — клиент Hysteria 2 для Windows, который решает,
 |---|---|---|
 | `HyRoute.exe` | администратор | трей, движок WinDivert, relay, kill switch, контроллер |
 | `HyRoute.exe --window` | как у HyRoute | окно (Wails + WebView2): живёт, пока окно открыто; вызовы страницы передаёт основному процессу ([app](architecture/app.md)) |
-| `hysteria.exe` | как у HyRoute | по одному на используемый сервер, в Job Object с `KILL_ON_JOB_CLOSE` |
+| `hysteria.exe` | как у HyRoute | по одному на используемый сервер Hysteria 2, в Job Object с `KILL_ON_JOB_CLOSE` |
+| `xray.exe` | как у HyRoute | то же для сервера VLESS (Xray-core): SOCKS5 → VLESS ([servers](architecture/servers.md#vless-профиль-конфиг-xray-проверка)) |
 | `hyroute-updater.exe` | администратор | заменяет файлы при обновлении и откатывает их, если новая версия не запустилась |
 | `hyroutectl.exe` | пользователь | командная строка, говорит с HyRoute через именованный канал |
 | `hyroute-server.exe` | пользователь | [HyRoute Server](SERVER_MANAGER.md) по кнопке «Открыть панель»: HyRoute сверяет его с SHA-256, зашитым при сборке, и запускает через Explorer (как браузер), в свёрнутом консольном окне; живёт, пока открыто это окно |
@@ -86,7 +87,7 @@ kill switch при входе.
 | `logs\`, `run\` | журналы; временные конфиги Hysteria с закрытым DACL |
 
 `%ProgramData%\HyRoute` (SYSTEM и Administrators — запись, Users — чтение):
-`runtime\` — проверенные копии `hysteria.exe` и WinDivert, `core\` —
+`runtime\` — проверенные копии `hysteria.exe`, `xray.exe` и WinDivert, `core\` —
 обновлённые ядра Hysteria, `updates\` и `update-journal.json` — обновление
 HyRoute. Данные WebView2 лежат не здесь, а в `%LOCALAPPDATA%\HyRoute\webview`
 пользователя: WebView2 работает без прав администратора.
@@ -108,6 +109,7 @@ HyRoute. Данные WebView2 лежат не здесь, а в `%LOCALAPPDATA%
 | `internal/dnscache`, `internal/dnspolicy`, `internal/dnsproxy`, `internal/sysdns` | DNS-кэш из ответов; DNS-политики; резолвер DoH/DoT; DNS-серверы адаптеров |
 | `internal/hysteria`, `internal/tunnels`, `internal/groups` | ссылки, конфиг и процесс Hysteria; запущенные серверы; группы серверов |
 | `internal/hy2uri` | модель, разбор и запись ссылок `hysteria2://` (общий с менеджером серверов) |
+| `internal/vless`, `internal/subfmt` | VLESS: настройки, ссылки `vless://`, конфиг Xray; подписки в виде конфигов Clash, sing-box и Xray |
 | `internal/localproxy`, `internal/fwrule` | локальные SOCKS5/HTTP-прокси; правила брандмауэра Windows |
 | `internal/killswitch` | kill switch на WFP |
 | `internal/flows`, `internal/stats`, `internal/logx` | «Соединения»; статистика; журналы, маскирование секретов, Privacy mode |
@@ -121,7 +123,7 @@ HyRoute. Данные WebView2 лежат не здесь, а в `%LOCALAPPDATA%
 
 ## Сборка и зависимости
 
-- `build/deps.json` — версии и SHA-256 Hysteria и WinDivert. `scripts/fetch-deps.ps1`
+- `build/deps.json` — версии и SHA-256 Hysteria, WinDivert и Xray. `scripts/fetch-deps.ps1`
   скачивает их в `bin\` и сверяет: хэш Hysteria ещё и с `hashes.txt` её
   релиза, у WinDivert — хэш архива и извлечённых файлов. Бинарники в
   репозиторий не коммитятся.

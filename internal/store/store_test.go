@@ -8,6 +8,7 @@ import (
 
 	"github.com/lardan099/hyroute/internal/hysteria"
 	"github.com/lardan099/hyroute/internal/rules"
+	"github.com/lardan099/hyroute/internal/vless"
 )
 
 func TestProfilesRoundTripKeepsSecretsOutOfPlainFields(t *testing.T) {
@@ -15,19 +16,25 @@ func TestProfilesRoundTripKeepsSecretsOutOfPlainFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &Profiles{Active: "a", List: []hysteria.Profile{{ID: "a", Name: "one", Host: "example.com", Ports: "443", Auth: "pw-auth", Obfs: hysteria.Obfs{Type: "salamander", Password: "pw-obfs"}}}}
+	p := &Profiles{Active: "a", List: []hysteria.Profile{
+		{ID: "a", Name: "one", Host: "example.com", Ports: "443", Auth: "pw-auth", Obfs: hysteria.Obfs{Type: "salamander", Password: "pw-obfs"}},
+		{ID: "b", Name: "two", Host: "example.org", Ports: "443", Protocol: hysteria.ProtoVLESS,
+			VLESS: vless.Settings{ID: "5f0b7c1e-1234-4abc-9def-0123456789ab", Security: "tls", Network: "ws"}},
+	}}
 	if err := s.SaveProfiles(p); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(s.Dir, "profiles.json"))
-	if strings.Contains(string(raw), `"auth": "pw-auth"`) || strings.Contains(string(raw), `"password": "pw-obfs"`) {
+	if strings.Contains(string(raw), `"auth": "pw-auth"`) || strings.Contains(string(raw), `"password": "pw-obfs"`) ||
+		strings.Contains(string(raw), "5f0b7c1e-1234") || strings.Count(string(raw), `"vless": {`) != 1 {
 		t.Fatalf("plain secrets on disk: %s", raw)
 	}
 	got, err := s.LoadProfiles()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Active != "a" || len(got.List) != 1 || got.List[0].Auth != "pw-auth" || got.List[0].Obfs.Password != "pw-obfs" {
+	if got.Active != "a" || len(got.List) != 2 || got.List[0].Auth != "pw-auth" || got.List[0].Obfs.Password != "pw-obfs" ||
+		got.List[1].VLESS != p.List[1].VLESS || got.List[0].VLESS != (vless.Settings{}) {
 		t.Fatalf("%+v", got)
 	}
 }

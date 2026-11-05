@@ -57,10 +57,15 @@ func (c *Controller) CheckProfile(id string) (CheckResult, error) {
 	ep, release := c.acquire(p)
 	defer release()
 
-	// 1. Hysteria connects.
+	// 1. Hysteria (Xray for VLESS) connects. Xray is up once a request
+	// went through the server, and the first may take a few tries.
 	start := time.Now()
-	st, err := waitConnected(ep, 20*time.Second)
-	step := CheckStep{Name: "Запуск Hysteria и подключение к серверу", Ms: time.Since(start).Milliseconds()}
+	limit, core := 20*time.Second, "Hysteria"
+	if p.IsVLESS() {
+		limit, core = 45*time.Second, "Xray"
+	}
+	st, err := waitConnected(ep, limit, core)
+	step := CheckStep{Name: "Запуск " + core + " и подключение к серверу", Ms: time.Since(start).Milliseconds()}
 	if err != nil {
 		step.Detail = err.Error()
 		res.Steps = append(res.Steps, step)
@@ -147,7 +152,7 @@ func (c *Controller) acquire(p hysteria.Profile) (*tunnels.Endpoint, func()) {
 	return mgr.Acquire(p)
 }
 
-func waitConnected(ep *tunnels.Endpoint, timeout time.Duration) (hysteria.Status, error) {
+func waitConnected(ep *tunnels.Endpoint, timeout time.Duration, core string) (hysteria.Status, error) {
 	deadline := time.Now().Add(timeout)
 	for {
 		st := ep.Status()
@@ -159,6 +164,9 @@ func waitConnected(ep *tunnels.Endpoint, timeout time.Duration) (hysteria.Status
 		case time.Now().After(deadline):
 			if st.Message != "" {
 				return st, errors.New(st.Message)
+			}
+			if core == "Xray" {
+				return st, fmt.Errorf("Xray не подключилась за %d с: сервер не отвечает", int(timeout.Seconds()))
 			}
 			return st, errors.New("Hysteria не подключилась за 20 с: сервер не отвечает (порт, obfs-пароль или блокировка UDP)")
 		}

@@ -280,8 +280,8 @@
   <section class="card">
     <h2>Добавить подписку</h2>
     <p class="muted small">
-      Ссылка подписки от вашего VPN-сервиса (вида <code>https://…/sub/…</code>). HyRoute сам заберёт из неё все профили
-      <code>hysteria2://</code> и будет обновлять их. Ссылка хранится зашифрованной и в логах не показывается.
+      Ссылка подписки от вашего VPN-сервиса (вида <code>https://…/sub/…</code>). HyRoute сам заберёт из неё все серверы
+      Hysteria 2 и VLESS (список ссылок, а также конфиги Clash, sing-box и Xray) и будет обновлять их. Ссылка хранится зашифрованной и в логах не показывается.
     </p>
     <div class="row">
       <input
@@ -303,6 +303,7 @@
         {#if shown.info}<SubInfoBar info={shown.info} compact />{/if}
         {#if shown.updateHours}<div class="muted small">Сервис советует обновлять каждые {shown.updateHours} ч.</div>{/if}
         {#if shown.base64}<div class="muted small">Формат: base64-список ссылок.</div>{/if}
+        {#if shown.format}<div class="muted small">Формат: конфиг {shown.format}.</div>{/if}
         <button class="link" onclick={() => (showNames = !showNames)}>{showNames ? 'Скрыть список' : 'Показать профили'}</button>
         {#if showNames}<div class="names">{#each shown.names as n}<span>{hide(n)}</span>{/each}</div>{/if}
         {#each shown.warnings.slice(0, 8) as w}<div class="note warn small">{hide(w)}</div>{/each}

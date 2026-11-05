@@ -16,6 +16,15 @@
       "WinDivert-2.2.2-A/x64/WinDivert64.sys": "8da085332782708d8767bcace5327a6ec7283c17cfb85e40b03cd2323a90ddc2"
     }
   },
+  "xray": {
+    "version": "v26.10.31",
+    "url": "https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-windows-64.zip",
+    "dgstUrl": "https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-windows-64.zip.dgst",
+    "sha256": "2e04a9995a6f2ad1b28c0bb25c708ecb2695e43a1c9c7889c4b6ac2b48cf7a6a",
+    "files": {
+      "xray.exe": "d5b558191cccb1e92a5772b68b8cab67717b26f634b0f15153215f65ae982a7e"
+    }
+  },
   "tools": {
     "goWinres": "v0.3.3"
   }

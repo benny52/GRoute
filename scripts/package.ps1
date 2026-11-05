@@ -1,6 +1,6 @@
 # Packs a release: dist\HyRoute-<ver>-windows-amd64.zip (flat: HyRoute.exe,
 # hyroute-updater.exe, hyroutectl.exe, hyroute-server.exe, hysteria.exe,
-# WinDivert.dll, WinDivert64.sys,
+# xray.exe, WinDivert.dll, WinDivert64.sys,
 # manifest.json with every file's SHA256, LICENSE.txt, THIRD-PARTY-NOTICES.txt)
 # and dist\SHA256SUMS.
 # Run after scripts\build.ps1 on a v* tag.
@@ -30,7 +30,7 @@ try {
     $stage = Join-Path $dist $name
     Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force $stage | Out-Null
-    $files = 'HyRoute.exe', 'hyroute-updater.exe', 'hyroutectl.exe', 'hyroute-server.exe', 'hysteria.exe', 'WinDivert.dll', 'WinDivert64.sys'
+    $files = 'HyRoute.exe', 'hyroute-updater.exe', 'hyroutectl.exe', 'hyroute-server.exe', 'hysteria.exe', 'xray.exe', 'WinDivert.dll', 'WinDivert64.sys'
     $manifest = [ordered]@{ version = $ver; files = [ordered]@{} }
     foreach ($f in $files) {
         $src = Join-Path 'bin' $f

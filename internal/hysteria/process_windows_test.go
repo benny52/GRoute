@@ -13,7 +13,7 @@ import (
 // Until Hysteria has read its config, the file in the user's RunDir can be
 // read but not rewritten, replaced or deleted by the user's other programs.
 func TestSecretFileHeldUntilReleased(t *testing.T) {
-	path := filepath.Join(t.TempDir(), configName())
+	path := filepath.Join(t.TempDir(), configName(false))
 	closeFile, err := writeSecretFile(path, []byte("server: 198.51.100.1:443\n"))
 	if err != nil {
 		t.Fatal(err)

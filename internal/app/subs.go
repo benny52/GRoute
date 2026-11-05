@@ -20,6 +20,7 @@ import (
 	"github.com/lardan099/hyroute/internal/hysteria"
 	"github.com/lardan099/hyroute/internal/socks5"
 	"github.com/lardan099/hyroute/internal/store"
+	"github.com/lardan099/hyroute/internal/subfmt"
 )
 
 // Subscription intervals.
@@ -177,37 +178,50 @@ func (c *Controller) fetch(ctx context.Context, u string) (FetchResult, error) {
 }
 
 // parseSubscription turns a body into profiles or an error that explains
-// what came instead.
+// what came instead. A list of share links (plain or base64) is the usual
+// body; Clash, sing-box and Xray configs are read too (subfmt).
 func parseSubscription(body []byte) (Links, error) {
 	l := ParseLinks(string(body))
 	if len(l.Profiles) > 0 {
 		return l, nil
 	}
+	if r, ok := subfmt.Convert(body); ok {
+		l = ParseLinks(strings.Join(r.Links, "\n"))
+		l.Format = r.Format
+		l.Warnings = append(r.Warnings, l.Warnings...)
+		l.Errors = append(r.Errors, l.Errors...)
+		for k, v := range r.Other {
+			l.Ignored[k] += v
+		}
+		if len(l.Profiles) > 0 {
+			return l, nil
+		}
+	}
 	t := strings.TrimSpace(string(body))
 	switch {
 	case t == "":
 		return l, errors.New("подписка пустая")
-	case strings.HasPrefix(t, "{") || strings.HasPrefix(t, "["):
-		return l, errors.New("похоже на JSON-конфиг (sing-box/Xray): нужна подписка со списком ссылок hysteria2://")
-	case strings.Contains(t, "proxies:") || strings.HasPrefix(t, "port:") || strings.HasPrefix(t, "mixed-port:"):
-		return l, errors.New("похоже на конфиг Clash: нужна подписка со списком ссылок hysteria2://")
 	case strings.HasPrefix(strings.ToLower(t), "<!doctype") || strings.HasPrefix(strings.ToLower(t), "<html"):
 		return l, errors.New("сервер вернул веб-страницу, а не подписку: проверьте ссылку")
 	case len(l.Errors) > 0:
 		// Its own links come first: the other protocols are not the issue.
-		msg := fmt.Sprintf("ни одна ссылка Hysteria 2 не разобрана (%d): %s", len(l.Errors), l.Errors[0])
+		msg := fmt.Sprintf("ни один сервер Hysteria 2 или VLESS не разобран (%d): %s", len(l.Errors), l.Errors[0])
 		if l.IgnoredTotal() > 0 {
 			msg += "; других протоколов: " + ignoredText(l.Ignored)
 		}
 		return l, errors.New(msg)
 	case l.IgnoredTotal() > 0:
-		return l, fmt.Errorf("в подписке нет профилей Hysteria 2, только другие протоколы (%s)", ignoredText(l.Ignored))
+		return l, fmt.Errorf("в подписке нет серверов Hysteria 2 и VLESS, только другие протоколы (%s)", ignoredText(l.Ignored))
+	case l.Format != "":
+		return l, fmt.Errorf("в конфиге %s нет серверов", l.Format)
+	case strings.HasPrefix(t, "{") || strings.HasPrefix(t, "["):
+		return l, errors.New("JSON без серверов: HyRoute читает конфиги sing-box и Xray и списки ссылок")
 	case !strings.ContainsAny(t, "\r\n") && utf8.RuneCountInString(t) <= 200:
 		// A panel's short answer in words ("подписка истекла…") says more
 		// than any guess.
 		return l, fmt.Errorf("сервер подписки ответил текстом, а не ссылками: «%s»", t)
 	}
-	return l, errors.New("в ответе нет ссылок hysteria2:// или hy2://")
+	return l, errors.New("в ответе нет ссылок hysteria2://, hy2:// или vless://")
 }
 
 func ignoredText(m map[string]int) string {
@@ -319,6 +333,9 @@ type Preview struct {
 	Warnings []string       `json:"warnings"`
 	Errors   []string       `json:"errors"`
 	Base64   bool           `json:"base64"`
+	// Format: a client config read as a subscription ("Clash",
+	// "sing-box", "Xray"), "" for a list of links.
+	Format string `json:"format"`
 	// subinfo: the panel's figures (nil: none) and its advised interval.
 	Info        *SubInfo `json:"info"`
 	UpdateHours int      `json:"updateHours"`
@@ -345,7 +362,7 @@ func (c *Controller) PreviewSubscription(rawURL string) (Preview, error) {
 		return Preview{}, previewInfoErr(err, res)
 	}
 	pv := Preview{Token: newID(), Title: res.Title, Count: len(l.Profiles), Ignored: l.Ignored, IgnoredN: l.IgnoredTotal(),
-		Warnings: l.Warnings, Errors: l.Errors, Base64: l.Base64, Names: []string{}}
+		Warnings: l.Warnings, Errors: l.Errors, Base64: l.Base64, Format: l.Format, Names: []string{}}
 	pv.Info, pv.UpdateHours = fetchedInfo(res), res.UpdateHours
 	if strings.HasPrefix(strings.ToLower(rawURL), "http://") {
 		// The link usually carries the account token; over plain HTTP the

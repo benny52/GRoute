@@ -117,7 +117,7 @@ func main() {
 	if err != nil {
 		fatalBox(err)
 	}
-	// hysteria.exe and WinDivert run from a verified copy in a folder only
+	// hysteria.exe, xray.exe and WinDivert run from a verified copy in a folder only
 	// administrators can write, never from the program folder itself.
 	// A file the program folder lacks is downloaded from the URL pinned in
 	// deps.json (same hash check).
@@ -156,7 +156,7 @@ func main() {
 			if errors.As(err, &mm) {
 				return nil, fmt.Errorf("копия %s изменилась после запуска HyRoute (повреждена или подменена): перезапустите HyRoute, он скопирует её заново", mm.Path)
 			}
-			return nil, fmt.Errorf("копии hysteria.exe и WinDivert не прочитаны: %w", err)
+			return nil, fmt.Errorf("копии hysteria.exe, xray.exe и WinDivert не прочитаны: %w", err)
 		}
 		s, err := session.Start(cfg)
 		if err != nil {
@@ -217,7 +217,7 @@ func main() {
 	// The kill switch lets HyRoute and Hysteria through, so they can
 	// reconnect while the internet is closed.
 	ctl.KillSwitch = &killswitch.Switch{Self: exe, Apps: func() []string {
-		return append([]string{exe}, coreMgr.Paths()...)
+		return append([]string{exe, filepath.Join(runtimeDir, "xray.exe")}, coreMgr.Paths()...)
 	}}
 	ctl.InitKillSwitch()
 	// A block left from before is what a start at sign-in has to show:

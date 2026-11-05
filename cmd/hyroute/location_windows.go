@@ -128,12 +128,12 @@ func moveTarget() string {
 
 // Files of a release folder; the rest of the source folder (it may be
 // Downloads) is left alone.
-var programFilesList = []string{"HyRoute.exe", "hyroute-updater.exe", "hysteria.exe", "WinDivert.dll", "WinDivert64.sys", "LICENSE.txt", "THIRD-PARTY-NOTICES.txt",
-	"hyroutectl.exe"}
+var programFilesList = []string{"HyRoute.exe", "hyroute-updater.exe", "hysteria.exe", "xray.exe", "WinDivert.dll", "WinDivert64.sys", "LICENSE.txt", "THIRD-PARTY-NOTICES.txt",
+	"hyroutectl.exe", "hyroute-server.exe"}
 
 // runtimeFilesList: files of programFilesList that run from the runtime
 // folder (see runtimefiles.Stage), never from the program folder.
-var runtimeFilesList = []string{"hysteria.exe", "WinDivert.dll", "WinDivert64.sys"}
+var runtimeFilesList = []string{"hysteria.exe", "xray.exe", "WinDivert.dll", "WinDivert64.sys"}
 
 // MoveToProgramFiles copies HyRoute into Program Files, adds a Start menu
 // shortcut, starts the new copy and exits. As after an update, the new

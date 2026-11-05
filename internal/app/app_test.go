@@ -92,7 +92,7 @@ func ids(ps []hysteria.Profile) string {
 
 func TestImportConnectStatus(t *testing.T) {
 	c, started := newCtl(t)
-	res, err := c.ImportURIs("garbage\n" + link + "\n hy2://x@h2.example:8443 vless://abc@h:1")
+	res, err := c.ImportURIs("garbage\n" + link + "\n hy2://x@h2.example:8443 trojan://abc@h:1")
 	if err != nil || len(res.Added) != 2 || len(res.Errors) != 0 {
 		t.Fatalf("%+v %v", res, err)
 	}
@@ -261,12 +261,25 @@ func TestHysteriaLogRedactedPerProfile(t *testing.T) {
 	}
 }
 
+func TestParseLinksVLESS(t *testing.T) {
+	l := ParseLinks("hy2://a@h1.example:443#one\n" + vlessLink + "\nvless://broken@h.example:443?security=reality")
+	if len(l.Profiles) != 2 || !l.Profiles[1].IsVLESS() || l.Profiles[1].Name != "NL" || len(l.Errors) != 1 || l.IgnoredTotal() != 0 {
+		t.Fatalf("%+v", l)
+	}
+	// The link HyRoute writes reads back to the same server.
+	p := l.Profiles[1]
+	q, _, err := hysteria.ParseURI(p.URI())
+	if err != nil || !hysteria.SameConnection(p, q) {
+		t.Fatalf("%v\n%+v\n%+v", err, p, q)
+	}
+}
+
 func TestParseLinksBase64AndIgnored(t *testing.T) {
-	body := "hy2://a@h1.example:443#one\nvless://x@h:1\nvmess://abc\nhysteria2://b@h2.example:443#two\nss://y@z:1"
-	enc := "aHkyOi8vYUBoMS5leGFtcGxlOjQ0MyNvbmUKdmxlc3M6Ly94QGg6MQp2bWVzczovL2FiYwpoeXN0ZXJpYTI6Ly9iQGgyLmV4YW1wbGU6NDQzI3R3bwpzczovL3lAejox"
+	body := "hy2://a@h1.example:443#one\ntrojan://x@h:1\nvmess://abc\nhysteria2://b@h2.example:443#two\nss://y@z:1"
+	enc := "aHkyOi8vYUBoMS5leGFtcGxlOjQ0MyNvbmUKdHJvamFuOi8veEBoOjEKdm1lc3M6Ly9hYmMKaHlzdGVyaWEyOi8vYkBoMi5leGFtcGxlOjQ0MyN0d28Kc3M6Ly95QHo6MQ"
 	for _, in := range []string{body, enc, enc + "\n"} {
 		l := ParseLinks(in)
-		if len(l.Profiles) != 2 || l.IgnoredTotal() != 3 || l.Ignored["vless"] != 1 {
+		if len(l.Profiles) != 2 || l.IgnoredTotal() != 3 || l.Ignored["trojan"] != 1 {
 			t.Fatalf("%q: %+v", in, l)
 		}
 	}

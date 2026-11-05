@@ -171,9 +171,9 @@ func (c *Core) dnsHold(a netip.Addr) bool {
 	return d == dnsMain || d == dnsSecondary
 }
 
-// ownHysteria: a hysteria.exe HyRoute started.
+// ownHysteria: a hysteria.exe or xray.exe (VLESS) HyRoute started.
 func (c *Core) ownHysteria(proc *procinfo.Info) bool {
-	return c.SelfPID != 0 && proc != nil && proc.Name == "hysteria.exe" && proc.Parent != nil && proc.Parent.PID == c.SelfPID
+	return c.SelfPID != 0 && proc != nil && (proc.Name == "hysteria.exe" || proc.Name == "xray.exe") && proc.Parent != nil && proc.Parent.PID == c.SelfPID
 }
 
 // own reports HyRoute's own traffic: its process, or a Hysteria it started

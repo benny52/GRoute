@@ -1,7 +1,7 @@
-# Downloads hysteria.exe and WinDivert into bin\ and verifies SHA256.
-# Versions and hashes are pinned in build\deps.json (single source of truth).
-# The Hysteria hash is additionally cross-checked against the release's
-# official hashes.txt.
+# Downloads hysteria.exe, WinDivert and xray.exe into bin\ and verifies
+# SHA256. Versions and hashes are pinned in build\deps.json (single source
+# of truth). The Hysteria hash is additionally cross-checked against the
+# release's official hashes.txt, the Xray zip's against its .dgst file.
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -64,6 +64,41 @@ try {
         $archive = [IO.Compression.ZipFile]::OpenRead($zip)
         try {
             foreach ($p in $w.files.PSObject.Properties) {
+                $entry = $archive.GetEntry($p.Name)
+                if (-not $entry) { throw "zip has no $($p.Name)" }
+                $out = Join-Path $tmp (Split-Path $p.Name -Leaf)
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $out, $true)
+                Assert-Hash $out $p.Value (Split-Path $p.Name -Leaf)
+                Copy-Item $out (Join-Path $bin (Split-Path $p.Name -Leaf)) -Force
+            }
+        } finally { $archive.Dispose() }
+    }
+    # --- Xray (VLESS servers) ---
+    $x = $deps.xray
+    $need = $false
+    foreach ($p in $x.files.PSObject.Properties) {
+        $d = Join-Path $bin (Split-Path $p.Name -Leaf)
+        if (-not (Test-Path $d) -or ((Get-Sha256 $d) -ne $p.Value)) { $need = $true }
+    }
+    if (-not $need) {
+        Write-Host "Xray $($x.version): already present"
+    } else {
+        Write-Host "Xray $($x.version): downloading"
+        $dgst = Join-Path $tmp 'xray.dgst'
+        Invoke-WebRequest -UseBasicParsing $x.dgstUrl -OutFile $dgst
+        $line = Get-Content $dgst | Where-Object { $_ -match '^SHA2-256=' }
+        if (-not $line) { throw 'Xray .dgst has no SHA2-256 line' }
+        $official = ($line -split '=\s*', 2)[1].Trim().ToLowerInvariant()
+        if ($official -ne $x.sha256) {
+            throw "deps.json hash for the Xray zip differs from the release .dgst ($official)"
+        }
+        $zip = Join-Path $tmp 'xray.zip'
+        Invoke-WebRequest -UseBasicParsing $x.url -OutFile $zip
+        Assert-Hash $zip $x.sha256 'Xray zip'
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+        try {
+            foreach ($p in $x.files.PSObject.Properties) {
                 $entry = $archive.GetEntry($p.Name)
                 if (-not $entry) { throw "zip has no $($p.Name)" }
                 $out = Join-Path $tmp (Split-Path $p.Name -Leaf)

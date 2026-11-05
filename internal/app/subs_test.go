@@ -20,7 +20,7 @@ const subURL = "https://panel.example/sub/SECRETTOKEN123?key=anothersecret99"
 
 func TestSubscriptionLifecycle(t *testing.T) {
 	c, _ := newCtl(t)
-	body := "hy2://a@de1.example:443#DE%20%231\nhy2://a@de2.example:443#DE%20%232\nvless://x@h:1\n"
+	body := "hy2://a@de1.example:443#DE%20%231\nhy2://a@de2.example:443#DE%20%232\ntrojan://x@h:1\n"
 	var fail error
 	c.Fetch = func(_ context.Context, u string) (FetchResult, error) {
 		if u != subURL {
@@ -117,14 +117,14 @@ func TestSubscriptionLifecycle(t *testing.T) {
 
 func TestParseSubscriptionErrors(t *testing.T) {
 	for body, want := range map[string]string{
-		"":                           "пустая",
-		`{"outbounds":[]}`:           "JSON",
-		"proxies:\n  - name: x":      "Clash",
-		"vless://a@b:1\nvmess://abc": "только другие протоколы",
+		"":                            "пустая",
+		`{"outbounds":[]}`:            "JSON",
+		"proxies:\n  - name: x":       "Clash",
+		"trojan://a@b:1\nvmess://abc": "только другие протоколы",
 		// Its own links' errors come first, and a short answer in words is
 		// quoted; a web address in it is no protocol.
-		"vless://a@b:1\nhy2://pw@h.example:443/?obfs=salamander": "ни одна ссылка Hysteria 2 не разобрана (1)",
-		"Подписка истекла, продлите: https://t.me/example_bot":   "ответил текстом",
+		"trojan://a@b:1\nhy2://pw@h.example:443/?obfs=salamander": "ни один сервер Hysteria 2 или VLESS не разобран (1)",
+		"Подписка истекла, продлите: https://t.me/example_bot":    "ответил текстом",
 	} {
 		if _, err := parseSubscription([]byte(body)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v", body, err)
@@ -790,5 +790,19 @@ func TestManualCopyOfSubscriptionServer(t *testing.T) {
 				t.Errorf("subscription server marked: %+v", p)
 			}
 		}
+	}
+}
+
+// A subscription that comes as a client config (Clash here) gives its
+// VLESS and Hysteria 2 servers like a list of links.
+func TestParseSubscriptionClash(t *testing.T) {
+	body := "proxies:\n" +
+		"  - {name: NL, type: vless, server: nl.example.com, port: 443, uuid: 5f0b7c1e-1234-4abc-9def-0123456789ab, tls: true, servername: nl.example.com, network: ws, ws-opts: {path: /ws}}\n" +
+		"  - {name: FI, type: hysteria2, server: fi.example.com, port: 443, password: pw}\n" +
+		"  - {name: VM, type: vmess, server: vm.example.com, port: 443}\n"
+	l, err := parseSubscription([]byte(body))
+	if err != nil || l.Format != "Clash" || len(l.Profiles) != 2 || !l.Profiles[0].IsVLESS() || l.Profiles[1].IsVLESS() ||
+		l.Profiles[0].Name != "NL" || l.Ignored["vmess"] != 1 {
+		t.Fatalf("%+v %v", l, err)
 	}
 }

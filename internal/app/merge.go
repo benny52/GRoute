@@ -147,7 +147,15 @@ func mergeSubscription(list []hysteria.Profile, source string, fresh []hysteria.
 // the parser takes only from 5 to 3600 seconds): the panel's value, and
 // its corrections, replace the intervals set in the editor. A link
 // without one keeps the server's, whoever set it.
+//
+// Of a VLESS server, or a server whose protocol changed, only IP pinning
+// is the user's: the rest of the editor's Hysteria settings mean nothing
+// to the other protocol.
 func keepLocal(fresh, old hysteria.Profile) hysteria.Profile {
+	if fresh.IsVLESS() || old.IsVLESS() {
+		fresh.PinServerIP = old.PinServerIP
+		return fresh
+	}
 	hop := old.Hop
 	if fresh.Hop.Interval != "" {
 		hop = hysteria.Hop{Interval: fresh.Hop.Interval}

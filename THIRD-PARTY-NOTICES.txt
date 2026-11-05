@@ -8,6 +8,10 @@ below. Each keeps its own license.
 hysteria.exe - Hysteria 2 (https://github.com/apernet/hysteria)
   License: MIT. Unmodified official release binary.
 
+xray.exe - Xray-core (https://github.com/XTLS/Xray-core), runs VLESS servers
+  License: MPL-2.0. Unmodified official release binary; the source code is
+  available at the URL above.
+
 WinDivert.dll, WinDivert64.sys - WinDivert 2.2.2 (https://github.com/basil00/WinDivert)
   License: LGPL-3.0 or GPL-2.0, at your choice. Unmodified official release
   binaries; the source code is available at the URL above. HyRoute uses

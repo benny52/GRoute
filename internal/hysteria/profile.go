@@ -1,5 +1,6 @@
-// Package hysteria manages Hysteria 2 client profiles (URI import/export,
-// YAML generation) and supervises the hysteria.exe child process.
+// Package hysteria manages HyRoute's server profiles (URI import/export,
+// config generation) and supervises the process that runs one: hysteria.exe
+// for Hysteria 2, xray.exe for VLESS (internal/vless).
 //
 // Field names follow https://v2.hysteria.network/docs/advanced/Full-Client-Config/
 // (checked against apernet/hysteria app/v2.12.3).
@@ -14,11 +15,23 @@ import (
 	"time"
 
 	"github.com/lardan099/hyroute/internal/hy2uri"
+	"github.com/lardan099/hyroute/internal/vless"
+)
+
+// Protocols of a profile.
+const (
+	ProtoHysteria2 = "" // the default: profiles saved before VLESS have none
+	ProtoVLESS     = "vless"
 )
 
 type Profile struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Protocol is "" (Hysteria 2) or "vless" (run by Xray). A VLESS
+	// profile uses Host, Ports (one port), PinServerIP and VLESS; the
+	// Hysteria fields stay empty.
+	Protocol string         `json:"protocol,omitempty"`
+	VLESS    vless.Settings `json:"vless,omitzero"`
 	// Host is a domain or IP literal (no brackets).
 	Host string `json:"host"`
 	// Ports is "443", "20000-50000" or "443,20000-50000" (port hopping).
@@ -55,13 +68,78 @@ func SameConnection(a, b Profile) bool {
 	return reflect.DeepEqual(strip(a), strip(b))
 }
 
-// SameConnectionNoSecrets is SameConnection with Auth and the obfuscation
-// password ignored: the same server, whatever the credentials. Only a
-// server equal in every other connection field may inherit secrets
-// (backup).
+// SameConnectionNoSecrets is SameConnection with the secrets (ClearSecrets)
+// ignored: the same server, whatever the credentials. Only a server equal
+// in every other connection field may inherit secrets (backup).
 func SameConnectionNoSecrets(a, b Profile) bool {
-	a.Auth, a.Obfs.Password, b.Auth, b.Obfs.Password = "", "", "", ""
+	a.ClearSecrets()
+	b.ClearSecrets()
 	return SameConnection(a, b)
+}
+
+// IsVLESS: the profile runs through Xray.
+func (p *Profile) IsVLESS() bool { return p.Protocol == ProtoVLESS }
+
+// ProtocolName names the protocol for the user.
+func (p *Profile) ProtocolName() string {
+	if p.IsVLESS() {
+		return "VLESS"
+	}
+	return "Hysteria 2"
+}
+
+// Normalize clears the fields of the other protocol (an editor may send
+// both) and puts VLESS's transport name in HyRoute's form.
+func (p *Profile) Normalize() {
+	if p.IsVLESS() {
+		p.Auth, p.TLS, p.Obfs, p.Hop, p.Bandwidth, p.Congestion, p.QUIC, p.FastOpen = "", TLS{}, Obfs{}, Hop{}, Bandwidth{}, Congestion{}, QUIC{}, false
+		p.VLESS.Network = vless.NormalizeNetwork(p.VLESS.Network)
+		if p.VLESS.Encryption == "none" {
+			p.VLESS.Encryption = ""
+		}
+		return
+	}
+	p.VLESS = vless.Settings{}
+}
+
+// Transport describes the connection for the list: "REALITY",
+// "WS · TLS", "XHTTP · REALITY" (VLESS only).
+func (p *Profile) Transport() string {
+	if !p.IsVLESS() {
+		return ""
+	}
+	sec := map[string]string{"": "", "tls": "TLS", "reality": "REALITY"}[p.VLESS.Security]
+	net := map[string]string{"": "", "ws": "WS", "grpc": "gRPC", "httpupgrade": "HTTPUpgrade", "xhttp": "XHTTP", "kcp": "mKCP"}[p.VLESS.Network]
+	switch {
+	case net == "" && sec == "":
+		return "TCP"
+	case net == "":
+		return sec
+	case sec == "":
+		return net
+	}
+	return net + " · " + sec
+}
+
+// Secrets are the values no log may show: the auth and obfuscation
+// passwords of Hysteria, the user ID of VLESS.
+func (p *Profile) Secrets() []string {
+	return []string{p.Auth, p.Obfs.Password, p.VLESS.ID}
+}
+
+// ClearSecrets empties the secrets (a backup without them).
+func (p *Profile) ClearSecrets() {
+	p.Auth, p.Obfs.Password, p.VLESS.ID = "", "", ""
+}
+
+// HasSecrets: any secret is set.
+func (p *Profile) HasSecrets() bool {
+	return p.Auth != "" || p.Obfs.Password != "" || p.VLESS.ID != ""
+}
+
+// CopySecrets takes the secrets of from.
+func (p *Profile) CopySecrets(from Profile) {
+	p.Auth, p.Obfs.Password, p.VLESS.ID = from.Auth, from.Obfs.Password, from.VLESS.ID
 }
 
 type TLS struct {
@@ -112,6 +190,13 @@ func (p *Profile) Validate() error {
 	if p.Host == "" {
 		return errors.New("server host is empty")
 	}
+	switch p.Protocol {
+	case ProtoHysteria2:
+	case ProtoVLESS:
+		return p.validateVLESS()
+	default:
+		return fmt.Errorf("протокол %q не поддерживается", p.Protocol)
+	}
 	if _, err := ParsePorts(p.Ports); err != nil {
 		return err
 	}
@@ -144,6 +229,32 @@ func (p *Profile) Validate() error {
 		}
 	}
 	return nil
+}
+
+// validateVLESS: one port, no Hysteria settings, and VLESS settings Xray
+// takes for this host.
+func (p *Profile) validateVLESS() error {
+	if _, err := VLESSPort(p.Ports); err != nil {
+		return err
+	}
+	q := *p
+	q.ID, q.Name, q.Source, q.Missing, q.Host, q.Ports, q.Protocol, q.VLESS, q.PinServerIP = "", "", "", false, "", "", "", vless.Settings{}, false
+	if !reflect.DeepEqual(q, Profile{}) {
+		return errors.New("у сервера VLESS не бывает настроек Hysteria (auth, obfs, port hopping, скорость, QUIC)")
+	}
+	return p.VLESS.ValidateFor(p.Host)
+}
+
+// VLESSPort is the one port of a VLESS server.
+func VLESSPort(ports string) (int, error) {
+	rs, err := ParsePorts(ports)
+	if err != nil {
+		return 0, err
+	}
+	if len(rs) != 1 || rs[0].From != rs[0].To {
+		return 0, errors.New("у сервера VLESS один порт, без диапазонов")
+	}
+	return int(rs[0].From), nil
 }
 
 // localDrivePath: "X:\..." with no second colon and no forward slashes;

@@ -78,6 +78,52 @@ socks5:
 - Маскирование: единый `Redactor` знает текущие auth, obfs-password и SOCKS-креды (в сыром и
   URL-escaped виде) и заменяет их на `***` во всех логах, включая вывод Hysteria.
 
+## VLESS: профиль, конфиг Xray, проверка
+
+Профиль с `protocol: "vless"` запускается в `xray.exe` (Xray-core, версия и SHA-256 в
+`build/deps.json`, защищённая копия в `runtime\`, как у Hysteria). Пакет `internal/vless`: модель
+(`vless.Settings` в поле `vless` профиля; у VLESS из общих полей только `host`, один порт в `ports` и
+`pinServerIP`, поля Hysteria пусты — `Profile.Validate`), ссылки `vless://` по стандарту Xray
+(`encryption, flow, type, security, sni, fp, alpn, ech, pcs, vcn, pbk, sid, spx, pqv, headerType,
+host, path, serviceName, authority, mode, extra, seed`) и конфиг Xray. Имена полей сверены с
+исходниками Xray-core v26.10.31 (`infra/conf`).
+
+Конфиг (`run\hy-<n>.json`, тот же DACL и то же удержание открытым, что у YAML Hysteria):
+```json
+{"log": {"loglevel": "warning", "access": "none"},
+ "inbounds": [{"protocol": "socks", "listen": "127.0.0.1", "port": <свободный>,
+   "settings": {"auth": "password", "accounts": [{"user": <random 16>, "pass": <random 32>}], "udp": true, "ip": "127.0.0.1"}}],
+ "outbounds": [{"protocol": "vless",
+   "settings": {"address": <pin IP или host>, "port": 443, "id": <secret>, "flow": "...", "encryption": "none"},
+   "streamSettings": {"network": "raw|xhttp|ws|grpc|httpupgrade|kcp", "security": "reality|tls|none", ...}}]}
+```
+Ни маршрутизации, ни DNS, ни баз geo: что идёт в туннель, решает HyRoute. При закреплённом IP
+`serverName` TLS и Host у HTTP-транспортов — имя сервера из профиля, если в ссылке их нет. Убранное из
+Xray отклоняется при проверке профиля: `allowInsecure`, транспорты `h2`/`http`/`quic`, `security=xtls`,
+VLESS без TLS/REALITY/encryption к публичному адресу (`requiresTransportSecurity` Xray). mKCP: заголовок
+или seed — маска `finalmask.udp` `mkcp-legacy`.
+
+Запуск: `xray.exe run -format json -c <file>` тем же `startProcess` (Job, `CREATE_NO_WINDOW`). Вывод
+Xray (`2026/11/05 10:51:23.123456 [Warning] …`) разбирается в `LogLine`; строка `Failed to start: …` —
+ошибка запуска (конфиг → `ErrConfig`, занятый порт → `ErrPortBusy`). Xray подключается к серверу на
+каждое соединение, сообщения «connected» у него нет, поэтому `watchVLESS`: ждёт порт SOCKS5, затем
+HTTP-запрос через туннель к `DefaultProbeURLs` (`cp.cloudflare.com`, `www.gstatic.com`;
+`Supervisor.ProbeURLs`) — любой ответ HTTP значит, что трафик прошёл через сервер. Первый успех —
+`Connected` (UDP есть всегда), конфиг удаляется. При запуске 3 неудачи, потом 2 подряд (проверка раз в
+минуту) — перезапуск с причиной из последнего предупреждения Xray (`ClassifyXray`); потерянная связь
+идёт с обычным backoff, не с долгим, как неверный пароль. Свои процессы движок узнаёт по имени
+`xray.exe` и родителю (исключение «hysteria»), kill switch пропускает копию из `runtime\`. В сводке
+сервера `fastOpen` для VLESS всегда true: SOCKS5 Xray отвечает раньше, чем подключится сайт.
+
+UUID — секрет: шифруется DPAPI вместе с `auth` и паролем obfs (`secrets.vless` в `profiles.json`),
+маскируется в журналах (`Profile.Secrets`), не попадает в копию без секретов (`ClearSecrets`).
+
+Подписки и вставка в «Добавить сервер», кроме списков ссылок, читают конфиги клиентов
+(`internal/subfmt`): Clash/Mihomo (`proxies`, типы `vless` и `hysteria2`), sing-box (`outbounds`
+с `type`) и Xray (`outbounds` с `protocol`, один конфиг или список). Серверы переводятся в ссылки и
+разбираются тем же `hysteria.ParseURI`; чего ссылка не несёт (`sockopt`, `mux`, `finalmask`,
+`skip-cert-verify`), уходит в предупреждения, другие протоколы — в «пропущенные».
+
 ## Несколько серверов одновременно
 
 Серверов работает несколько одновременно, и через каждый идут свои маршруты:

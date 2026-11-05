@@ -27,13 +27,22 @@ func (cfg *Config) HysteriaPath() string {
 	return filepath.Join(cfg.Dir, "hysteria.exe")
 }
 
-// RunnerFactory starts a hysteria.Supervisor per profile. The profile
-// check uses it outside a session too.
+// XrayPath is the xray.exe a VLESS profile starts with.
+func (cfg *Config) XrayPath() string {
+	return filepath.Join(cfg.Dir, "xray.exe")
+}
+
+// RunnerFactory starts a hysteria.Supervisor per profile: hysteria.exe, or
+// xray.exe for VLESS. The profile check uses it outside a session too.
 func RunnerFactory(cfg Config) tunnels.Factory {
 	return func(p hysteria.Profile, h tunnels.Hooks) tunnels.Runner {
+		exe, path := cfg.HysteriaPath(), cfg.HysteriaPath
+		if p.IsVLESS() {
+			exe, path = cfg.XrayPath(), cfg.XrayPath
+		}
 		return &hysteria.Supervisor{
-			Exe:          cfg.HysteriaPath(),
-			ExePath:      cfg.HysteriaPath,
+			Exe:          exe,
+			ExePath:      path,
 			RunDir:       cfg.RunDir,
 			Profile:      p,
 			Redactor:     cfg.Redactor,
@@ -46,7 +55,7 @@ func RunnerFactory(cfg Config) tunnels.Factory {
 }
 
 type Config struct {
-	// Dir holds WinDivert.dll, WinDivert64.sys and hysteria.exe.
+	// Dir holds WinDivert.dll, WinDivert64.sys, hysteria.exe and xray.exe.
 	Dir string
 	// Exe is the program the relay firewall rule allows.
 	Exe string

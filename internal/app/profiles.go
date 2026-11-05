@@ -24,6 +24,11 @@ type ProfileSummary struct {
 	SNI      string `json:"sni"`
 	Insecure bool   `json:"insecure"`
 	Pinned   bool   `json:"pinned"`
+	// Protocol is "hysteria2" or "vless"; Transport describes a VLESS
+	// connection ("REALITY", "WS · TLS"), Flow is its flow ("" none).
+	Protocol  string `json:"protocol"`
+	Transport string `json:"transport"`
+	Flow      string `json:"flow"`
 	// Main: rules without an explicit profile use this one.
 	Main bool `json:"main"`
 	// Source: "" (manual) or "sub:<id>"; SourceName is the subscription.
@@ -49,10 +54,21 @@ type ProfileSummary struct {
 func (c *Controller) summaryLocked(p *hysteria.Profile) ProfileSummary {
 	s := ProfileSummary{ID: p.ID, Name: p.Name, Server: hysteria.ServerString(p.Host, p.Ports), Host: p.Host,
 		Obfs: p.Obfs.Type, SNI: p.TLS.SNI, Insecure: p.TLS.Insecure, Pinned: p.TLS.PinSHA256 != "",
-		Main: p.ID == c.mainTargetLocked(), Source: p.Source, Missing: p.Missing, UsedBy: c.usedByLocked(p.ID), FastOpen: p.FastOpen}
+		Main: p.ID == c.mainTargetLocked(), Source: p.Source, Missing: p.Missing, UsedBy: c.usedByLocked(p.ID), FastOpen: fastOpen(p),
+		Protocol: "hysteria2"}
+	if p.IsVLESS() {
+		s.Protocol, s.Transport, s.Flow = "vless", p.Transport(), p.VLESS.Flow
+		s.SNI, s.Pinned = p.VLESS.SNI, p.VLESS.PinSHA256 != ""
+	}
 	s.SourceName = c.sourceNameLocked(p.Source)
 	return s
 }
+
+// fastOpen: the tunnel answers a connection before the remote end
+// connects, so its failed connections are invisible to server groups'
+// error streaks: Hysteria's fast open, and Xray, whose SOCKS5 always
+// answers at once.
+func fastOpen(p *hysteria.Profile) bool { return p.FastOpen || p.IsVLESS() }
 
 // usedByLocked lists enabled rules (and the default route) that tunnel
 // through profile id, resolving "" to the main target, and the running
@@ -217,9 +233,16 @@ type ImportResult struct {
 func (c *Controller) ImportURIs(text string) (ImportResult, error) {
 	res := ImportResult{Added: []ProfileSummary{}, Warnings: []string{}, Errors: []string{}, Skipped: []string{}}
 	parsed := ParseLinks(text)
+	if len(parsed.Profiles) == 0 && len(parsed.Errors) == 0 {
+		// A pasted Clash, sing-box or Xray config, as a subscription
+		// may bring.
+		if l, err := parseSubscription([]byte(text)); err == nil || l.Format != "" {
+			parsed = l
+		}
+	}
 	res.Warnings, res.Errors = parsed.Warnings, parsed.Errors
 	if len(parsed.Profiles) == 0 && len(res.Errors) == 0 {
-		return res, errors.New("не найдено ни одной ссылки hysteria2:// или hy2://")
+		return res, errors.New("не найдено ни одной ссылки hysteria2://, hy2:// или vless://")
 	}
 	c.mu.Lock()
 	var added []hysteria.Profile
@@ -344,6 +367,7 @@ func (c *Controller) SaveProfile(p hysteria.Profile) (ProfileSummary, error) {
 		return ProfileSummary{}, err
 	}
 	p.Host, p.Ports = host, ports
+	p.Normalize()
 	if err := p.Validate(); err != nil {
 		return ProfileSummary{}, err
 	}

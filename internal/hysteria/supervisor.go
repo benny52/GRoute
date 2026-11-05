@@ -20,6 +20,7 @@ import (
 
 	"github.com/lardan099/hyroute/internal/logx"
 	"github.com/lardan099/hyroute/internal/socks5"
+	"github.com/lardan099/hyroute/internal/vless"
 )
 
 type State int
@@ -47,8 +48,9 @@ type Status struct {
 	SOCKS      string // local SOCKS5 address of the current run
 }
 
-// Supervisor runs hysteria.exe in SOCKS5 mode, restarts it with backoff and
-// exposes the SOCKS5 inbound as a relay.Tunnel.
+// Supervisor runs hysteria.exe (xray.exe for a VLESS profile, xray.go) in
+// SOCKS5 mode, restarts it with backoff and exposes the SOCKS5 inbound as
+// a relay.Tunnel.
 type Supervisor struct {
 	Exe string
 	// ExePath, when set, is read at every start of Hysteria instead of
@@ -75,6 +77,9 @@ type Supervisor struct {
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	// ReResolveEvery defaults to 5 minutes.
 	ReResolveEvery time.Duration
+	// ProbeURLs are the plain-HTTP addresses a VLESS run checks the
+	// server with (DefaultProbeURLs when empty).
+	ProbeURLs []string
 
 	mu        sync.Mutex
 	status    Status
@@ -397,8 +402,9 @@ func (s *Supervisor) runOnce(ctx context.Context) (time.Duration, ErrorKind, str
 	defer releasePort()
 	user, pass := randomString(16), randomString(32)
 	if s.Redactor != nil {
-		s.Redactor.SetGroup(s.RedactGroup, s.Profile.Auth, s.Profile.Obfs.Password, user, pass)
+		s.Redactor.SetGroup(s.RedactGroup, append(s.Profile.Secrets(), user, pass)...)
 	}
+	vl := s.Profile.IsVLESS()
 	opts := RunOptions{
 		SOCKSListen:   net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
 		SOCKSUsername: user,
@@ -407,7 +413,14 @@ func (s *Supervisor) runOnce(ctx context.Context) (time.Duration, ErrorKind, str
 	if pinned.IsValid() {
 		opts.ServerIP = pinned.String()
 	}
-	cfg, err := BuildConfig(&s.Profile, opts)
+	var cfg []byte
+	if vl {
+		port, _ := VLESSPort(s.Profile.Ports)
+		cfg, err = vless.Config(s.Profile.VLESS, vless.Run{Host: s.Profile.Host, Port: port, Dial: pinned,
+			SOCKSListen: opts.SOCKSListen, SOCKSUsername: user, SOCKSPassword: pass})
+	} else {
+		cfg, err = BuildConfig(&s.Profile, opts)
+	}
 	if err != nil {
 		return 0, ErrConfig, "Ошибка в профиле: " + err.Error()
 	}
@@ -416,14 +429,14 @@ func (s *Supervisor) runOnce(ctx context.Context) (time.Duration, ErrorKind, str
 	// Every run gets a file of its own: supervisors of different profiles
 	// share RunDir, and a shared name let one profile's Hysteria read
 	// another profile's config (wrong server, clashing SOCKS5 port).
-	cfgPath := filepath.Join(s.RunDir, configName())
+	cfgPath := filepath.Join(s.RunDir, configName(vl))
 	s.socks = socks5.Client{Server: opts.SOCKSListen, Username: user, Password: pass}
 	s.kick = kick
 	s.status.SOCKS = opts.SOCKSListen
 	s.mu.Unlock()
 	releaseCfg, err := writeSecretFile(cfgPath, cfg)
 	if err != nil {
-		return 0, ErrOther, "Не удалось записать конфиг Hysteria: " + err.Error()
+		return 0, ErrOther, "Не удалось записать конфиг " + s.coreName() + ": " + err.Error()
 	}
 	// The config is read at startup only: it goes once Hysteria has
 	// connected, or with the process.
@@ -437,18 +450,21 @@ func (s *Supervisor) runOnce(ctx context.Context) (time.Duration, ErrorKind, str
 	defer dropConfig()
 
 	pr, pw := io.Pipe()
-	env := append(os.Environ(),
+	args, env := []string{"client", "-c", cfgPath}, append(os.Environ(),
 		"HYSTERIA_LOG_FORMAT=json",
 		"HYSTERIA_LOG_LEVEL=info",
 		"HYSTERIA_DISABLE_UPDATE_CHECK=1",
 	)
+	if vl {
+		args, env = []string{"run", "-format", "json", "-c", cfgPath}, os.Environ()
+	}
 	exe := s.Exe
 	if s.ExePath != nil {
 		if p := s.ExePath(); p != "" {
 			exe = p
 		}
 	}
-	proc, err := startProcess(exe, []string{"client", "-c", cfgPath}, env, pw)
+	proc, err := startProcess(exe, args, env, pw)
 	if err != nil {
 		pw.Close()
 		return 0, ErrOther, "Не удалось запустить " + exe + ": " + err.Error()
@@ -457,7 +473,7 @@ func (s *Supervisor) runOnce(ctx context.Context) (time.Duration, ErrorKind, str
 	var (
 		connectedAt time.Time
 		lastKind    = ErrOther
-		lastMsg     = "Hysteria завершилась"
+		lastMsg     = s.coreName() + " завершилась"
 		lastUDP     bool
 		evMu        sync.Mutex
 		listening   atomic.Bool
@@ -476,78 +492,128 @@ func (s *Supervisor) runOnce(ctx context.Context) (time.Duration, ErrorKind, str
 		})
 	}
 	readDone := make(chan struct{})
-	go func() {
-		defer close(readDone)
-		sc := bufio.NewScanner(pr)
-		sc.Buffer(make([]byte, 64*1024), 1024*1024)
-		for sc.Scan() {
-			// Parse and interpret the line as written, redact afterwards: a
-			// secret that matches JSON syntax or the message ("true",
-			// "connected") would otherwise break the line and hide events.
-			l := ParseLogLine(sc.Text())
-			ev, ok := Interpret(l)
-			if s.Redactor != nil {
-				l = redactLine(s.Redactor, l)
-				ev.Message = s.Redactor.Redact(ev.Message)
+	if vl {
+		// Xray connects to the server per connection, not at start: it
+		// is up once its SOCKS5 port answers and a request goes through
+		// the server (watchVLESS).
+		var lastWarn atomic.Pointer[string]
+		go func() {
+			defer close(readDone)
+			sc := bufio.NewScanner(pr)
+			sc.Buffer(make([]byte, 64*1024), 1024*1024)
+			for sc.Scan() {
+				l := ParseXrayLine(sc.Text())
+				ev, fatal := InterpretXray(l)
+				if s.Redactor != nil {
+					l = redactLine(s.Redactor, l)
+					ev.Message = s.Redactor.Redact(ev.Message)
+				}
+				if s.LogLine != nil {
+					s.LogLine(l)
+				}
+				switch {
+				case fatal:
+					evMu.Lock()
+					lastKind, lastMsg = ev.Kind, ev.Message
+					evMu.Unlock()
+				case l.Level == "warn" || l.Level == "error":
+					m := l.Msg
+					lastWarn.Store(&m)
+				}
 			}
-			if s.LogLine != nil {
-				s.LogLine(l)
-			}
-			if !ok {
-				continue
-			}
-			evMu.Lock()
-			switch {
-			case ev.Connected:
+			io.Copy(io.Discard, pr)
+		}()
+		probes.Add(1)
+		go func() {
+			defer probes.Done()
+			s.watchVLESS(runCtx, opts.SOCKSListen, kick, &lastWarn, func() {
+				evMu.Lock()
 				first := connectedAt.IsZero()
 				if first {
 					connectedAt = time.Now()
+				}
+				evMu.Unlock()
+				if first {
 					dropConfig()
 				}
-				lastUDP = ev.UDPEnabled
-				evMu.Unlock()
-				if !first {
-					if listening.Load() {
-						setConnected(ev.UDPEnabled)
-					}
+				listening.Store(true)
+				setConnected(true)
+			})
+		}()
+	} else {
+		go func() {
+			defer close(readDone)
+			sc := bufio.NewScanner(pr)
+			sc.Buffer(make([]byte, 64*1024), 1024*1024)
+			for sc.Scan() {
+				// Parse and interpret the line as written, redact afterwards: a
+				// secret that matches JSON syntax or the message ("true",
+				// "connected") would otherwise break the line and hide events.
+				l := ParseLogLine(sc.Text())
+				ev, ok := Interpret(l)
+				if s.Redactor != nil {
+					l = redactLine(s.Redactor, l)
+					ev.Message = s.Redactor.Redact(ev.Message)
+				}
+				if s.LogLine != nil {
+					s.LogLine(l)
+				}
+				if !ok {
 					continue
 				}
-				// Traffic goes to Hysteria only once its SOCKS5 port is open.
-				probes.Add(1)
-				go func() {
-					defer probes.Done()
-					if !waitListening(runCtx, opts.SOCKSListen, 15*time.Second) {
-						if runCtx.Err() == nil {
-							select {
-							case kick <- restart{ErrPortBusy, "Hysteria подключилась, но не открыла локальный порт SOCKS5, перезапуск"}:
-							default:
-							}
-						}
-						return
+				evMu.Lock()
+				switch {
+				case ev.Connected:
+					first := connectedAt.IsZero()
+					if first {
+						connectedAt = time.Now()
+						dropConfig()
 					}
-					listening.Store(true)
-					evMu.Lock()
-					udp := lastUDP
+					lastUDP = ev.UDPEnabled
 					evMu.Unlock()
-					setConnected(udp)
-				}()
-				continue
-			case ev.Fatal:
-				lastKind, lastMsg = ev.Kind, ev.Message
-			case ev.Lost:
-				// The server went away after the first connection. Restart:
-				// a failed first connection is fatal, so the profile turns
-				// Failed (and rules move to their fallbacks) until the
-				// server answers again.
-				select {
-				case kick <- restart{ev.Kind, ev.Message}:
-				default:
+					if !first {
+						if listening.Load() {
+							setConnected(ev.UDPEnabled)
+						}
+						continue
+					}
+					// Traffic goes to Hysteria only once its SOCKS5 port is open.
+					probes.Add(1)
+					go func() {
+						defer probes.Done()
+						if !waitListening(runCtx, opts.SOCKSListen, 15*time.Second) {
+							if runCtx.Err() == nil {
+								select {
+								case kick <- restart{ErrPortBusy, "Hysteria подключилась, но не открыла локальный порт SOCKS5, перезапуск"}:
+								default:
+								}
+							}
+							return
+						}
+						listening.Store(true)
+						evMu.Lock()
+						udp := lastUDP
+						evMu.Unlock()
+						setConnected(udp)
+					}()
+					continue
+				case ev.Fatal:
+					lastKind, lastMsg = ev.Kind, ev.Message
+				case ev.Lost:
+					// The server went away after the first connection. Restart:
+					// a failed first connection is fatal, so the profile turns
+					// Failed (and rules move to their fallbacks) until the
+					// server answers again.
+					select {
+					case kick <- restart{ev.Kind, ev.Message}:
+					default:
+					}
 				}
+				evMu.Unlock()
 			}
-			evMu.Unlock()
-		}
-		io.Copy(io.Discard, pr)
-	}()
+			io.Copy(io.Discard, pr)
+		}()
+	}
 
 	exited := make(chan error, 1)
 	go func() { exited <- proc.Wait(); pw.Close() }()
@@ -629,7 +695,7 @@ wait:
 	kind, msg := lastKind, lastMsg
 	if restartReason != "" {
 		kind, msg = restartKind, restartReason
-	} else if lastMsg == "Hysteria завершилась" && waitErr != nil {
+	} else if lastMsg == s.coreName()+" завершилась" && waitErr != nil {
 		msg += ": " + waitErr.Error()
 	}
 	switch {
@@ -732,11 +798,16 @@ type process interface {
 	Kill() error
 }
 
-// configName is a unique name for one run's config file.
-func configName() string {
+// configName is a unique name for one run's config file: YAML for
+// Hysteria, JSON for Xray.
+func configName(xray bool) string {
 	var b [12]byte
 	rand.Read(b[:])
-	return fmt.Sprintf("hy-%x.yaml", b)
+	ext := "yaml"
+	if xray {
+		ext = "json"
+	}
+	return fmt.Sprintf("hy-%x.%s", b, ext)
 }
 
 // CleanRunDir removes the configs a run that ended mid-start left in dir
@@ -745,7 +816,8 @@ func configName() string {
 // and one a running Hysteria holds open cannot be removed.
 func CleanRunDir(dir string, minAge time.Duration) {
 	names, _ := filepath.Glob(filepath.Join(dir, "hy-*.yaml"))
-	for _, n := range names {
+	more, _ := filepath.Glob(filepath.Join(dir, "hy-*.json"))
+	for _, n := range append(names, more...) {
 		if fi, err := os.Lstat(n); err == nil && fi.Mode().IsRegular() && time.Since(fi.ModTime()) >= minAge {
 			os.Remove(n)
 		}

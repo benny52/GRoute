@@ -1,5 +1,5 @@
 // Package runtimefiles moves the binaries HyRoute runs with administrator
-// rights (hysteria.exe, WinDivert.dll, WinDivert64.sys) out of the program
+// rights (hysteria.exe, xray.exe, WinDivert.dll, WinDivert64.sys) out of the program
 // folder before use. The program folder may be writable by the user (a
 // portable copy in Downloads); any process of that user could replace a
 // file there and have it run elevated. Each file is checked against the
@@ -36,6 +36,14 @@ type File struct {
 	URL, Member, ArchiveSHA256 string
 }
 
+// archive is a zip in deps.json and the files HyRoute takes from it
+// (WinDivert, Xray).
+type archive struct {
+	URL    string            `json:"url"`
+	SHA256 string            `json:"sha256"`
+	Files  map[string]string `json:"files"`
+}
+
 // FromDeps reads the pinned hashes from deps.json.
 func FromDeps(b []byte) ([]File, error) {
 	var d struct {
@@ -44,22 +52,21 @@ func FromDeps(b []byte) ([]File, error) {
 			Dest   string `json:"dest"`
 			SHA256 string `json:"sha256"`
 		} `json:"hysteria"`
-		WinDivert struct {
-			URL    string            `json:"url"`
-			SHA256 string            `json:"sha256"`
-			Files  map[string]string `json:"files"`
-		} `json:"windivert"`
+		WinDivert archive `json:"windivert"`
+		Xray      archive `json:"xray"`
 	}
 	if err := json.Unmarshal(b, &d); err != nil {
 		return nil, fmt.Errorf("deps.json: %w", err)
 	}
-	if d.Hysteria.Dest == "" || d.Hysteria.SHA256 == "" || len(d.WinDivert.Files) == 0 {
+	if d.Hysteria.Dest == "" || d.Hysteria.SHA256 == "" || len(d.WinDivert.Files) == 0 || len(d.Xray.Files) == 0 {
 		return nil, errors.New("deps.json: no pinned files")
 	}
 	out := []File{{Name: d.Hysteria.Dest, SHA256: strings.ToLower(d.Hysteria.SHA256), URL: d.Hysteria.URL}}
-	for p, sum := range d.WinDivert.Files {
-		out = append(out, File{Name: path.Base(p), SHA256: strings.ToLower(sum),
-			URL: d.WinDivert.URL, Member: p, ArchiveSHA256: strings.ToLower(d.WinDivert.SHA256)})
+	for _, a := range []archive{d.WinDivert, d.Xray} {
+		for p, sum := range a.Files {
+			out = append(out, File{Name: path.Base(p), SHA256: strings.ToLower(sum),
+				URL: a.URL, Member: p, ArchiveSHA256: strings.ToLower(a.SHA256)})
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
@@ -93,7 +100,8 @@ type Result struct {
 	Replaced []string
 }
 
-// maxDownload bounds one download (hysteria.exe is about 25 MB).
+// maxDownload bounds one download (hysteria.exe is about 25 MB, the Xray
+// zip about 17).
 const maxDownload = 96 << 20
 
 // Stage makes dst hold verified copies of files from src. dst must already

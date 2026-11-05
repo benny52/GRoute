@@ -577,7 +577,7 @@ type SystemInfo struct {
 func (g *GUI) System() SystemInfo {
 	info := SystemInfo{Build: build, DataDir: g.dataDir, ProgramDir: g.dllDir, FirewallRule: fwrule.Name, Legacy: []string{}, Missing: []string{},
 		ProtectedLocation: protectedLocation(g.dllDir), RuntimeDir: g.runtimeDir, MoveTarget: moveTarget()}
-	for _, f := range []string{"hysteria.exe", "WinDivert.dll", "WinDivert64.sys"} {
+	for _, f := range runtimeFilesList {
 		if _, err := os.Stat(filepath.Join(g.runtimeDir, f)); err != nil {
 			info.Missing = append(info.Missing, f)
 		}

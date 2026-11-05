@@ -173,8 +173,11 @@ func validServer(p hysteria.Profile, secrets bool) (hysteria.Profile, error) {
 	}
 	p.Host, p.Ports = host, ports
 	q := p
-	if !secrets && q.Obfs.Password == "" {
+	if !secrets && !q.IsVLESS() && q.Obfs.Password == "" {
 		q.Obfs.Password = "x"
+	}
+	if !secrets && q.IsVLESS() && q.VLESS.ID == "" {
+		q.VLESS.ID = "x"
 	}
 	if err := q.Validate(); err != nil {
 		return p, err
@@ -501,7 +504,7 @@ func (x *planCtx) importServer(key string, s hysteria.Profile, cur *hysteria.Pro
 }
 
 func (x *planCtx) secretFree(s hysteria.Profile) bool {
-	return !x.p.Secrets || s.Auth == "" && s.Obfs.Password == ""
+	return !x.p.Secrets || !s.HasSecrets()
 }
 
 // planServers is step 2.
@@ -550,7 +553,7 @@ func (x *planCtx) planServers() {
 			cur := pool[i]
 			matched[i] = true
 			if free {
-				b.Auth, b.Obfs.Password = cur.Auth, cur.Obfs.Password
+				b.CopySecrets(cur)
 				inherited++
 			}
 			x.tmap[b.ID] = cur.ID
@@ -564,7 +567,7 @@ func (x *planCtx) planServers() {
 		x.tmap[b.ID] = id
 		b.ID = id
 		if free {
-			b.Auth, b.Obfs.Password = "", ""
+			b.ClearSecrets()
 			noPass++
 		}
 		next.Profiles.List = append(next.Profiles.List, b)

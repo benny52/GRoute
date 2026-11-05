@@ -76,7 +76,7 @@
     }
   }
 
-  // failedLinks returns the hysteria2:// / hy2:// links of text that the
+  // failedLinks returns the hysteria2:// / hy2:// / vless:// links of text that the
   // import errors ("ссылка N: …", N counting those links) name, one per
   // line. It splits links the way the backend's splitLinks does; text it
   // finds no links in (a base64 list) gives ''.
@@ -89,7 +89,7 @@
       const starts = [...line.matchAll(/(?:^|[\t\f ])([A-Za-z][A-Za-z0-9+.\-]*:\/\/)/g)];
       starts.forEach((m, i) => {
         const scheme = m[1].slice(0, -3).toLowerCase();
-        if (scheme !== 'hysteria2' && scheme !== 'hy2') return;
+        if (scheme !== 'hysteria2' && scheme !== 'hy2' && scheme !== 'vless') return;
         n++;
         const end = i + 1 < starts.length ? starts[i + 1].index : line.length;
         if (bad.has(n)) out.push(line.slice(m.index + m[0].length - m[1].length, end).trim());
@@ -181,7 +181,7 @@
       <h1>Серверы</h1>
       {#if view === 'servers'}
         <p class="muted sub">
-          Серверы Hysteria 2. Работает только тот, который нужен правилам, и несколько могут работать одновременно. ★ — основной сервер.
+          Серверы Hysteria 2 и VLESS. Работает только тот, который нужен правилам, и несколько могут работать одновременно. ★ — основной сервер.
         </p>
       {/if}
     </div>
@@ -205,7 +205,7 @@
     </p>
     <ul>
       <li><b>«Проверить»</b> покажет, работает ли сервер и насколько он быстрый (задержка: чем меньше, тем лучше).</li>
-      <li>Новый сервер: «Добавить сервер» и вставьте ссылку <code>hysteria2://…</code>. Ссылка подписки (<code>https://…</code>) добавляется на странице «Подписки».</li>
+      <li>Новый сервер: «Добавить сервер» и вставьте ссылку <code>hysteria2://…</code> или <code>vless://…</code>. Ссылка подписки (<code>https://…</code>) добавляется на странице «Подписки».</li>
       <li>Серверы из подписки обновляются сами, их не нужно добавлять заново.</li>
     </ul>
   </Help>
@@ -213,7 +213,7 @@
   {#if adding}
     <section class="card">
       <h2>Добавить сервер</h2>
-      <textarea rows="4" placeholder="Вставьте ссылки hysteria2://… или hy2://… (по одной на строку)" bind:value={text}></textarea>
+      <textarea rows="4" placeholder="Вставьте ссылки hysteria2://…, hy2://… или vless://… (по одной на строку) или конфиг Clash, sing-box, Xray" bind:value={text}></textarea>
       <div class="row" style="margin-top: 10px">
         <button class="primary" onclick={() => doImport(false)} disabled={!text.trim()}>Добавить</button>
         <button onclick={() => doImport(true)}><Icon name="clipboard" size={16} />Из буфера обмена</button>
@@ -261,6 +261,8 @@
               <span class="badge warn-b" title="Тот же адрес, пароль и настройки, что у «{hide(p.duplicateOf)}» из подписки «{hide(p.duplicateSub)}»: та копия обновляется вместе с подпиской">есть в подписке «{hide(p.duplicateSub)}»</span>
               <button class="link small" onclick={() => removeCopy(p)}>Удалить копию</button>
             {:else if p.duplicateOf}<span class="badge warn-b" title="Тот же адрес, пароль и настройки, что у «{hide(p.duplicateOf)}»: копию можно удалить">дубль «{hide(p.duplicateOf)}»</span>{/if}
+            {#if p.protocol === 'vless'}<span class="badge" title="VLESS через Xray">VLESS · {p.transport}</span>{/if}
+            {#if p.flow}<span class="badge" title={p.flow}>Vision</span>{/if}
             {#if p.obfs}<span class="badge">{p.obfs}</span>{/if}
             {#if p.pinned}<span class="badge" title="Сертификат проверяется по отпечатку">pin</span>{:else if p.insecure}<span class="badge warn-b" title="Сертификат не проверяется">insecure</span>{/if}
           </div>

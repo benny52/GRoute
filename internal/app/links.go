@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/lardan099/hyroute/internal/hysteria"
@@ -14,11 +15,13 @@ type Links struct {
 	Profiles []hysteria.Profile
 	Warnings []string
 	Errors   []string
-	// Ignored counts share links of other protocols (vless://, vmess://,
-	// ss://, trojan://, tuic://, hysteria:// v1 …) by scheme.
+	// Ignored counts share links of other protocols (vmess://, ss://,
+	// trojan://, tuic://, hysteria:// v1 …) by scheme.
 	Ignored map[string]int
 	// Base64: the text was a base64-encoded link list.
 	Base64 bool
+	// Format: the text was a client config (subfmt), "" for links.
+	Format string
 }
 
 func (l *Links) IgnoredTotal() int {
@@ -29,8 +32,8 @@ func (l *Links) IgnoredTotal() int {
 	return n
 }
 
-// ParseLinks finds hysteria2:// and hy2:// links in text (one per line or
-// separated by spaces). A body without any "://" is tried as base64 (the
+// ParseLinks finds hysteria2://, hy2:// and vless:// links in text (one
+// per line or separated by spaces). A body without any "://" is tried as base64 (the
 // common subscription format).
 func ParseLinks(text string) Links {
 	res := Links{Ignored: map[string]int{}}
@@ -47,7 +50,7 @@ func ParseLinks(text string) Links {
 		if scheme == "http" || scheme == "https" {
 			continue // a web address in a text, not a share link
 		}
-		if scheme != "hysteria2" && scheme != "hy2" {
+		if !slices.Contains(hysteria.LinkSchemes, scheme) {
 			res.Ignored[scheme]++
 			continue
 		}

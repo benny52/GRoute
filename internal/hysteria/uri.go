@@ -1,14 +1,23 @@
 package hysteria
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/lardan099/hyroute/internal/hy2uri"
+	"github.com/lardan099/hyroute/internal/vless"
 )
 
+// LinkSchemes are the share link schemes ParseURI reads.
+var LinkSchemes = []string{"hysteria2", "hy2", "vless"}
+
 // ParseURI parses hysteria2:// and hy2:// share links (see hy2uri.Parse
-// for the accepted variants) into a profile.
+// for the accepted variants) and vless:// ones (vless.Parse) into a
+// profile.
 func ParseURI(s string) (p Profile, warnings []string, err error) {
+	if scheme, _, _ := strings.Cut(strings.TrimSpace(s), "://"); strings.EqualFold(scheme, "vless") {
+		return parseVLESS(s)
+	}
 	l, warnings, err := hy2uri.Parse(s)
 	if err != nil {
 		return p, nil, err
@@ -42,10 +51,30 @@ func ParseURI(s string) (p Profile, warnings []string, err error) {
 	return p, warnings, p.Validate()
 }
 
+func parseVLESS(s string) (p Profile, warnings []string, err error) {
+	l, warnings, err := vless.Parse(s)
+	if err != nil {
+		return p, nil, err
+	}
+	p = Profile{
+		Name:        l.Name,
+		Host:        l.Host,
+		Ports:       strconv.Itoa(l.Port),
+		Protocol:    ProtoVLESS,
+		VLESS:       l.Settings,
+		PinServerIP: true,
+	}
+	return p, warnings, p.Validate()
+}
+
 // URI exports the profile in the official format. Only connection
 // parameters are included (bandwidth, hop intervals etc. are not part of the
 // share-link spec).
 func (p *Profile) URI() string {
+	if p.IsVLESS() {
+		port, _ := VLESSPort(p.Ports)
+		return vless.Link{Name: p.Name, Host: p.Host, Port: port, Settings: p.VLESS}.String()
+	}
 	return hy2uri.Link{
 		Name:         p.Name,
 		Auth:         p.Auth,

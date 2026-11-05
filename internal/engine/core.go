@@ -932,8 +932,8 @@ func (c *Core) decide(p *packet.Packet, addr *divert.Address, proto uint8, key n
 }
 
 // exclusion is the mandatory exclusion (docs/architecture/interception.md) that a flow of a
-// known owner falls under, if any: HyRoute itself, the Hysteria processes
-// it started, and the Windows DNS client (Dnscache), which resolves the
+// known owner falls under, if any: HyRoute itself, the Hysteria and Xray
+// processes it started, and the Windows DNS client (Dnscache), which resolves the
 // Hysteria servers: plain DNS on port 53, and DNS over HTTPS (TCP 443) or
 // TLS (TCP 853) to the system's DNS servers when Windows encrypts DNS.
 // Dnscache may share its svchost with other services, whose HTTPS to

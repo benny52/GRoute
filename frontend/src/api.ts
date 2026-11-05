@@ -63,6 +63,37 @@ export interface Profile {
   quic: Record<string, unknown>;
   fastOpen?: boolean;
   pinServerIP: boolean;
+  // '' (Hysteria 2) or 'vless' (run by Xray): a VLESS server uses host,
+  // ports (one), pinServerIP and vless; the Hysteria fields stay empty.
+  protocol?: string;
+  vless?: VLESSSettings;
+}
+
+// The VLESS part of a server (internal/vless.Settings).
+export interface VLESSSettings {
+  id: string;
+  flow?: string;
+  encryption?: string;
+  network?: string; // '' raw | ws | grpc | httpupgrade | xhttp | kcp
+  security?: string; // '' | tls | reality
+  sni?: string;
+  fingerprint?: string;
+  alpn?: string;
+  ech?: string;
+  pinSHA256?: string;
+  verifyName?: string;
+  publicKey?: string;
+  shortId?: string;
+  spiderX?: string;
+  mldsa65Verify?: string;
+  headerType?: string;
+  host?: string;
+  path?: string;
+  serviceName?: string;
+  authority?: string;
+  mode?: string;
+  extra?: string;
+  seed?: string;
 }
 
 export interface ProfileSummary {
@@ -74,6 +105,9 @@ export interface ProfileSummary {
   sni: string;
   insecure: boolean;
   pinned: boolean;
+  protocol: string; // hysteria2 | vless
+  transport: string; // VLESS: "REALITY", "WS · TLS" …
+  flow: string; // VLESS flow, '' none
   main: boolean;
   source: string;
   sourceName: string;
@@ -506,6 +540,7 @@ export interface SubPreview {
   warnings: string[];
   errors: string[];
   base64: boolean;
+  format: string; // "Clash", "sing-box", "Xray" when the subscription is a client config
   // subinfo: the panel's figures and the update interval it advises (hours, 0 = none)
   info: SubInfo | null;
   updateHours: number;

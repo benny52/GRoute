@@ -358,7 +358,7 @@ func (c *Controller) groupViewsLocked() ([]GroupView, Session) {
 		for _, id := range g.Members {
 			mv := MemberView{ID: id, Name: c.profileName(id), State: "stopped"}
 			if p := c.profiles.Find(id); p != nil {
-				mv.FastOpen, mv.NotInSub = p.FastOpen, p.Missing
+				mv.FastOpen, mv.NotInSub = fastOpen(p), p.Missing
 			} else {
 				mv.Missing, mv.Name = true, "удалённый сервер"
 				v.Missing++

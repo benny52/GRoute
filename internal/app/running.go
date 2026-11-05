@@ -23,7 +23,7 @@ func (c *Controller) RunningApps(query string, all bool, limit int) []procinfo.R
 	var hits []scored
 	for _, r := range list {
 		name := strings.ToLower(r.Name)
-		if name == "hysteria.exe" || strings.HasPrefix(name, "hyroute") {
+		if name == "hysteria.exe" || name == "xray.exe" || strings.HasPrefix(name, "hyroute") {
 			continue
 		}
 		if r.System && !r.Windowed && !all && q == "" {

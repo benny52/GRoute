@@ -29,7 +29,7 @@ func TestFromRepoDeps(t *testing.T) {
 			t.Fatalf("%+v", f)
 		}
 	}
-	if names != "WinDivert.dll WinDivert64.sys hysteria.exe " {
+	if names != "WinDivert.dll WinDivert64.sys hysteria.exe xray.exe " {
 		t.Fatalf("%q", names)
 	}
 }

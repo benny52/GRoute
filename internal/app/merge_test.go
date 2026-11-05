@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/lardan099/hyroute/internal/hysteria"
+	"github.com/lardan099/hyroute/internal/vless"
 )
 
 func p(name, host, auth string) hysteria.Profile {
@@ -172,6 +173,8 @@ func TestMergeKeepsLocalSettings(t *testing.T) {
 	// must either travel in the share link or be kept by keepLocal.
 	fillZero(t, reflect.ValueOf(&old).Elem())
 	old.PinServerIP, old.Missing = false, false // a parsed link has PinServerIP=true
+	// The VLESS fields are the other protocol's (TestMergeKeepsLocalSettingsVLESS).
+	old.Protocol, old.VLESS = "", vless.Settings{}
 	fresh, _, err := hysteria.ParseURI(old.URI())
 	if err != nil {
 		t.Fatal(err)
@@ -256,5 +259,33 @@ func fillZero(t *testing.T, v reflect.Value) {
 		default:
 			t.Fatalf("%s: unhandled kind %s", v.Type().Field(i).Name, f.Kind())
 		}
+	}
+}
+
+const vlessLink = "vless://5f0b7c1e-1234-4abc-9def-0123456789ab@nl.example:443?flow=xtls-rprx-vision&security=reality&sni=www.example.org&fp=chrome&pbk=Z84J2IelR9ch3k8VtlVhhs5ycBUlXA7wHBWcBrjqnAw&sid=ab#NL"
+
+// Of a VLESS server only IP pinning is the user's; a server that changes
+// protocol keeps no Hysteria setting.
+func TestMergeKeepsLocalSettingsVLESS(t *testing.T) {
+	src := "sub:s1"
+	old, _, err := hysteria.ParseURI(vlessLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.ID, old.Source, old.PinServerIP = "x", src, false
+	fresh, _, _ := hysteria.ParseURI(strings.Replace(vlessLink, "sid=ab", "sid=cd", 1))
+	none := func(string) bool { return false }
+	list, st := mergeSubscription([]hysteria.Profile{old}, src, []hysteria.Profile{fresh}, none, newID)
+	if st.Updated != 1 || list[0].ID != "x" || list[0].VLESS.ShortID != "cd" || list[0].PinServerIP {
+		t.Fatalf("%+v %+v", st, list)
+	}
+	// The same server, now Hysteria 2 (matched by name): the Hysteria
+	// settings start empty, and the profile is valid.
+	hy := hysteria.Profile{ID: "y", Name: "DE", Host: "de.example", Ports: "443", Auth: "a", Source: src,
+		Bandwidth: hysteria.Bandwidth{Up: "10 mbps"}, PinServerIP: true}
+	fresh, _, _ = hysteria.ParseURI(strings.NewReplacer("nl.example", "de.example", "#NL", "#DE").Replace(vlessLink))
+	list, _ = mergeSubscription([]hysteria.Profile{hy}, src, []hysteria.Profile{fresh}, none, newID)
+	if x := list[0]; x.ID != "y" || !x.IsVLESS() || x.Bandwidth.Up != "" || x.Validate() != nil {
+		t.Fatalf("%+v %v", x, x.Validate())
 	}
 }
