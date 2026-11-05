@@ -92,6 +92,9 @@ type Controller struct {
 	// Runners starts Hysteria for profile checks outside a session (nil =
 	// session.RunnerFactory(Base)).
 	Runners tunnels.Factory
+	// Device identifies this computer to subscription panels that limit
+	// devices (DeviceInfo; nil sends nothing).
+	Device func(host string) DeviceInfo
 	// Fetch overrides the subscription download (tests).
 	Fetch func(ctx context.Context, url string) (FetchResult, error)
 	// KillSwitch closes the internet when routing stops without a

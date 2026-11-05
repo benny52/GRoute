@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -47,6 +49,42 @@ type FetchResult struct {
 	// ViaVPN: the direct download failed and this one went through the
 	// main server's tunnel.
 	ViaVPN bool
+}
+
+// DeviceInfo is what panels that limit a subscription's devices
+// (Remnawave's «HWID device limit», and panels copying it) want to see,
+// as Happ, v2rayTun and Hiddify send it: without x-hwid such a panel
+// answers with a placeholder server («Приложение не поддерживается»).
+type DeviceInfo struct {
+	HWID      string // x-hwid ("" sends no device headers)
+	OS        string // x-device-os
+	OSVersion string // x-ver-os
+	Model     string // x-device-model
+}
+
+func (d DeviceInfo) setHeaders(h http.Header) {
+	if d.HWID == "" {
+		return
+	}
+	h.Set("X-Hwid", d.HWID)
+	for k, v := range map[string]string{"X-Device-Os": d.OS, "X-Ver-Os": d.OSVersion, "X-Device-Model": d.Model} {
+		if v != "" {
+			h.Set(k, v)
+		}
+	}
+}
+
+// DeviceID is this computer's ID for the panel at host: a hash of the
+// machine's own ID (Windows' MachineGuid) and the host. The same for every
+// download from that panel, also after HyRoute is reinstalled; another for
+// every other panel, so that panels cannot match their users by it; and
+// never the machine ID itself.
+func DeviceID(machineID, host string) string {
+	if machineID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("HyRoute device\x00" + strings.ToLower(strings.TrimSpace(machineID)) + "\x00" + strings.ToLower(host)))
+	return hex.EncodeToString(sum[:16])
 }
 
 // directTransport is http.DefaultTransport without a proxy: HyRoute's own
@@ -113,6 +151,9 @@ func (c *Controller) httpFetch(ctx context.Context, rawURL string) (FetchResult,
 	}
 	req.Header.Set("User-Agent", "HyRoute/"+c.Version)
 	req.Header.Set("Accept", "text/plain, */*")
+	if c.Device != nil {
+		c.Device(u.Hostname()).setHeaders(req.Header)
+	}
 	resp, err := subClient().Do(req)
 	viaVPN := false
 	if failed := err != nil || resp.StatusCode >= 500; failed && u.Scheme == "https" {
@@ -199,6 +240,10 @@ func parseSubscription(body []byte) (Links, error) {
 	}
 	t := strings.TrimSpace(string(body))
 	switch {
+	case len(l.Notices) > 0:
+		// The panel says why it sent no servers: device limit, an
+		// expired account, an app it does not serve.
+		return l, fmt.Errorf("панель прислала вместо серверов сообщение: «%s»", strings.Join(l.Notices, "», «"))
 	case t == "":
 		return l, errors.New("подписка пустая")
 	case strings.HasPrefix(strings.ToLower(t), "<!doctype") || strings.HasPrefix(strings.ToLower(t), "<html"):

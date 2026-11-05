@@ -207,6 +207,7 @@ func main() {
 	}
 
 	ctl.Version = version
+	ctl.Device = deviceInfo
 	coreMgr := &core.Manager{
 		Dir:     core.DefaultDir("core"),
 		Bundled: filepath.Join(runtimeDir, "hysteria.exe"),

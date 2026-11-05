@@ -3,6 +3,8 @@ package app
 import (
 	"encoding/base64"
 	"fmt"
+	"net/netip"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -22,6 +24,9 @@ type Links struct {
 	Base64 bool
 	// Format: the text was a client config (subfmt), "" for links.
 	Format string
+	// Notices are the texts of placeholder servers (panelNotice): what
+	// the panel says instead of, or next to, the servers.
+	Notices []string
 }
 
 func (l *Links) IgnoredTotal() int {
@@ -54,6 +59,10 @@ func ParseLinks(text string) Links {
 			res.Ignored[scheme]++
 			continue
 		}
+		if msg, ok := panelNotice(f); ok {
+			res.Notices = append(res.Notices, msg)
+			continue
+		}
 		n++
 		p, warns, err := hysteria.ParseURI(f)
 		label := p.Name
@@ -72,6 +81,9 @@ func ParseLinks(text string) Links {
 		}
 		res.Profiles = append(res.Profiles, p)
 	}
+	for _, m := range res.Notices {
+		res.Warnings = append(res.Warnings, "сообщение панели: «"+m+"»")
+	}
 	if res.Warnings == nil {
 		res.Warnings = []string{}
 	}
@@ -79,6 +91,26 @@ func ParseLinks(text string) Links {
 		res.Errors = []string{}
 	}
 	return res
+}
+
+// panelNotice reports a placeholder server: a link to 0.0.0.0 or ::
+// (or to port 1 of the loopback) is no server, but a panel's message in
+// its name, as Remnawave and Marzban send «Приложение не поддерживается»,
+// «Подписка истекла» or the days left.
+func panelNotice(link string) (string, bool) {
+	u, err := url.Parse(link)
+	if err != nil {
+		return "", false
+	}
+	a, err := netip.ParseAddr(u.Hostname())
+	if err != nil || !(a.IsUnspecified() || a.IsLoopback() && u.Port() == "1") {
+		return "", false
+	}
+	msg := strings.TrimSpace(u.Fragment)
+	if msg == "" {
+		msg = "без текста"
+	}
+	return msg, true
 }
 
 // linkStart finds "scheme://" at the start of a line or after whitespace

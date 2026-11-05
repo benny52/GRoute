@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -804,5 +807,48 @@ func TestParseSubscriptionClash(t *testing.T) {
 	if err != nil || l.Format != "Clash" || len(l.Profiles) != 2 || !l.Profiles[0].IsVLESS() || l.Profiles[1].IsVLESS() ||
 		l.Profiles[0].Name != "NL" || l.Ignored["vmess"] != 1 {
 		t.Fatalf("%+v %v", l, err)
+	}
+}
+
+// A panel's placeholder server is its message, not a server: alone it is
+// the error, next to servers a warning.
+func TestParseSubscriptionPanelNotice(t *testing.T) {
+	stub := "vless://00000000-0000-0000-0000-000000000000@0.0.0.0:1?encryption=none&type=tcp&security=none#%D0%9F%D1%80%D0%B8%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D0%B5%20%D0%BD%D0%B5%20%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%B8%D0%B2%D0%B0%D0%B5%D1%82%D1%81%D1%8F"
+	enc := base64.StdEncoding.EncodeToString([]byte(stub))
+	_, err := parseSubscription([]byte(enc))
+	if err == nil || err.Error() != "панель прислала вместо серверов сообщение: «Приложение не поддерживается»" {
+		t.Fatalf("%v", err)
+	}
+	l, err := parseSubscription([]byte("hy2://a@de1.example:443#DE\nvless://x@0.0.0.0:1#%D0%9E%D1%81%D1%82%D0%B0%D0%BB%D0%BE%D1%81%D1%8C%2062%20%D0%B4%D0%BD%D1%8F\n"))
+	if err != nil || len(l.Profiles) != 1 || len(l.Errors) != 0 || len(l.Warnings) != 1 || l.Warnings[0] != "сообщение панели: «Осталось 62 дня»" {
+		t.Fatalf("%+v %v", l, err)
+	}
+}
+
+// Device headers: one ID per machine and panel, never the machine ID.
+func TestDeviceHeaders(t *testing.T) {
+	a, b := DeviceID("{A-GUID}", "panel.example"), DeviceID("{a-guid}", "PANEL.example")
+	if a == "" || a != b || len(a) != 32 || strings.Contains(a, "guid") {
+		t.Fatalf("%q %q", a, b)
+	}
+	if DeviceID("{A-GUID}", "other.example") == a || DeviceID("", "panel.example") != "" {
+		t.Fatal("IDs of panels must differ; no machine ID, no device ID")
+	}
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		fmt.Fprintln(w, "hy2://a@de1.example:443#DE")
+	}))
+	defer srv.Close()
+	c, _ := newCtl(t)
+	c.Device = func(host string) DeviceInfo {
+		return DeviceInfo{HWID: DeviceID("m", host), OS: "Windows", OSVersion: "10.0.26100", Model: "PC"}
+	}
+	if _, err := c.httpFetch(t.Context(), srv.URL+"/sub/token"); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("X-Hwid") != DeviceID("m", "127.0.0.1") || got.Get("X-Device-Os") != "Windows" || got.Get("X-Ver-Os") != "10.0.26100" ||
+		got.Get("X-Device-Model") != "PC" || !strings.HasPrefix(got.Get("User-Agent"), "HyRoute/") {
+		t.Fatalf("%v", got)
 	}
 }
