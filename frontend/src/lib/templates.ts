@@ -1,11 +1,12 @@
 // Ready-made rules. Services use lists from the rule database
 // (geosite:/geoip:), which are maintained upstream and updated by HyRoute,
 // so a template never goes stale when a service adds a new CDN domain.
-// Apps are exe names. A template names programs or sites, never both: a
+// Apps are Windows exe names (on macOS without .exe, tplApps). A template names programs or sites, never both: a
 // rule with both matches only when those programs open those sites, and a
 // program such as Discord (voice by IP) or Telegram needs all its traffic
 // through the VPN.
 import { cleanSettings, newRuleID, type Action, type Rule, type RulesConfig, type Settings } from '../api';
+import { ui } from '../state.svelte';
 
 export interface Template {
   id: string;
@@ -15,6 +16,22 @@ export interface Template {
   domains: string[];
   action?: Action; // default: tunnel
   group: 'Сервисы' | 'Россия' | 'Полезное';
+  windows?: boolean; // of use on Windows only: not offered on macOS
+}
+
+// The templates this system is offered.
+export function shownTemplates(): Template[] {
+  return templates.filter((t) => !(ui.mac && t.windows));
+}
+
+// tplApps: a template's programs as this system names them (macOS
+// executables have no .exe: Discord.app runs Contents/MacOS/Discord).
+export function tplApps(t: Template): string[] {
+  return (t.apps ?? []).map((a) => (ui.mac ? a.replace(/\.exe$/i, '') : a));
+}
+
+export function tplHint(t: Template): string {
+  return ui.mac ? t.hint.replace(/\.exe\b/gi, '') : t.hint;
 }
 
 export const templates: Template[] = [
@@ -63,14 +80,14 @@ export const templates: Template[] = [
 
   { id: 'lan', name: 'Локальная сеть', hint: 'роутер, принтер, NAS → напрямую', domains: ['geoip:private'], action: 'direct', group: 'Полезное' },
   { id: 'ads', name: 'Реклама', hint: 'рекламные сети → блок', domains: ['geosite:category-ads-all'], action: 'block', group: 'Полезное' },
-  { id: 'telemetry', name: 'Телеметрия Windows', hint: 'сбор данных Microsoft → блок', domains: ['geosite:win-spy'], action: 'block', group: 'Полезное' },
+  { id: 'telemetry', name: 'Телеметрия Windows', hint: 'сбор данных Microsoft → блок', domains: ['geosite:win-spy'], action: 'block', group: 'Полезное', windows: true },
 ];
 
 export function ruleFromTemplate(t: Template): Rule {
   return {
     id: newRuleID(), // conn-rules: rules made in the UI get an ID
     name: t.name,
-    apps: (t.apps ?? []).map((a) => ({ pattern: a, inheritChildren: true })),
+    apps: tplApps(t).map((a) => ({ pattern: a, inheritChildren: true })),
     domains: [...t.domains],
     action: t.action ?? 'tunnel',
     profile: '',

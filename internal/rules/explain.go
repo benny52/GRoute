@@ -75,7 +75,7 @@ func Explain(c Config, main string, q Query) Explanation {
 		proc = &procinfo.Info{Name: strings.ToLower(filepath.Base(strings.ReplaceAll(app, `\`, "/")))}
 		if pathKnown {
 			proc.Path = app
-		} else if !strings.ContainsAny(proc.Name, ".*?") && !nameRule(c, proc.Name) {
+		} else if !exeOptional && !strings.ContainsAny(proc.Name, ".*?") && !nameRule(c, proc.Name) {
 			// "chrome" is chrome.exe, as in rules text and the editor; a
 			// rule for this very name ("app:vmmem", System) keeps it.
 			proc.Name += ".exe"

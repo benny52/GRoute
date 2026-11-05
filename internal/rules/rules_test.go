@@ -481,3 +481,27 @@ func TestUserRegexpIgnoresCase(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// On macOS a Windows program name (a template, a rule from Windows)
+// matches the program without .exe; a name written without it is as is.
+func TestExeOptionalOnMac(t *testing.T) {
+	defer func(v bool) { exeOptional = v }(exeOptional)
+	discord := &procinfo.Info{Path: "/Applications/Discord.app/Contents/MacOS/Discord", Name: "discord"}
+	safari := &procinfo.Info{Path: "/Applications/Safari.app/Contents/MacOS/Safari", Name: "safari"}
+	cfg := Config{DefaultAction: Direct, Rules: []Rule{
+		{Name: "discord", Apps: []AppMatch{{Pattern: "Discord.exe"}}, Action: Tunnel},
+		{Name: "safari", Apps: []AppMatch{{Pattern: "Safari"}}, Action: Block},
+		{Name: "dotexe", Apps: []AppMatch{{Pattern: ".exe"}}, Action: Block},
+	}}
+	for _, mac := range []bool{true, false} {
+		exeOptional = mac
+		s := mustCompile(t, cfg)
+		r := s.EvaluateNoDomain(sub(discord, 6))
+		if (r.Rule == "discord") != mac {
+			t.Fatalf("mac=%v: %+v", mac, r)
+		}
+		if r := s.EvaluateNoDomain(sub(safari, 6)); r.Rule != "safari" {
+			t.Fatalf("mac=%v: %+v", mac, r)
+		}
+	}
+}

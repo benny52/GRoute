@@ -6,7 +6,7 @@
   import { onMount } from 'svelte';
   import { api, errText, plural, cleanSettings, cleanFallback, cleanRule, type Action, type Rule, type Settings, type RunningApp } from '../api';
   import { ui, hide, mainTarget, mainText, targetText } from '../state.svelte';
-  import { templates, ruleFromTemplate, type Template } from './templates';
+  import { templates, ruleFromTemplate, tplHint, type Template } from './templates';
   import { itemLabel, isSpecial, isAddress, shortLabel, loadGeo } from '../geo.svelte';
   import { appLabel } from '../ruletitle';
   import Icon from './Icon.svelte';
@@ -103,10 +103,12 @@
     },
     { id: 'ru-all', title: 'Все российские сайты', hint: 'зона .ru, Яндекс, VK, российские сети: открываются быстрее и не тратят трафик VPN', rules: [tpl('ru-all')] },
   ];
-  const blockTiles: Tile[] = [
+  const allBlockTiles: Tile[] = [
     { id: 'ads', title: 'Реклама', hint: 'рекламные сети в браузере и программах. Если из-за этого сломается какой-то сайт, правило можно выключить', rules: [tpl('ads')] },
     { id: 'telemetry', title: 'Телеметрия Windows', hint: 'сбор данных Microsoft. Может мешать обновлениям Windows и магазину приложений', rules: [tpl('telemetry')] },
   ];
+  // Windows telemetry is not offered on macOS.
+  const blockTiles = $derived(ui.mac ? allBlockTiles.filter((t) => t.id !== 'telemetry') : allBlockTiles);
   const tiles = $derived(base === 'all' ? directLists : services);
 
   function toggle(list: string[], id: string): string[] {
@@ -128,7 +130,7 @@
   async function browse() {
     try {
       const path = await api.BrowseExe();
-      if (path) addApp(path, path.split('\\').pop()?.replace(/\.exe$/i, '') ?? path);
+      if (path) addApp(path, path.split(/[\\/]/).pop()?.replace(/\.exe$/i, '') ?? path);
     } catch (e) {
       error = errText(e);
     }
@@ -251,7 +253,7 @@
   // What a rule takes, in words: a template's hint, else its items.
   function ruleText(r: Rule): string {
     const t = [...templates, aiSites].find((x) => x.name === r.name && x.hint);
-    if (t) return t.hint.replace(/ → .*$/, '');
+    if (t) return tplHint(t).replace(/ → .*$/, '');
     return [...(r.apps ?? []).map((a) => appLabel(a.pattern)), ...(r.domains ?? []).map((d) => (itemLabel(d)?.geo ? `«${itemLabel(d)!.text}»` : hide(shortLabel(d))))].join(', ');
   }
 
@@ -442,7 +444,7 @@
         <button onclick={() => (pickingApps = true)}><Icon name="app" size={16} />Выбрать из запущенных…</button>
         <button onclick={browse}><Icon name="folder" size={16} />Найти файл программы…</button>
       </div>
-      <p class="muted small">Нужной программы нет в списке запущенных — запустите её и откройте список снова, или найдите её .exe-файл.</p>
+      <p class="muted small">Нужной программы нет в списке запущенных — запустите её и откройте список снова, или найдите её {ui.mac ? 'в «Программах»' : '.exe-файл'}.</p>
       {#if apps.length}
         <div class="items">
           {#each apps as a, i (a.pattern)}

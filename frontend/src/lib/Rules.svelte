@@ -13,7 +13,7 @@
   import RouteWizard from './RouteWizard.svelte';
   import RulesetBar, { showSwitchResult, showRulesetError } from './RulesetBar.svelte';
   import RulesetDialog from './RulesetDialog.svelte';
-  import { templates, ruleFromTemplate, schemes, applyScheme, schemeTemplates, type Scheme } from './templates';
+  import { shownTemplates, tplApps, tplHint, ruleFromTemplate, schemes, applyScheme, schemeTemplates, type Scheme } from './templates';
   import { itemLabel, loadGeo, geo } from '../geo.svelte';
   import { ruleTitle as title, appLabel, siteLabel, locateRule, sameRule } from '../ruletitle';
   import { toast } from '../toast.svelte';
@@ -654,7 +654,7 @@
         {#each tplGroups as g}
           <div class="tgroup">{g}</div>
           <div class="tpls">
-            {#each templates.filter((t) => t.group === g) as t (t.id)}
+            {#each shownTemplates().filter((t) => t.group === g) as t (t.id)}
               {@const miss = missingLists(t.domains)}
               <button
                 class="tpl"
@@ -663,8 +663,8 @@
                   openEditor(-1, ruleFromTemplate(t), `Новое правило: ${t.name}`);
                 }}
               >
-                <b>{t.name}</b><span class="muted small">{t.hint}</span>
-                <span class="faint small mono">{[...(t.apps ?? []), ...t.domains].join(' ')}</span>
+                <b>{t.name}</b><span class="muted small">{tplHint(t)}</span>
+                <span class="faint small mono">{[...tplApps(t), ...t.domains].join(' ')}</span>
                 {#if miss}<span class="warn-t small"><Icon name="alert" size={12} /> {miss}</span>{/if}
               </button>
             {/each}

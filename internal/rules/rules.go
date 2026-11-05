@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -194,9 +195,15 @@ const (
 type appPat struct {
 	kind    string // name, path, glob
 	app     string // normalized pattern
+	bare    string // name: app without ".exe" where exeOptional, else ""
 	inherit bool
 	src     string
 }
+
+// exeOptional: macOS executables have no extension, so a program name
+// written for Windows ("discord.exe": the templates, rules carried over
+// from Windows) also matches the program without it.
+var exeOptional = runtime.GOOS == "darwin"
 
 type domPat struct {
 	kind domainKind
@@ -413,7 +420,11 @@ func compileRule(i int, r Rule, g Geo) (compiled, error) {
 			ap.kind = AppKind(p)
 		}
 		switch ap.kind {
-		case "name", "path", "glob":
+		case "name":
+			if b, ok := strings.CutSuffix(ap.app, ".exe"); ok && b != "" && exeOptional {
+				ap.bare = b
+			}
+		case "path", "glob":
 		default:
 			return cr, fmt.Errorf("%s: неизвестный тип программы %q", cr.name, a.Kind)
 		}
@@ -504,7 +515,7 @@ func (a *appPat) matchChain(p *procinfo.Info) bool {
 func (a *appPat) matchOne(p *procinfo.Info) bool {
 	switch a.kind {
 	case "name":
-		return p.Name != "" && p.Name == a.app
+		return p.Name != "" && (p.Name == a.app || p.Name == a.bare)
 	case "path":
 		return p.Path != "" && normPath(p.Path) == a.app
 	case "glob":
