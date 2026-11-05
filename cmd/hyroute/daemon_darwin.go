@@ -21,6 +21,7 @@ import (
 	"github.com/lardan099/hyroute/internal/session"
 	"github.com/lardan099/hyroute/internal/store"
 	"github.com/lardan099/hyroute/internal/sysdns"
+	"github.com/lardan099/hyroute/internal/update"
 )
 
 // runDaemon is the service: launchd starts it as root at boot
@@ -89,8 +90,10 @@ func runDaemon(verbose, stub bool) {
 	// The cores: the bundled copies or updates (darwin builds of this Mac's
 	// architecture, core/kinds_darwin.go), in root's data folder.
 	client := &release.Client{UserAgent: "HyRoute/" + version}
-	coreMgr := &core.Manager{Dir: filepath.Join(dataDir, "core"), Bundled: hysteriaPath, Client: client, Version: hysteria.ExeVersion}
-	xrayMgr := &core.Manager{Kind: core.Xray, Dir: filepath.Join(dataDir, "xray"), Bundled: xrayPath, Client: client,
+	hyKind, xrayKind := core.MacKinds()
+	update.Platform = update.PlatformMac // HyRoute's own macOS package
+	coreMgr := &core.Manager{Kind: hyKind, Dir: filepath.Join(dataDir, "core"), Bundled: hysteriaPath, Client: client, Version: hysteria.ExeVersion}
+	xrayMgr := &core.Manager{Kind: xrayKind, Dir: filepath.Join(dataDir, "xray"), Bundled: xrayPath, Client: client,
 		Version: hysteria.XrayVersion, Test: ctl.TestXray}
 	ctl.Base.Hysteria, ctl.Base.Xray = coreMgr.Path, xrayMgr.Path
 	ctl.CoreVersion = func() string { return coreMgr.Info().Version }

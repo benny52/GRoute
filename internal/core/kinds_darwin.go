@@ -4,14 +4,17 @@ package core
 
 import "runtime"
 
-// On macOS the cores are the darwin builds of the Mac's own architecture
-// (the service runs the slice of the universal binary that fits it).
-func init() {
-	Hysteria.Exe = "hysteria"
-	Hysteria.Asset = "hysteria-darwin-" + runtime.GOARCH
-	Xray.Exe, Xray.Member = "xray", "xray"
-	Xray.Asset = "Xray-macos-64.zip"
+// MacKinds are the cores for macOS: the darwin builds of the Mac's own
+// architecture (the service runs the slice of the universal binary that
+// fits it).
+func MacKinds() (hysteria, xray Kind) {
+	hysteria, xray = Hysteria, Xray
+	hysteria.Exe = "hysteria"
+	hysteria.Asset = "hysteria-darwin-" + runtime.GOARCH
+	xray.Exe, xray.Member = "xray", "xray"
+	xray.Asset = "Xray-macos-64.zip"
 	if runtime.GOARCH == "arm64" {
-		Xray.Asset = "Xray-macos-arm64-v8a.zip"
+		xray.Asset = "Xray-macos-arm64-v8a.zip"
 	}
+	return hysteria, xray
 }
