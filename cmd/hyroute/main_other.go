@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 // HyRoute is a Windows program; this stub keeps `go build ./...` and
 // `go vet ./...` working on other systems.

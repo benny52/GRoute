@@ -54,6 +54,16 @@ jobs:
         run: |
           go test -c -o "$RUNNER_TEMP/session.test" ./internal/session
           sudo HYROUTE_TUN_TEST=1 "$RUNNER_TEMP/session.test" -test.run TUNSession -test.v -test.timeout 180s
+      # HyRoute.app (universal) from this commit, for testers: the run's
+      # artifacts.
+      - name: App bundle
+        run: scripts/build-macos.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: HyRoute-macos
+          path: dist/HyRoute-*-macos-universal.zip
+          if-no-files-found: error
+          retention-days: 14
   linux:
     runs-on: ubuntu-latest
     steps:

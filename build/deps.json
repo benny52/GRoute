@@ -25,6 +25,32 @@
       "xray.exe": "d5b558191cccb1e92a5772b68b8cab67717b26f634b0f15153215f65ae982a7e"
     }
   },
+  "macos": {
+    "hysteria": {
+      "version": "app/v2.12.3",
+      "amd64": {
+        "url": "https://github.com/apernet/hysteria/releases/download/app%2Fv2.12.3/hysteria-darwin-amd64",
+        "sha256": "cdbc8144cbdb19a535234a8ccb6afceaab3ddf03d0fb60c6e198e056d4f689a7"
+      },
+      "arm64": {
+        "url": "https://github.com/apernet/hysteria/releases/download/app%2Fv2.12.3/hysteria-darwin-arm64",
+        "sha256": "9065dc5dc9cd75f7ba881f481e8cb77e7eae17139460ca09d399682ca6fad443"
+      }
+    },
+    "xray": {
+      "version": "v26.10.31",
+      "amd64": {
+        "url": "https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-macos-64.zip",
+        "sha256": "37c60b63c77ef5edcfb46a0d70349f7d96e0c132e6a356ead4fd20aeeacc5c75",
+        "xray": "2793e1aee9ec202df2a4e65dde7149f2dd3e092b0a595b594be1fb942a6e8db0"
+      },
+      "arm64": {
+        "url": "https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-macos-arm64-v8a.zip",
+        "sha256": "0a05dca3bd311b0bc5a89c7ce56350cab1e829e131e4b2bcd48eb304fac07e9a",
+        "xray": "9ddc3b0d912a8539285918e4fead4b60bbc449acdb639450ba068bc7efb983b7"
+      }
+    }
+  },
   "tools": {
     "goWinres": "v0.3.3"
   }

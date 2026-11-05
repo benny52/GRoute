@@ -318,19 +318,6 @@ func (g *GUI) cliLine() string {
 	return "Командная строка: только просмотр, канал работает"
 }
 
-// RulesJSON is «Правила текстом» → JSON of the profile the page shows (its
-// token; "" = the active one).
-func (g *GUI) RulesJSON(ruleset string) (string, error) {
-	b, err := g.ctl.RulesJSONFor(ruleset)
-	return string(b), err
-}
-
-// ParseRulesTextFor is the «Правила текстом» preview: replace = mode «Все
-// правила» (a pasted JSON's «Всё остальное» counts only then).
-func (g *GUI) ParseRulesTextFor(text string, replace bool) app.RulesTextResult {
-	return g.ctl.ParseRulesTextAs(text, "auto", replace)
-}
-
 // ctlBackend is ctlserver.API over the GUI and the controller: the calls
 // the window makes.
 type ctlBackend struct{ g *GUI }
