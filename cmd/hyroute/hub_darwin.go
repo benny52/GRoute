@@ -36,7 +36,10 @@ type winHost struct {
 
 	mu    sync.Mutex
 	peers []*uirpc.Peer // newest last: dialogs and the clipboard go to it
-	ln    net.Listener
+	// menubar: the peers that are the menu bar icon (they asked
+	// "client.menubar"): events go to them, dialogs never.
+	menubar map[*uirpc.Peer]bool
+	ln      net.Listener
 }
 
 var errNoWindow = errors.New("окно HyRoute закрыто")
@@ -109,7 +112,16 @@ func (h *winHost) serve(c *net.UnixConn) {
 	}
 	p := uirpc.New(c, c)
 	p.OnCall = h.answer
-	p.OnEvent = func(name string, args []json.RawMessage) {}
+	p.OnEvent = func(name string, args []json.RawMessage) {
+		if name == "client.menubar" {
+			h.mu.Lock()
+			if h.menubar == nil {
+				h.menubar = map[*uirpc.Peer]bool{}
+			}
+			h.menubar[p] = true
+			h.mu.Unlock()
+		}
+	}
 	h.mu.Lock()
 	h.peers = append(h.peers, p)
 	h.mu.Unlock()
@@ -121,6 +133,7 @@ func (h *winHost) serve(c *net.UnixConn) {
 			break
 		}
 	}
+	delete(h.menubar, p)
 	h.mu.Unlock()
 }
 
@@ -133,13 +146,16 @@ func (h *winHost) answer(method string, args []json.RawMessage) (any, error) {
 	return h.g.dispatch(method, args)
 }
 
+// current is the newest window (not a menu bar icon).
 func (h *winHost) current() *uirpc.Peer {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.peers) == 0 {
-		return nil
+	for i := len(h.peers) - 1; i >= 0; i-- {
+		if !h.menubar[h.peers[i]] {
+			return h.peers[i]
+		}
 	}
-	return h.peers[len(h.peers)-1]
+	return nil
 }
 
 func (h *winHost) isOpen() bool { return h.current() != nil }
@@ -169,6 +185,17 @@ func (h *winHost) notify(name string, args ...any) {
 func (h *winHost) open(string) {
 	if p := h.current(); p != nil {
 		go p.Call(context.Background(), "show")
+		return
+	}
+	// No window: the menu bar icon, the user's process, starts one.
+	h.mu.Lock()
+	var bars []*uirpc.Peer
+	for p := range h.menubar {
+		bars = append(bars, p)
+	}
+	h.mu.Unlock()
+	for _, p := range bars {
+		p.Notify("menubar.openWindow")
 	}
 }
 

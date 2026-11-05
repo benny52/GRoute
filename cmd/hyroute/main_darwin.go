@@ -23,6 +23,7 @@ func main() {
 	uninstall := flag.Bool("uninstall-service", false, "stop and remove the service (root)")
 	stub := flag.Bool("stub", false, "service: an in-process SOCKS5 stub instead of Hysteria (testing)")
 	verbose := flag.Bool("v", false, "service: debug logging")
+	menubar := flag.Bool("menubar", false, "be the menu bar icon (a launch agent starts it at login)")
 	flag.Parse()
 	switch {
 	case *daemon:
@@ -32,6 +33,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, "HyRoute:", err)
 			os.Exit(1)
 		}
+	case *menubar:
+		runMenubar()
 	case *uninstall:
 		if err := uninstallService(); err != nil {
 			fmt.Fprintln(os.Stderr, "HyRoute:", err)

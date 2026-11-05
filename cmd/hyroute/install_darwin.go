@@ -22,7 +22,31 @@ const (
 	serviceDir   = "/Library/Application Support/HyRoute/bin"
 	servicePlist = "/Library/LaunchDaemons/" + serviceLabel + ".plist"
 	serviceLog   = "/Library/Logs/HyRoute-service.log"
+	menubarLabel = "com.hyroute.menubar"
+	menubarPlist = "/Library/LaunchAgents/" + menubarLabel + ".plist"
 )
+
+// menubarText: the menu bar icon, for every user who signs in.
+const menubarText = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>` + menubarLabel + `</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>` + serviceDir + `/HyRoute</string>
+		<string>--menubar</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+</dict>
+</plist>
+`
 
 const plistText = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -88,7 +112,36 @@ func installService() error {
 	if out, err := exec.Command("/bin/launchctl", "bootstrap", "system", servicePlist).CombinedOutput(); err != nil {
 		return fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(string(out)))
 	}
+	// The menu bar icon: for every user at login, and now for the one at
+	// the screen (its old copy goes first).
+	if err := os.WriteFile(menubarPlist, []byte(menubarText), 0o644); err != nil {
+		return err
+	}
+	os.Chown(menubarPlist, 0, 0)
+	if uid := consoleUID(); uid != "" {
+		exec.Command("/bin/launchctl", "bootout", "gui/"+uid+"/"+menubarLabel).Run()
+		exec.Command("/bin/launchctl", "bootstrap", "gui/"+uid, menubarPlist).Run()
+	}
 	return nil
+}
+
+// consoleUID is the user signed in at the screen ("" for none).
+func consoleUID() string {
+	out, err := exec.Command("/usr/bin/stat", "-f", "%u", "/dev/console").Output()
+	uid := strings.TrimSpace(string(out))
+	if err != nil || uid == "" || uid == "0" {
+		return ""
+	}
+	return uid
+}
+
+// startMenubar (the window, as its user) brings the menu bar icon back
+// when it was hidden («Скрыть значок»).
+func startMenubar() {
+	uid := fmt.Sprint(os.Getuid())
+	if exec.Command("/bin/launchctl", "kickstart", "gui/"+uid+"/"+menubarLabel).Run() != nil {
+		exec.Command("/bin/launchctl", "bootstrap", "gui/"+uid, menubarPlist).Run()
+	}
 }
 
 // copyRootFile writes a root-owned executable copy, replacing dst whole
@@ -128,6 +181,10 @@ func uninstallService() error {
 	}
 	exec.Command("/bin/launchctl", "bootout", "system/"+serviceLabel).Run()
 	os.Remove(servicePlist)
+	if uid := consoleUID(); uid != "" {
+		exec.Command("/bin/launchctl", "bootout", "gui/"+uid+"/"+menubarLabel).Run()
+	}
+	os.Remove(menubarPlist)
 	// A block the service left (it stopped while connected) goes too.
 	(&killswitch.Switch{StateDir: filepath.Join("/var/root/Library/Application Support/HyRoute")}).Release()
 	killswitch.DeleteGroup()

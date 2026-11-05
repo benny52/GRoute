@@ -125,6 +125,7 @@ func runWindow() {
 		alert(err.Error())
 		os.Exit(1)
 	}
+	go startMenubar()
 	b := &Bridge{peer: peer}
 	peer.OnCall = b.answer
 	peer.OnEvent = func(name string, args []json.RawMessage) {

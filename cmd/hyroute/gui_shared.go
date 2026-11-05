@@ -357,3 +357,15 @@ func (g *GUI) RulesJSON(ruleset string) (string, error) {
 func (g *GUI) ParseRulesTextFor(text string, replace bool) app.RulesTextResult {
 	return g.ctl.ParseRulesTextAs(text, "auto", replace)
 }
+
+// RulesetsBrief, ConnectOrResume and SwitchRulesetFromTray serve the menu
+// bar icon on macOS (the Windows tray calls the controller itself).
+func (g *GUI) RulesetsBrief() app.RulesetsBrief { return g.ctl.RulesetsBrief() }
+func (g *GUI) ConnectOrResume() error {
+	_, err := g.ctl.ConnectOrResume()
+	return err
+}
+func (g *GUI) SwitchRulesetFromTray(id string) error {
+	_, err := g.ctl.SwitchRuleset(id, app.SourceTray, app.SwitchOptions{})
+	return err
+}
