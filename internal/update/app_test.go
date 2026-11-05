@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -42,7 +43,7 @@ func TestExtractAndVerifyApp(t *testing.T) {
 	if err != nil || m.Version != "v1.3.13" {
 		t.Fatalf("%+v %v", m, err)
 	}
-	if fi, _ := os.Stat(filepath.Join(dst, "HyRoute.app/Contents/MacOS/HyRoute")); fi.Mode()&0o111 == 0 {
+	if fi, _ := os.Stat(filepath.Join(dst, "HyRoute.app/Contents/MacOS/HyRoute")); runtime.GOOS != "windows" && fi.Mode()&0o111 == 0 {
 		t.Fatal("not executable")
 	}
 	for _, bad := range []string{"../evil", "HyRoute.app/../../evil", "/abs", "Other.app/x", `HyRoute.app\x`} {
