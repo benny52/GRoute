@@ -23,7 +23,9 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/lardan099/hyroute/frontend"
+	"github.com/lardan099/hyroute/internal/release"
 	"github.com/lardan099/hyroute/internal/uirpc"
+	"github.com/lardan099/hyroute/internal/update"
 )
 
 // Bridge is bound to the page: window.go.main.Bridge (frontend/src/api.ts),
@@ -58,6 +60,14 @@ func connectService() (*uirpc.Peer, error) {
 	c, err := net.Dial("unix", sockPath)
 	installed := false
 	if err != nil {
+		if _, ierr := os.Stat(servicePlist); ierr == nil {
+			// Installed but not answering yet: just started, or restarting
+			// after an update. It is given time before being installed
+			// again over itself.
+			c, err = waitService()
+		}
+	}
+	if err != nil {
 		if err := asAdmin("--install-service"); err != nil {
 			return nil, err
 		}
@@ -90,14 +100,61 @@ func connectService() (*uirpc.Peer, error) {
 	var v string
 	json.Unmarshal(r, &v)
 	if v != version+" "+build && !installed {
-		// Another version: this app's copy replaces it.
 		c.Close()
+		if svc, _, _ := strings.Cut(v, " "); release.Compare(svc, version) > 0 {
+			// A newer service: this app is older (its update could not
+			// replace it, or an old copy was opened). It updates itself
+			// and never puts its older service in place of the new one.
+			return nil, updateSelf(svc)
+		}
+		// Another version: this app's copy replaces it.
 		if err := asAdmin("--install-service"); err != nil {
 			return nil, err
 		}
 		return connectService()
 	}
 	return p, nil
+}
+
+// ownApp is the HyRoute.app this window runs from.
+func ownApp() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return ""
+	}
+	return filepath.Dir(filepath.Dir(filepath.Dir(exe)))
+}
+
+// updateSelf replaces this app with the service's copy of version svc
+// (appStageDir) and opens it; it returns only when that failed.
+func updateSelf(svc string) error {
+	app := ownApp()
+	m, err := update.VerifyApp(appStageDir)
+	if err == nil && release.Compare(m.Version, svc) != 0 {
+		err = fmt.Errorf("копия HyRoute.app службы версии %s", m.Version)
+	}
+	if err == nil {
+		err = replaceBundle(filepath.Join(appStageDir, update.AppBundle), app)
+	}
+	if err == nil {
+		reopen(app)
+		os.Exit(0)
+	}
+	return appNotUpdated(svc, err)
+}
+
+func appNotUpdated(svc string, err error) error {
+	return fmt.Errorf("служба HyRoute обновлена до %s, а это приложение — версия %s, и заменить его не получилось (%v). "+
+		"Скачайте HyRoute %s: https://github.com/%s/releases/latest — и замените им HyRoute.app в «Программах». Настройки сохранятся.",
+		svc, version, err, svc, updateRepo)
+}
+
+// reopen opens app once this process is gone.
+func reopen(app string) {
+	exec.Command("/bin/sh", "-c", `sleep 2; /usr/bin/open "$0"`, app).Start()
 }
 
 func waitService() (net.Conn, error) {
@@ -130,19 +187,29 @@ func runWindow() {
 	b := &Bridge{peer: peer}
 	peer.OnCall = b.answer
 	// The service updates this app: it is told where it runs from.
-	if exe, err := os.Executable(); err == nil {
-		if exe, err = filepath.EvalSymlinks(exe); err == nil {
-			peer.Notify("client.app", filepath.Dir(filepath.Dir(filepath.Dir(exe))))
-		}
+	if app := ownApp(); app != "" {
+		peer.Notify("client.app", app)
 	}
 	peer.OnEvent = func(name string, args []json.RawMessage) {
 		if name == "service.updated" {
-			// The new version opens once the service is back.
-			var app string
+			// The new version opens once the service is back. When the
+			// service could not replace the app (staged: its copy), the
+			// app replaces itself: macOS lets an app change its own bundle.
+			var app, staged string
 			if len(args) > 0 {
 				json.Unmarshal(args[0], &app)
 			}
+			if len(args) > 1 {
+				json.Unmarshal(args[1], &staged)
+			}
 			b.closing.Store(true)
+			if app != "" && staged != "" {
+				if err := replaceBundle(staged, app); err != nil {
+					m, _ := update.VerifyApp(filepath.Dir(staged))
+					alert(appNotUpdated(m.Version, err).Error())
+					app = ""
+				}
+			}
 			if app != "" {
 				exec.Command("/bin/sh", "-c", `sleep 4; /usr/bin/open "$0"`, app).Start()
 			}

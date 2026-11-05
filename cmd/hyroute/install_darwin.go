@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/lardan099/hyroute/internal/killswitch"
 )
@@ -20,6 +21,10 @@ import (
 const (
 	serviceLabel = "com.hyroute.service"
 	serviceDir   = "/Library/Application Support/HyRoute/bin"
+	// appStageDir holds a readable copy of the HyRoute.app the service was
+	// updated to: the window replaces its own app from it when the
+	// service may not (stageAppCopy).
+	appStageDir  = "/Library/Application Support/HyRoute/app"
 	servicePlist = "/Library/LaunchDaemons/" + serviceLabel + ".plist"
 	serviceLog   = "/Library/Logs/HyRoute-service.log"
 	menubarLabel = "com.hyroute.menubar"
@@ -86,8 +91,10 @@ func installService() error {
 	if _, err := killswitch.EnsureGroup(); err != nil {
 		return err
 	}
-	// Stop the old service first: its files are replaced.
+	// Stop the old service first: its files are replaced. bootout may
+	// return before the job is gone; it is waited for.
 	exec.Command("/bin/launchctl", "bootout", "system/"+serviceLabel).Run()
+	waitUnloaded(10 * time.Second)
 	if err := installFiles(exe, res); err != nil {
 		return err
 	}
@@ -95,8 +102,8 @@ func installService() error {
 		return err
 	}
 	os.Chown(servicePlist, 0, 0)
-	if out, err := exec.Command("/bin/launchctl", "bootstrap", "system", servicePlist).CombinedOutput(); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(string(out)))
+	if err := startService(); err != nil {
+		return err
 	}
 	// The menu bar icon: for every user at login, and now for the one at
 	// the screen (its old copy goes first).
@@ -109,6 +116,42 @@ func installService() error {
 		exec.Command("/bin/launchctl", "bootstrap", "gui/"+uid, menubarPlist).Run()
 	}
 	return nil
+}
+
+// serviceLoaded reports that launchd holds the service's job.
+func serviceLoaded() bool {
+	return exec.Command("/bin/launchctl", "print", "system/"+serviceLabel).Run() == nil
+}
+
+func waitUnloaded(d time.Duration) {
+	for deadline := time.Now().Add(d); serviceLoaded() && time.Now().Before(deadline); {
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// startService loads the service's job. bootstrap fails ("5: Input/output
+// error") while a job of that label is still loaded: an old one going
+// away is waited for, and one that stays is restarted from the new files
+// (kickstart -k) instead.
+func startService() error {
+	exec.Command("/bin/launchctl", "enable", "system/"+serviceLabel).Run() // a disabled job does not load
+	var last error
+	for try := 0; try < 3; try++ {
+		out, err := exec.Command("/bin/launchctl", "bootstrap", "system", servicePlist).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		last = fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(string(out)))
+		if serviceLoaded() {
+			out, err := exec.Command("/bin/launchctl", "kickstart", "-k", "system/"+serviceLabel).CombinedOutput()
+			if err == nil {
+				return nil
+			}
+			last = fmt.Errorf("launchctl kickstart: %v: %s", err, strings.TrimSpace(string(out)))
+		}
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("служба HyRoute не запустилась (журнал: %s): %w", serviceLog, last)
 }
 
 // installFiles copies HyRoute (exe) and the cores and hyroutectl (from
@@ -208,6 +251,7 @@ func uninstallService() error {
 		exec.Command("/bin/launchctl", "bootout", "gui/"+uid+"/"+menubarLabel).Run()
 	}
 	os.Remove(menubarPlist)
+	os.RemoveAll(appStageDir)
 	if cur, err := os.Readlink(hyroutectlLink); err == nil && cur == filepath.Join(serviceDir, "hyroutectl") {
 		os.Remove(hyroutectlLink)
 	}

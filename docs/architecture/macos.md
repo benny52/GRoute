@@ -123,10 +123,19 @@ HyRoute checks `HyRoute-<version>-macos-universal.zip` against
 SHA256SUMS, extracts `HyRoute.app` (`update.stageApp`: regular files
 under the bundle only) and checks its files and version (`VerifyApp`).
 Installing copies the service's files from the new bundle
-(`installFiles`), replaces the app the window runs from (`client.app`),
-leaves a reconnect marker when it was connected and exits; launchd
-starts the new service. The windows reopen the new app, the menu bar
-icon execs the new copy.
+(`installFiles`) and a copy of the bundle anyone can read to
+`/Library/Application Support/HyRoute/app` (`stageAppCopy`). From macOS
+13 App Management lets only the app itself change its bundle, root or
+not, so when the service cannot replace the app the window runs from
+(`client.app`), the window replaces it from that copy before it quits
+(`replaceBundle`). The service leaves a reconnect marker when it was
+connected and exits; launchd starts the new service. The windows reopen
+the new app, the menu bar icon execs the new copy. A window older than
+the service never installs its service over it: it replaces itself from
+the copy (`updateSelf`) or says where to download the new version.
+Installing the service waits for the old job to be gone, and when
+`launchctl bootstrap` still finds it loaded ("5: Input/output error")
+restarts it from the new files (`kickstart -k`).
 
 ## Not yet on macOS
 

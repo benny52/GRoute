@@ -99,6 +99,7 @@ func runDaemon(verbose, stub bool) {
 	ctl.CoreVersion = func() string { return coreMgr.Info().Version }
 	ctl.Updater = &app.Updater{Repo: updateRepo, Dir: filepath.Join(dataDir, "updates"), Core: coreMgr, Xray: xrayMgr, Client: client}
 	os.RemoveAll(ctl.Updater.Dir) // staging of an earlier run
+	dropStaleAppCopy()
 	ctl.ListRunning = procinfo.ListRunning
 	ctl.KillSwitch = &killswitch.Switch{GID: gid, StateDir: dataDir}
 	ctl.InitKillSwitch()

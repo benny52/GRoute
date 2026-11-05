@@ -18,6 +18,7 @@ import (
 
 	"github.com/lardan099/hyroute/internal/app"
 	"github.com/lardan099/hyroute/internal/core"
+	"github.com/lardan099/hyroute/internal/release"
 	"github.com/lardan099/hyroute/internal/uirpc"
 	"github.com/lardan099/hyroute/internal/update"
 )
@@ -151,11 +152,22 @@ func (g *GUI) ApplyAppUpdate() error {
 	if err := installFiles(exe, filepath.Join(bundle, "Contents", "Resources")); err != nil {
 		return fmt.Errorf("файлы службы не обновлены: %w", err)
 	}
+	// A copy everyone can read: the window replaces its app from it when
+	// the service cannot, and an older app opened later updates itself.
+	staged := ""
+	if err := stageAppCopy(bundle); err != nil {
+		g.ctl.Log.Warn("HyRoute.app copy for the window not made", "err", err)
+	} else {
+		staged = filepath.Join(appStageDir, update.AppBundle)
+	}
 	target := g.win.appPath()
 	if target != "" {
+		// From macOS 13 only the app itself may change its bundle
+		// («Управление приложениями»), not the service, root as it is.
 		if err := replaceBundle(bundle, target); err != nil {
-			g.ctl.Log.Warn("HyRoute.app not replaced: the service is updated, the app stays as it was", "app", target, "err", err)
-			target = ""
+			g.ctl.Log.Info("HyRoute.app not replaced by the service: the window replaces it", "app", target, "err", err)
+		} else {
+			staged = "" // done
 		}
 	}
 	g.ctl.StopNetModes()
@@ -166,12 +178,36 @@ func (g *GUI) ApplyAppUpdate() error {
 	g.ctl.Log.Info("installing update: the service restarts with the new version", "to", ver)
 	g.ctl.HoldKillSwitch()
 	g.ctl.Disconnect()
-	g.win.notify("service.updated", target)
+	g.win.notify("service.updated", target, staged)
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		g.quit() // launchd starts the new service (KeepAlive)
 	}()
 	return nil
+}
+
+// stageAppCopy copies the verified bundle to appStageDir, readable by
+// everyone, writable by root only.
+func stageAppCopy(bundle string) error {
+	os.RemoveAll(appStageDir)
+	if err := os.MkdirAll(appStageDir, 0o755); err != nil {
+		return err
+	}
+	dst := filepath.Join(appStageDir, update.AppBundle)
+	if out, err := exec.Command("/usr/bin/ditto", bundle, dst).CombinedOutput(); err != nil {
+		os.RemoveAll(appStageDir)
+		return fmt.Errorf("ditto: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	exec.Command("/usr/sbin/chown", "-R", "0:0", appStageDir).Run()
+	exec.Command("/bin/chmod", "-R", "go-w,a+rX", appStageDir).Run()
+	return nil
+}
+
+// dropStaleAppCopy removes a copy of another version than the service's.
+func dropStaleAppCopy() {
+	if m, err := update.VerifyApp(appStageDir); err != nil || release.Compare(m.Version, version) != 0 {
+		os.RemoveAll(appStageDir)
+	}
 }
 
 // replaceBundle puts the new HyRoute.app in the place of the one at
