@@ -388,7 +388,7 @@
     </p>
   </section>
 
-  {#if !ui.mac}<BrowserExtension />{/if}
+  <BrowserExtension />
 
   {#if ui.expert}<CLISettings />{/if}
 

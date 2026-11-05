@@ -135,6 +135,7 @@ func (g *GUI) systemLines() []string {
 		"Служба: " + info.ProgramDir,
 		"Данные: " + info.DataDir,
 		g.cliLine(),
+		g.browserLine(),
 	}
 	if len(info.Missing) > 0 {
 		lines = append(lines, "Нет файлов: "+strings.Join(info.Missing, ", "))
@@ -156,26 +157,6 @@ func (g *GUI) MoveToProgramFiles() error       { return errMac }
 func (g *GUI) OpenServerPanel() error {
 	return errors.New("панель серверов (hyroute-server) запускается на Windows или Linux")
 }
-
-// ---- Windows-only parts of «Настройки» ----
-
-type BrowserExtView struct {
-	On        bool   `json:"on"`
-	Installed bool   `json:"installed"`
-	Dir       string `json:"dir"`
-	Version   string `json:"version"`
-	Host      bool   `json:"host"`
-	Browsers  []any  `json:"browsers"`
-	Seen      int64  `json:"seen"`
-}
-
-func (g *GUI) BrowserExtInfo() BrowserExtView { return BrowserExtView{Browsers: []any{}} }
-func (g *GUI) InstallBrowserExt() (BrowserExtView, error) {
-	return g.BrowserExtInfo(), errMac
-}
-func (g *GUI) SetBrowserExtOn(bool) (BrowserExtView, error) { return g.BrowserExtInfo(), errMac }
-func (g *GUI) RemoveBrowserExt() (BrowserExtView, error)    { return g.BrowserExtInfo(), errMac }
-func (g *GUI) OpenBrowserExtensions(string) error           { return errMac }
 
 // ServiceVersion lets the window see whether the service is its own
 // version (else it installs its copy).

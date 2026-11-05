@@ -236,6 +236,28 @@ func (b *Bridge) answer(method string, args []json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return runtime.SaveFileDialog(ctx, o)
+	case "reveal":
+		// The browser extension's folder, in Finder.
+		var p string
+		if err := arg(0, &p); err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(p, "/Library/Application Support/HyRoute/") {
+			return nil, errors.New("показываются только папки HyRoute")
+		}
+		return nil, exec.Command("/usr/bin/open", "-R", p).Run()
+	case "open.browser":
+		var app, page string
+		if err := arg(0, &app); err != nil {
+			return nil, err
+		}
+		if err := arg(1, &page); err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(app, "/Applications/") || !strings.HasSuffix(app, ".app") || !strings.HasSuffix(page, "://extensions/") {
+			return nil, errors.New("открывается только страница расширений браузера")
+		}
+		return nil, exec.Command("/usr/bin/open", "-a", app, page).Run()
 	case "open":
 		var s string
 		if err := arg(0, &s); err != nil {

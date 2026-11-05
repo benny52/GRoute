@@ -111,6 +111,7 @@ func runDaemon(verbose, stub bool) {
 		fatal(fmt.Errorf("socket %s: %w", sockPath, err))
 	}
 	gui.applyCLI(gui.cliMode()) // hyroutectl
+	go gui.syncBrowserExt()
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	select {
