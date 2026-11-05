@@ -84,10 +84,54 @@ local namespaces (`sysdns.ParseScutil`).
 to both systems; `gui_darwin.go` the macOS ones and stubs for what only
 Windows has. The page asks `Platform()` and hides those parts.
 
+## Kill switch
+
+`internal/killswitch/killswitch_darwin.go`: a pf anchor (`com.apple/hyroute`)
+whose one rule set serves both states. It passes loopback, the local
+network, DHCP, the system resolver's DNS (`user _mdnsresponder`),
+HyRoute's TUN addresses and the sockets of group `_hyroute`, and blocks
+the rest. The service sets that group (created at its install,
+`EnsureGroup`) before it opens anything; the cores inherit it. While
+HyRoute routes, applications' traffic goes into its device and passes;
+once the service stops without a Disconnect, the device and its routes
+go and the block takes effect. pf is enabled with HyRoute's own reference
+(`pfctl -E`, the token kept in the data folder). CI loads the rules into
+the runner's pf (`TestPF`).
+
+## Menu bar icon
+
+`HyRoute --menubar` (`menubar_darwin.go`, fyne.io/systray, an accessory
+app without a Dock icon) is the user's process, started at login by
+`/Library/LaunchAgents/com.hyroute.menubar.plist`. It speaks to the
+service over its socket like the window, announcing itself with
+`client.menubar`: dialogs and the clipboard never go to it, and a request
+to show the window with none open is passed to it (it opens the app).
+
+## Command line and browser extension
+
+The service serves hyroutectl on `/var/run/hyroute-ctl.sock`
+(`ctl.ListenUnix`, peer credentials: root and group admin) with the
+Windows server and backend. hyroutectl checks the socket is root's. The
+browser extension is written to `/Library/Application Support/HyRoute`,
+its native messaging host manifests into the browsers' system-wide
+folders.
+
+## Updates
+
+The cores update from their darwin assets (`core/kinds_darwin.go`).
+HyRoute checks `HyRoute-<version>-macos-universal.zip` against
+SHA256SUMS, extracts `HyRoute.app` (`update.stageApp`: regular files
+under the bundle only) and checks its files and version (`VerifyApp`).
+Installing copies the service's files from the new bundle
+(`installFiles`), replaces the app the window runs from (`client.app`),
+leaves a reconnect marker when it was connected and exits; launchd
+starts the new service. The windows reopen the new app, the menu bar
+icon execs the new copy.
+
 ## Not yet on macOS
 
-The kill switch (pf), a menu bar icon, automatic updates of HyRoute and of
-the cores, hyroutectl and the browser extension, ICMP through the engine.
+ICMP is passed direct (it is not routed on Windows either); DNS policies
+with a DNS server on the local network are untested.
 
 ## Building and tests
 
