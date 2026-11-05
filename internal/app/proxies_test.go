@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,10 +23,23 @@ func init() { lanHost = "127.0.0.1" }
 
 // freePort finds a free port below the relay's range, where a LAN proxy
 // may listen (port 0 would pick one from the range on Windows).
+// givenPorts are the ports freePort handed out: a test asking for several
+// gets distinct ones (each is only free, not held, until it is used).
+var (
+	givenMu    sync.Mutex
+	givenPorts = map[int]bool{}
+)
+
 func freePort(t *testing.T) int {
+	givenMu.Lock()
+	defer givenMu.Unlock()
 	for p := 20000 + rand.IntN(20000); p < relay.PortMin; p++ {
+		if givenPorts[p] {
+			continue
+		}
 		if ln, err := net.Listen("tcp", "127.0.0.1:"+itoa(p)); err == nil {
 			ln.Close()
+			givenPorts[p] = true
 			return p
 		}
 	}
