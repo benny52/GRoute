@@ -34,6 +34,18 @@ func TestTUNSession(t *testing.T) {
 		}
 		return set
 	}
+	// Pings go direct through the engine; the runner may have no ICMP to
+	// the internet at all, then they are not checked.
+	pingOK := exec.Command("ping", "-c", "1", "-t", "5", "1.1.1.1").Run() == nil
+	ping := func() {
+		t.Helper()
+		if !pingOK {
+			return
+		}
+		if out, err := exec.Command("ping", "-c", "2", "-t", "8", "1.1.1.1").CombinedOutput(); err != nil {
+			t.Fatalf("ping through the engine: %v %s", err, out)
+		}
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	profiles := []hysteria.Profile{{ID: "p1", Name: "stub"}}
 	onDecision := func(v flows.View) {
@@ -79,6 +91,7 @@ func TestTUNSession(t *testing.T) {
 	if !seen(s, "curl", "tunnel") {
 		t.Fatalf("no tunneled record of curl: %+v", s.Flows().Closed())
 	}
+	ping()
 	dig()
 	if st := s.Stats(); st.UDPTunneled < 1 {
 		t.Fatalf("dig not tunneled: %+v", st)

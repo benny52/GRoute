@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/lardan099/hyroute/internal/killswitch"
 )
 
 // The service's files: its own copy of HyRoute and the cores, in a folder
@@ -55,6 +57,11 @@ func installService() error {
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 	res := filepath.Join(filepath.Dir(filepath.Dir(exe)), "Resources")
+	// The kill switch lets the sockets of this group through: the service
+	// and its cores run with it.
+	if _, err := killswitch.EnsureGroup(); err != nil {
+		return err
+	}
 	// Stop the old service first: its files are replaced.
 	exec.Command("/bin/launchctl", "bootout", "system/"+serviceLabel).Run()
 	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
@@ -121,6 +128,9 @@ func uninstallService() error {
 	}
 	exec.Command("/bin/launchctl", "bootout", "system/"+serviceLabel).Run()
 	os.Remove(servicePlist)
+	// A block the service left (it stopped while connected) goes too.
+	(&killswitch.Switch{StateDir: filepath.Join("/var/root/Library/Application Support/HyRoute")}).Release()
+	killswitch.DeleteGroup()
 	return os.RemoveAll(serviceDir)
 }
 

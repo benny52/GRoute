@@ -15,6 +15,7 @@ import (
 	"github.com/lardan099/hyroute/internal/app"
 	"github.com/lardan099/hyroute/internal/core"
 	"github.com/lardan099/hyroute/internal/hysteria"
+	"github.com/lardan099/hyroute/internal/killswitch"
 	"github.com/lardan099/hyroute/internal/procinfo"
 	"github.com/lardan099/hyroute/internal/session"
 	"github.com/lardan099/hyroute/internal/store"
@@ -27,6 +28,18 @@ func runDaemon(verbose, stub bool) {
 	if os.Geteuid() != 0 {
 		fmt.Fprintln(os.Stderr, "the HyRoute service runs as root (launchd starts it)")
 		os.Exit(1)
+	}
+	// launchd gives a daemon no HOME: the data and the cores' folders are
+	// root's (store.DefaultDir, core.DefaultDir).
+	os.Setenv("HOME", "/var/root")
+	// The kill switch lets this group's sockets through: the service's and
+	// its cores' (they inherit it). Set before anything opens a socket.
+	gid := killswitch.GroupID()
+	if gid > 0 {
+		if err := syscall.Setgid(gid); err != nil {
+			fmt.Fprintln(os.Stderr, "HyRoute: group", killswitch.GroupName, "not set:", err)
+			gid = 0
+		}
 	}
 	exe, _ := os.Executable()
 	binDir := filepath.Dir(exe)
@@ -75,6 +88,8 @@ func runDaemon(verbose, stub bool) {
 	coreMgr := &core.Manager{Dir: filepath.Join(dataDir, "core"), Bundled: hysteriaPath, Version: hysteria.ExeVersion}
 	ctl.CoreVersion = func() string { return coreMgr.Info().Version }
 	ctl.ListRunning = procinfo.ListRunning
+	ctl.KillSwitch = &killswitch.Switch{GID: gid, StateDir: dataDir}
+	ctl.InitKillSwitch()
 
 	life, endLife := context.WithCancel(context.Background())
 	defer endLife()

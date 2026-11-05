@@ -56,8 +56,9 @@ type Engine struct {
 	cfg Config
 	log *slog.Logger
 
-	dev *tunDevice
-	fwd *udpForwarder
+	dev  *tunDevice
+	fwd  *udpForwarder
+	icmp *icmpForwarder
 
 	netMu sync.Mutex // guards the fields below and the routes
 	def4  defaultRoute
@@ -110,6 +111,7 @@ func New(cfg Config) *Engine {
 		return e.def4.Index != 0
 	}
 	e.fwd = &udpForwarder{listen: e.listenUDP, deliver: e.deliver, log: cfg.Log}
+	e.icmp = &icmpForwarder{e: e}
 	return e
 }
 
@@ -493,6 +495,9 @@ func (e *Engine) readLoop() {
 			continue
 		}
 		pkt := buf[4:n]
+		if e.icmp.handle(pkt) {
+			continue // pings go direct, never routed
+		}
 		if isDNSQuery(pkt) {
 			e.HandleDNS(pkt, true) // before HandlePacket rewrites it
 		}
@@ -644,6 +649,7 @@ func (e *Engine) teardown() {
 	e.dnsRoutes = nil
 	e.netMu.Unlock()
 	e.fwd.close()
+	e.icmp.close()
 	if e.dev != nil {
 		e.dev.close()
 	}

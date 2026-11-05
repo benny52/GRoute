@@ -545,17 +545,15 @@
             <span>Не нужно каждый раз нажимать кнопку: VPN включится сам, как только HyRoute запустится.</span></span
           >
         </label>
-        {#if !ui.mac}
         <label class="opt">
           <input type="checkbox" bind:checked={wantKill} />
           <span><b>Kill switch: не пускать интернет мимо VPN</b>
             <span>
-              Если HyRoute вдруг закроется или сломается, Windows закроет интернет, чтобы ничего не ушло без VPN. Интернет вернётся, когда вы снова
+              Если HyRoute вдруг закроется или сломается, {ui.mac ? 'macOS' : 'Windows'} закроет интернет, чтобы ничего не ушло без VPN. Интернет вернётся, когда вы снова
               подключитесь или нажмёте «Открыть интернет». Нужно, если важно, чтобы ни один запрос не прошёл мимо VPN. Не уверены — не включайте.
             </span></span
           >
         </label>
-        {/if}
         {#if ext?.host && extBrowsers.length}
           <label class="opt">
             <input type="checkbox" bind:checked={wantBrowser} />

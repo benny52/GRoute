@@ -64,6 +64,10 @@ jobs:
         run: |
           go test -c -o "$RUNNER_TEMP/session.test" ./internal/session
           sudo HYROUTE_TUN_TEST=1 "$RUNNER_TEMP/session.test" -test.run TUNSession -test.v -test.timeout 180s
+      - name: Kill switch (root, real pf)
+        run: |
+          go test -c -o "$RUNNER_TEMP/killswitch.test" ./internal/killswitch
+          sudo HYROUTE_PF_TEST=1 "$RUNNER_TEMP/killswitch.test" -test.v -test.timeout 120s
   linux:
     runs-on: ubuntu-latest
     steps:

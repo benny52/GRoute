@@ -392,11 +392,19 @@
 
   {#if ui.expert && !ui.mac}<CLISettings />{/if}
 
-  {#if routing && !ui.mac}
+  {#if routing}
     <section class="card">
       <h2><Icon name="shield" size={17} /> Kill switch</h2>
       <label class="check"><input type="checkbox" checked={routing.killSwitch ?? false} onchange={(e) => settle(e, (el) => saveRouting({ killSwitch: el.checked }), () => routing?.killSwitch ?? false)} />
         Закрывать интернет, если HyRoute перестал работать</label>
+      {#if ui.mac}
+      <p class="muted small">
+        Если служба HyRoute остановится во время подключения (сбой, её завершили) или откажет перехват, трафик не пойдёт напрямую: macOS
+        (брандмауэр pf) заблокирует соединения, пока вы снова не подключитесь или не нажмёте «Открыть интернет». Блокировку снимают кнопки
+        «Отключить» и «Открыть интернет», выключение этой настройки и перезагрузка Mac. Во время блокировки работают локальная сеть, DNS-запросы
+        macOS, сама служба HyRoute, Hysteria и Xray.
+      </p>
+      {:else}
       <p class="muted small">
         Если HyRoute закроется во время подключения (окно закрыто, «Снять задачу» в диспетчере задач, сбой) или откажет драйвер перехвата,
         трафик не пойдёт напрямую: Windows заблокирует соединения, пока вы снова не подключитесь или не нажмёте «Открыть интернет». Если отказал
@@ -406,6 +414,7 @@
         Во время блокировки работают локальная сеть, DNS-запросы Windows (и зашифрованный DNS к DNS-серверам адаптеров на момент подключения),
         сам HyRoute и Hysteria.
       </p>
+      {/if}
       {#if routing.killSwitch && info && !info.protectedLocation}
         <div class="note warn small">
           HyRoute не в Program Files или его папку могут менять программы без прав администратора, поэтому после выключения компьютера он сам не
