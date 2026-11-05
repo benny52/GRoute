@@ -497,6 +497,12 @@ func (s *Supervisor) runOnce(ctx context.Context) (time.Duration, ErrorKind, str
 		// is up once its SOCKS5 port answers and a request goes through
 		// the server (watchVLESS).
 		var lastWarn atomic.Pointer[string]
+		vport, _ := VLESSPort(s.Profile.Ports)
+		vhost := s.Profile.Host
+		if pinned.IsValid() {
+			vhost = pinned.String()
+		}
+		vlessServer := net.JoinHostPort(vhost, strconv.Itoa(vport))
 		go func() {
 			defer close(readDone)
 			sc := bufio.NewScanner(pr)
@@ -526,7 +532,7 @@ func (s *Supervisor) runOnce(ctx context.Context) (time.Duration, ErrorKind, str
 		probes.Add(1)
 		go func() {
 			defer probes.Done()
-			s.watchVLESS(runCtx, opts.SOCKSListen, kick, &lastWarn, func() {
+			s.watchVLESS(runCtx, opts.SOCKSListen, vlessServer, kick, &lastWarn, func() {
 				evMu.Lock()
 				first := connectedAt.IsZero()
 				if first {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"strconv"
@@ -24,11 +25,14 @@ import (
 // DefaultProbeURLs answer any request with 204 and no body.
 var DefaultProbeURLs = []string{"http://cp.cloudflare.com/generate_204", "http://www.gstatic.com/generate_204"}
 
-// Test hooks.
+// Test hooks. One check of a new run, every probe URL at once, takes at
+// most vlessProbeTimeout: the 3 of a start fit in the 45 s «Проверить»
+// waits (app.CheckProfile), which then shows this run's own reason.
 var (
-	vlessProbeTimeout = 10 * time.Second
+	vlessProbeTimeout = 8 * time.Second
 	vlessProbeEvery   = time.Minute
 	vlessRetryEvery   = 3 * time.Second
+	vlessDirectWait   = 3 * time.Second // directCheck's dial
 )
 
 const (
@@ -52,7 +56,11 @@ func (s *Supervisor) coreName() string {
 // vlessProbeEvery. A run that never gets a request through, or stops
 // getting them through, is restarted with the reason (Xray's last warning
 // says it best).
-func (s *Supervisor) watchVLESS(ctx context.Context, addr string, kick chan restart, lastWarn *atomic.Pointer[string], up func()) {
+//
+// server is the address Xray dials (the pinned IP or the host, with the
+// port): a failed check also tries it directly, to tell a server that
+// does not answer from one that answers but lets nothing through.
+func (s *Supervisor) watchVLESS(ctx context.Context, addr, server string, kick chan restart, lastWarn *atomic.Pointer[string], up func()) {
 	send := func(r restart) {
 		if ctx.Err() == nil {
 			select {
@@ -82,12 +90,22 @@ func (s *Supervisor) watchVLESS(ctx context.Context, addr string, kick chan rest
 			wait = vlessProbeEvery
 		} else {
 			fails++
+			warn := ""
+			if w := lastWarn.Load(); w != nil {
+				warn = *w
+			}
+			kind, msg := ClassifyXray(err, warn)
+			kind, msg = directCheck(ctx, server, kind, msg)
+			if !connected && fails < vlessFirstTries {
+				// Still starting: the reason shows at once, not only
+				// after the last try.
+				s.setStatusWhile(func() bool { return ctx.Err() == nil }, func(st *Status) {
+					if st.State == Connecting {
+						st.Message = fmt.Sprintf("%s (попытка %d из %d)", msg, fails, vlessFirstTries)
+					}
+				})
+			}
 			if !connected && fails >= vlessFirstTries || connected && fails >= vlessLostAfter {
-				warn := ""
-				if w := lastWarn.Load(); w != nil {
-					warn = *w
-				}
-				kind, msg := ClassifyXray(err, warn)
 				if connected {
 					// It worked with these settings: no reason for the
 					// long wait of a refused password.
@@ -108,24 +126,68 @@ func (s *Supervisor) watchVLESS(ctx context.Context, addr string, kick chan rest
 	}
 }
 
-// probeVLESS sends an HTTP request through the tunnel to each probe URL
-// until one answers.
+// probeVLESS sends an HTTP request through the tunnel to every probe URL
+// at once; one answer is enough.
 func (s *Supervisor) probeVLESS(ctx context.Context, c socks5.Client) error {
 	urls := s.ProbeURLs
 	if len(urls) == 0 {
 		urls = DefaultProbeURLs
 	}
-	var first error
+	pctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make(chan error, len(urls))
 	for _, u := range urls {
-		err := probeHTTP(ctx, c, u)
-		if err == nil || ctx.Err() != nil {
-			return err
+		go func() { errs <- probeHTTP(pctx, c, u) }()
+	}
+	var first error
+	for range urls {
+		err := <-errs
+		if err == nil {
+			return nil
 		}
 		if first == nil {
 			first = err
 		}
 	}
 	return first
+}
+
+// directCheck refines the reason of a failed check by connecting to the
+// server itself, outside the tunnel (HyRoute's own traffic is never
+// routed): a server whose port answers is up, and what fails is VLESS
+// (the ID, REALITY, flow) or the server's way out.
+func directCheck(ctx context.Context, server string, kind ErrorKind, msg string) (ErrorKind, string) {
+	if server == "" {
+		return kind, msg
+	}
+	dctx, cancel := context.WithTimeout(ctx, vlessDirectWait)
+	defer cancel()
+	start := time.Now()
+	conn, err := (&net.Dialer{}).DialContext(dctx, "tcp", server)
+	if err != nil {
+		if ctx.Err() != nil {
+			return kind, msg
+		}
+		return ErrTimeout, "Порт сервера не отвечает (" + shortNetErr(err) + "): сервер выключен, порт другой или его блокирует сеть"
+	}
+	conn.Close()
+	ms := time.Since(start).Milliseconds()
+	if kind == ErrTimeout {
+		// The port answers: not the server's absence. What Xray said is
+		// the reason, the port's answer the hint.
+		return ErrOther, fmt.Sprintf("Порт сервера отвечает (TCP за %d мс), но запросы через VLESS не проходят: %s", ms, msg)
+	}
+	return kind, fmt.Sprintf("%s (порт сервера отвечает, TCP за %d мс)", msg, ms)
+}
+
+// shortNetErr is the last part of a dial error ("i/o timeout",
+// "connection refused"), without the addresses.
+func shortNetErr(err error) string {
+	e := err.Error()
+	if i := strings.LastIndex(e, ": "); i >= 0 {
+		e = e[i+2:]
+	}
+	return e
 }
 
 // errNoHTTP: the tunnel took the connection, but no HTTP answer came back

@@ -110,9 +110,9 @@ func newXraySupervisor(t *testing.T, mode string, probe string) (*Supervisor, ch
 
 func fastProbes(t *testing.T) {
 	t.Helper()
-	every, retry, timeout := vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout
-	vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout = 100*time.Millisecond, 50*time.Millisecond, time.Second
-	t.Cleanup(func() { vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout = every, retry, timeout })
+	every, retry, timeout, direct := vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout, vlessDirectWait
+	vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout, vlessDirectWait = 100*time.Millisecond, 50*time.Millisecond, time.Second, 200*time.Millisecond
+	t.Cleanup(func() { vlessProbeEvery, vlessRetryEvery, vlessProbeTimeout, vlessDirectWait = every, retry, timeout, direct })
 }
 
 func TestVLESSConnectsThroughXray(t *testing.T) {
@@ -260,6 +260,51 @@ func TestClassifyXray(t *testing.T) {
 	} {
 		if kind, msg := ClassifyXray(c.err, c.warn); kind != c.kind || msg == "" {
 			t.Errorf("%v / %q: %v %q", c.err, c.warn, kind, msg)
+		}
+	}
+}
+
+// A failed check says whether the server's port answers at all.
+func TestDirectCheck(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	kind, msg := directCheck(t.Context(), ln.Addr().String(), ErrTimeout, "Сервер не отвечает: проверьте адрес и порт")
+	if kind != ErrOther || !strings.HasPrefix(msg, "Порт сервера отвечает (TCP за ") || !strings.Contains(msg, "запросы через VLESS не проходят") {
+		t.Fatalf("%v %q", kind, msg)
+	}
+	kind, msg = directCheck(t.Context(), ln.Addr().String(), ErrTLS, "Сертификат")
+	if kind != ErrTLS || !strings.HasPrefix(msg, "Сертификат (порт сервера отвечает") {
+		t.Fatalf("%v %q", kind, msg)
+	}
+	dead, _ := net.Listen("tcp", "127.0.0.1:0")
+	addr := dead.Addr().String()
+	dead.Close()
+	kind, msg = directCheck(t.Context(), addr, ErrOther, "x")
+	if kind != ErrTimeout || !strings.HasPrefix(msg, "Порт сервера не отвечает (") || strings.Contains(msg, "127.0.0.1") {
+		t.Fatalf("%v %q", kind, msg)
+	}
+}
+
+// While a run starts, each failed check shows its reason at once.
+func TestVLESSReasonWhileStarting(t *testing.T) {
+	fastProbes(t)
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	dead := "http://" + ln.Addr().String() + "/"
+	ln.Close()
+	s, ch, _ := newXraySupervisor(t, "ok", dead)
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case st := <-ch:
+			if st.State == Connecting && strings.Contains(st.Message, "(попытка 1 из 3)") {
+				return
+			}
+		case <-deadline:
+			t.Fatal("no reason while starting")
 		}
 	}
 }
