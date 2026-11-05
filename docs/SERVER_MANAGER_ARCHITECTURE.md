@@ -4,8 +4,8 @@ Server Manager (`hyroute-server`) — controller, который развора�
 импортирует и обслуживает серверы Hysteria 2 по SSH и выдаёт ссылки для
 клиента HyRoute. Работает на Linux VPS (основной сценарий), собирается и
 на Windows. Этот документ описывает устройство Phase 1 в том виде, как
-она сделана, и решения, которые не должны помешать Phase 2–4. План задач —
-`TODO_SERVER_MANAGER.md`, инструкция для пользователя — `SERVER_MANAGER.md`.
+она сделана, и решения, которые не должны помешать Phase 2–4. Инструкция
+для пользователя — `SERVER_MANAGER.md`.
 
 Сверено с документацией Hysteria 2 (hysteria.network: Installation,
 Server Installation Script, Full Server Config, Full Client Config, URI
