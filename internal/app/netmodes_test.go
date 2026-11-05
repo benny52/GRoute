@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1516,7 +1517,11 @@ func TestNetSSIDOnlyWhileSettling(t *testing.T) {
 	}
 	w2.ssidErr = netmode.ErrSSIDDenied
 	w2.set(cafe())
-	if _, err := c2.CurrentSSID(); err == nil || !strings.Contains(err.Error(), "Расположение") {
+	hint := "Расположение" // Windows: the location setting
+	if runtime.GOOS == "darwin" {
+		hint = "Именно эта сеть" // macOS: the router instead
+	}
+	if _, err := c2.CurrentSSID(); err == nil || !strings.Contains(err.Error(), hint) {
 		t.Fatal(err)
 	}
 }
