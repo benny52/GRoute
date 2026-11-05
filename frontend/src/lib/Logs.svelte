@@ -115,13 +115,13 @@
 <div class="wrap">
   <header>
     <h1>Журнал</h1>
-    <p class="muted sub">Что делают HyRoute и серверы Hysteria. Пригодится, если что-то не работает.</p>
+    <p class="muted sub">Что делают HyRoute и серверы (Hysteria и Xray). Пригодится, если что-то не работает.</p>
   </header>
   <div class="row">
     <select bind:value={source} title="Чей журнал">
       <option value="engine">HyRoute</option>
-      <option value="hysteria">Hysteria — все серверы</option>
-      {#each ui.profiles as p (p.id)}<option value={'hysteria:' + p.id}>Hysteria — {serverLabel(p)}</option>{/each}
+      <option value="hysteria">Серверы — все (Hysteria и Xray)</option>
+      {#each ui.profiles as p (p.id)}<option value={'hysteria:' + p.id}>{p.protocol === 'vless' ? 'Xray' : 'Hysteria'} — {serverLabel(p)}</option>{/each}
     </select>
     <select bind:value={level}>
       <option value="debug">Все уровни</option>
@@ -153,7 +153,7 @@
     {#each drawn as l (l.seq)}
       <div class="line lvl-{l.level}"><span class="t">{fmtTime(l.time)}{' '}</span><span class="l">{l.level.toUpperCase().padEnd(5)}{' '}</span>{hide(l.msg)}</div>
     {/each}
-    {#if shown.length === 0}<p class="muted">Пусто.{source !== 'engine' ? ' Журнал Hysteria появляется, когда сервер запущен.' : ''}</p>{/if}
+    {#if shown.length === 0}<p class="muted">Пусто.{source !== 'engine' ? ' Журнал сервера появляется, когда сервер запущен.' : ''}</p>{/if}
   </div>
 </div>
 
