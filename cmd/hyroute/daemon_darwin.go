@@ -110,6 +110,7 @@ func runDaemon(verbose, stub bool) {
 	if err := gui.win.listen(); err != nil {
 		fatal(fmt.Errorf("socket %s: %w", sockPath, err))
 	}
+	gui.applyCLI(gui.cliMode()) // hyroutectl
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	select {
@@ -118,6 +119,7 @@ func runDaemon(verbose, stub bool) {
 	}
 	ctl.Log.Info("HyRoute service stopping")
 	endLife()
+	gui.stopCLI()
 	gui.win.close()
 	ctl.StopNetModes()
 	ctl.Shutdown()

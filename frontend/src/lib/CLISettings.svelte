@@ -54,7 +54,9 @@
     return ui.privacy ? '***' : u;
   }
 
-  const copyLine = $derived(info?.exe ? `& "${info.exe}" status` : '');
+  // macos: hyroutectl is on the PATH (/usr/local/bin).
+  const copyLine = $derived(info?.exe ? (ui.mac ? 'hyroutectl status' : `& "${info.exe}" status`) : '');
+  const exeName = $derived(ui.mac ? 'hyroutectl' : 'hyroutectl.exe');
 
   async function copy() {
     error = '';
@@ -71,7 +73,7 @@
 <section class="card">
   <h2><Icon name="terminal" size={17} /> Командная строка</h2>
   <div class="row">
-    <label for="climode" class="grow">Управление из командной строки (hyroutectl.exe)</label>
+    <label for="climode" class="grow">Управление из командной строки ({exeName})</label>
     <select id="climode" value={info?.mode ?? 'read'} disabled={!info || !!info.prefsError}
       onchange={(e) => settle(e, (el) => setMode(el.value as CLIMode), () => info?.mode ?? 'read')}>
       <option value="full">Полный доступ</option>
@@ -79,12 +81,21 @@
       <option value="off">Выключено</option>
     </select>
   </div>
+  {#if ui.mac}
+  <p class="muted small">
+    hyroutectl ставится вместе со службой HyRoute ({info?.exe ?? '/usr/local/bin/hyroutectl'}) и управляет ей из Терминала: подключение, основной
+    сервер, профиль правил, «Проверить адрес», импорт и экспорт правил, правила сетей, статистика, журнал. Команды принимаются только от
+    администраторов этого Mac. «Только просмотр» (по умолчанию) разрешает состояние, списки, «Проверить адрес», экспорт правил, статистику и
+    журнал; подключать, отключать и менять правила можно только с «Полным доступом». Команды записываются в журнал HyRoute.
+  </p>
+  {:else}
   <p class="muted small">
     hyroutectl.exe лежит рядом с HyRoute.exe и управляет запущенным HyRoute без прав администратора: подключение, основной сервер, профиль
     правил, «Проверить адрес», импорт и экспорт правил, правила сетей, статистика, журнал. Команды принимаются только от программ вашей учётной записи Windows на этом
     компьютере и от администраторов. «Только просмотр» (по умолчанию) разрешает состояние, списки, «Проверить адрес», экспорт правил, статистику и
     журнал; подключать, отключать и менять правила можно только с «Полным доступом». Команды записываются в журнал HyRoute.
   </p>
+  {/if}
   {#if !info && !error}
     <p class="muted small">Загрузка…</p>
   {/if}
@@ -97,7 +108,9 @@
         <code class="grow cmd">{hidePath(copyLine)}</code>
         <button onclick={copy}><Icon name="copy" size={15} /> Копировать</button>
       </div>
-      <p class="muted small">В PowerShell — как показано; в cmd — без «&amp; ». Папка программы: {hidePath(info.dir)}</p>
+      {#if !ui.mac}<p class="muted small">В PowerShell — как показано; в cmd — без «&amp; ». Папка программы: {hidePath(info.dir)}</p>{/if}
+    {:else if ui.mac}
+      <div class="note warn small">hyroutectl не установлен: откройте новую версию HyRoute.app, она обновит службу.</div>
     {:else}
       <div class="note warn small">hyroutectl.exe нет рядом с HyRoute.exe: он есть в архиве с программой.</div>
     {/if}

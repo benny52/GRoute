@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 // hyroutectl controls a running HyRoute from the command line (Windows).
 package main

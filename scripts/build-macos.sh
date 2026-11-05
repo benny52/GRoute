@@ -32,6 +32,8 @@ for arch in arm64 amd64; do
 		go build -trimpath -tags desktop,production \
 		-ldflags "-s -w -X main.version=$version -X main.build=$build" \
 		-o "$work/HyRoute-$arch" ./cmd/hyroute
+	CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath \
+		-ldflags "-s -w -X main.version=$version" -o "$work/hyroutectl-$arch" ./cmd/hyroutectl
 
 	echo "== hysteria $arch"
 	curl -fsSL -o "$work/hysteria-$arch" "$(dep macos.hysteria.$arch.url)"
@@ -51,7 +53,8 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 lipo -create -output "$app/Contents/MacOS/HyRoute" "$work/HyRoute-arm64" "$work/HyRoute-amd64"
 lipo -create -output "$app/Contents/Resources/hysteria" "$work/hysteria-arm64" "$work/hysteria-amd64"
 lipo -create -output "$app/Contents/Resources/xray" "$work/xray-arm64" "$work/xray-amd64"
-chmod 755 "$app/Contents/MacOS/HyRoute" "$app/Contents/Resources/hysteria" "$app/Contents/Resources/xray"
+lipo -create -output "$app/Contents/Resources/hyroutectl" "$work/hyroutectl-arm64" "$work/hyroutectl-amd64"
+chmod 755 "$app/Contents/MacOS/HyRoute" "$app/Contents/Resources/hysteria" "$app/Contents/Resources/xray" "$app/Contents/Resources/hyroutectl"
 sed "s/@VERSION@/${version#v}/g" build/macos/Info.plist > "$app/Contents/Info.plist"
 cp THIRD-PARTY-NOTICES* LICENSE* "$app/Contents/Resources/" 2>/dev/null || true
 

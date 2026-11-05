@@ -99,10 +99,22 @@ func installService() error {
 			return err
 		}
 	}
-	files := map[string]string{"HyRoute": exe, "hysteria": filepath.Join(res, "hysteria"), "xray": filepath.Join(res, "xray")}
+	files := map[string]string{"HyRoute": exe, "hysteria": filepath.Join(res, "hysteria"), "xray": filepath.Join(res, "xray"),
+		"hyroutectl": filepath.Join(res, "hyroutectl")}
 	for name, src := range files {
 		if err := copyRootFile(src, filepath.Join(serviceDir, name)); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	// hyroutectl on the PATH (a link to the service's copy).
+	if os.MkdirAll(filepath.Dir(hyroutectlLink), 0o755) == nil {
+		if cur, err := os.Readlink(hyroutectlLink); err == nil || os.IsNotExist(err) {
+			if err == nil && cur != filepath.Join(serviceDir, "hyroutectl") {
+				// Someone else's hyroutectl: left alone.
+			} else {
+				os.Remove(hyroutectlLink)
+				os.Symlink(filepath.Join(serviceDir, "hyroutectl"), hyroutectlLink)
+			}
 		}
 	}
 	if err := os.WriteFile(servicePlist, []byte(plistText), 0o644); err != nil {
@@ -185,6 +197,9 @@ func uninstallService() error {
 		exec.Command("/bin/launchctl", "bootout", "gui/"+uid+"/"+menubarLabel).Run()
 	}
 	os.Remove(menubarPlist)
+	if cur, err := os.Readlink(hyroutectlLink); err == nil && cur == filepath.Join(serviceDir, "hyroutectl") {
+		os.Remove(hyroutectlLink)
+	}
 	// A block the service left (it stopped while connected) goes too.
 	(&killswitch.Switch{StateDir: filepath.Join("/var/root/Library/Application Support/HyRoute")}).Release()
 	killswitch.DeleteGroup()

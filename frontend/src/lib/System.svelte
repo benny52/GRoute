@@ -390,7 +390,7 @@
 
   {#if !ui.mac}<BrowserExtension />{/if}
 
-  {#if ui.expert && !ui.mac}<CLISettings />{/if}
+  {#if ui.expert}<CLISettings />{/if}
 
   {#if routing}
     <section class="card">

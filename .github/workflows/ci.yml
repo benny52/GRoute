@@ -64,6 +64,13 @@ jobs:
         run: |
           go test -c -o "$RUNNER_TEMP/session.test" ./internal/session
           sudo HYROUTE_TUN_TEST=1 "$RUNNER_TEMP/session.test" -test.run TUNSession -test.v -test.timeout 180s
+      - name: hyroutectl smoke test (no HyRoute service exits 3)
+        run: |
+          go build -o "$RUNNER_TEMP/hyroutectl" ./cmd/hyroutectl
+          "$RUNNER_TEMP/hyroutectl" --help
+          set +e
+          "$RUNNER_TEMP/hyroutectl" status
+          test $? -eq 3
       - name: Kill switch (root, real pf)
         run: |
           go test -c -o "$RUNNER_TEMP/killswitch.test" ./internal/killswitch

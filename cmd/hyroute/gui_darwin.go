@@ -36,6 +36,8 @@ type GUI struct {
 	notice   string
 	quitOnce sync.Once
 	quitCh   chan struct{}
+
+	cli cliState // hyroutectl's socket (cli_darwin.go)
 }
 
 func (g *GUI) emitStatus() { g.win.notify("status") }
@@ -44,9 +46,9 @@ func (g *GUI) showWindow() { g.win.open("normal") }
 
 func (g *GUI) quit() { g.quitOnce.Do(func() { close(g.quitCh) }) }
 
-// The kill switch check at sign-in and hyroutectl's pipe are Windows'.
+// The kill switch check at sign-in is Windows' (the service starts with
+// the Mac).
 func (g *GUI) syncKillSwitchCheck() {}
-func (g *GUI) applyCLI(string)      {}
 
 var errMac = errors.New("на macOS этого пока нет")
 
@@ -132,6 +134,7 @@ func (g *GUI) systemLines() []string {
 		"macOS: " + macVersion(),
 		"Служба: " + info.ProgramDir,
 		"Данные: " + info.DataDir,
+		g.cliLine(),
 	}
 	if len(info.Missing) > 0 {
 		lines = append(lines, "Нет файлов: "+strings.Join(info.Missing, ", "))
@@ -173,23 +176,6 @@ func (g *GUI) InstallBrowserExt() (BrowserExtView, error) {
 func (g *GUI) SetBrowserExtOn(bool) (BrowserExtView, error) { return g.BrowserExtInfo(), errMac }
 func (g *GUI) RemoveBrowserExt() (BrowserExtView, error)    { return g.BrowserExtInfo(), errMac }
 func (g *GUI) OpenBrowserExtensions(string) error           { return errMac }
-
-type CLIInfo struct {
-	Mode        string `json:"mode"`
-	Listening   bool   `json:"listening"`
-	Pipe        string `json:"pipe"`
-	Exe         string `json:"exe"`
-	Dir         string `json:"dir"`
-	User        string `json:"user"`
-	UserDiffers bool   `json:"userDiffers"`
-	Error       string `json:"error,omitempty"`
-	PrefsError  string `json:"prefsError,omitempty"`
-}
-
-func (g *GUI) CLIInfo() CLIInfo {
-	return CLIInfo{Mode: "off", Error: "командная строка hyroutectl пока есть только на Windows"}
-}
-func (g *GUI) SetCLIMode(string) error { return errMac }
 
 // ServiceVersion lets the window see whether the service is its own
 // version (else it installs its copy).
