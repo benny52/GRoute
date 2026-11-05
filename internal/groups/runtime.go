@@ -134,13 +134,14 @@ type memberState struct {
 	probeAt       time.Time
 	probeErr      string
 	probeFails    int
-	failSince     time.Time // first failed probe of the current run
-	lastOK        time.Time // last passed probe
-	probed        bool      // probed this session (ProbeBroken)
-	forceProbe    bool      // (re)connected: probe at once
-	upSince       time.Time // zero = not up
-	recoveredAt   time.Time // a penalty ended
-	streak        int       // failed dials in a row, to distinct destinations
+	failSince     time.Time   // first failed probe of the current run
+	fails         []time.Time // failed probes within FlapWindow, oldest first
+	lastOK        time.Time   // last passed probe
+	probed        bool        // probed this session (ProbeBroken)
+	forceProbe    bool        // (re)connected: probe at once
+	upSince       time.Time   // zero = not up
+	recoveredAt   time.Time   // a penalty ended
+	streak        int         // failed dials in a row, to distinct destinations
 	lastErrDst    string
 	lastErrAt     time.Time
 	trialAt       time.Time // half-open trial in flight since
@@ -156,6 +157,10 @@ type Runtime struct {
 	OnSwitch func(SwitchEvent)
 	// Name resolves a member ID to its name for logs (nil = the ID).
 	Name func(id string) string
+	// OnUnhealthy is called (no lock held) when a server stops being
+	// ServerHealthy: the connections through it are reset, so that
+	// applications reconnect through a fallback at once.
+	OnUnhealthy func(id string)
 
 	now   func() time.Time
 	randN func(n int) int
@@ -313,8 +318,9 @@ func (r *Runtime) streakState(st *memberState, sae int, m mode, now time.Time) i
 }
 
 // peerOK: another member of a group holding id passed the probe since id
-// started failing, recently: the probe URL works, id is the problem.
-func (r *Runtime) peerOK(id string, st *memberState, now time.Time) bool {
+// started failing (since), recently: the probe URL works, id is the
+// problem.
+func (r *Runtime) peerOK(id string, since time.Time, now time.Time) bool {
 	c := r.defs.Load()
 	window := ProbePeerWindow * r.every
 	for _, gid := range c.byMember[id] {
@@ -323,7 +329,7 @@ func (r *Runtime) peerOK(id string, st *memberState, now time.Time) bool {
 				continue
 			}
 			ps := r.mem[p]
-			if ps != nil && !ps.lastOK.IsZero() && !ps.lastOK.Before(st.failSince) && now.Sub(ps.lastOK) < window {
+			if ps != nil && !ps.lastOK.IsZero() && !ps.lastOK.Before(since) && now.Sub(ps.lastOK) < window {
 				return true
 			}
 		}
@@ -331,8 +337,79 @@ func (r *Runtime) peerOK(id string, st *memberState, now time.Time) bool {
 	return false
 }
 
+// probeBad: the probe failed ProbeFailLimit times in a row, or FlapFails
+// times within FlapWindow (a member that keeps dropping out), while
+// another member's probe passed.
 func (r *Runtime) probeBad(id string, st *memberState, now time.Time) bool {
-	return st.probeFails >= ProbeFailLimit && r.peerOK(id, st, now)
+	if st.probeFails >= ProbeFailLimit && r.peerOK(id, st.failSince, now) {
+		return true
+	}
+	recent := recentFails(st.fails, now)
+	return len(recent) >= FlapFails && r.peerOK(id, recent[0], now)
+}
+
+// recentFails are the failures within FlapWindow.
+func recentFails(fails []time.Time, now time.Time) []time.Time {
+	for len(fails) > 0 && now.Sub(fails[0]) >= FlapWindow {
+		fails = fails[1:]
+	}
+	return fails
+}
+
+// lastFail is the member's last failed probe (zero for none).
+func (st *memberState) lastFail() time.Time {
+	if len(st.fails) == 0 {
+		return time.Time{}
+	}
+	return st.fails[len(st.fails)-1]
+}
+
+// ChainStreak is how many connections in a row, to distinct
+// destinations, must fail through a server for a rule's fallback to take
+// over (a rule has no setting for it, a group has SwitchAfterErrors).
+const ChainStreak = 3
+
+// ServerHealthy reports whether a server of a rule's fallback chain may
+// take connections: not when its probe failed (until it passed again and
+// RevertAfter went by without another failure), when it keeps dropping out
+// (FlapFails within FlapWindow), or when ChainStreak connections through it
+// failed in a row. Probe failures count only when another server's probe
+// passed since: then the probe URL works and the server is the problem.
+func (r *Runtime) ServerHealthy(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.serverHealthyLocked(id, r.now())
+}
+
+func (r *Runtime) serverHealthyLocked(id string, now time.Time) bool {
+	st := r.mem[id]
+	if st == nil {
+		return true
+	}
+	if st.streak >= ChainStreak && now.Sub(st.lastErrAt) < PenaltyFor {
+		return false
+	}
+	if st.probeFails > 0 && r.anyPeerOK(id, st.failSince, now) {
+		return false
+	}
+	if recent := recentFails(st.fails, now); len(recent) >= FlapFails && r.anyPeerOK(id, recent[0], now) {
+		return false
+	}
+	if f := st.lastFail(); !f.IsZero() && now.Sub(f) < RevertAfter && r.anyPeerOK(id, f, now) {
+		return false
+	}
+	return true
+}
+
+// anyPeerOK: another server's probe passed since, recently.
+func (r *Runtime) anyPeerOK(id string, since, now time.Time) bool {
+	window := ProbePeerWindow * r.every
+	for p, ps := range r.mem {
+		if p != id && !ps.lastOK.IsZero() && !ps.lastOK.Before(since) && now.Sub(ps.lastOK) < window {
+			return true
+		}
+	}
+	return false
 }
 
 // state returns a member's state, a zero one when it has none (not
@@ -367,9 +444,14 @@ func (r *Runtime) evalLocked(g *Group, us []bool, m mode, now time.Time) []eval 
 		st := r.state(id)
 		e := eval{usable: us[i], streak: r.streakState(st, g.SwitchAfterErrors, m, now), probeBad: r.probeBad(id, st, now)}
 		e.healthy = e.usable && !e.probeBad && e.streak != stPenalised
+		// Stable: up, and no penalty or failed probe for RevertAfter (a
+		// member that just failed is not taken back at once).
 		since := st.upSince
 		if st.recoveredAt.After(since) {
 			since = st.recoveredAt
+		}
+		if f := st.lastFail(); f.After(since) {
+			since = f
 		}
 		e.stable = e.healthy && !st.upSince.IsZero() && now.Sub(since) >= RevertAfter
 		out[i] = e
@@ -657,7 +739,7 @@ func (r *Runtime) NoteState(member string, up bool) {
 	case up && st.upSince.IsZero():
 		st.upSince = r.now()
 		st.forceProbe = true
-		st.probeFails, st.failSince = 0, time.Time{}
+		st.probeFails, st.failSince, st.fails = 0, time.Time{}, nil
 		st.streak, st.lastErrDst, st.trialAt, st.penaltyLogged = 0, "", time.Time{}, false
 	case !up:
 		st.upSince, st.trialAt = time.Time{}, time.Time{}
@@ -673,6 +755,7 @@ func (r *Runtime) NoteDial(member, dst string, err error) {
 	var logs []string
 	r.mu.Lock()
 	now := r.now()
+	wasOK := r.serverHealthyLocked(member, now)
 	st := r.stateFor(member)
 	if err == nil {
 		if !st.trialAt.IsZero() || st.streak >= 2 {
@@ -681,6 +764,11 @@ func (r *Runtime) NoteDial(member, dst string, err error) {
 		st.streak, st.lastErrDst, st.trialAt, st.penaltyLogged = 0, "", time.Time{}, false
 		r.mu.Unlock()
 		return
+	}
+	// A failed connection has the member probed now: a dead server is
+	// found in seconds, not at the next interval.
+	if !st.upSince.IsZero() && now.Sub(st.probeAt) >= ProbeRetry {
+		st.forceProbe = true
 	}
 	switch {
 	case !st.trialAt.IsZero():
@@ -696,9 +784,22 @@ func (r *Runtime) NoteDial(member, dst string, err error) {
 		}
 	}
 	n := st.streak
+	down := wasOK && !r.serverHealthyLocked(member, now)
 	r.mu.Unlock()
 	for _, g := range logs {
 		r.Log.Info("server group: member skipped after N failed connections", "group", g, "member", r.name(member), "n", n)
+	}
+	if down {
+		r.unhealthy(member, "failed connections")
+	}
+}
+
+// unhealthy logs a server leaving the fallback chains and calls
+// OnUnhealthy (no lock held).
+func (r *Runtime) unhealthy(member, why string) {
+	r.Log.Info("server not healthy: rules with fallbacks use the next server", "server", r.name(member), "reason", why)
+	if r.OnUnhealthy != nil {
+		r.OnUnhealthy(member)
 	}
 }
 
@@ -709,8 +810,13 @@ func (r *Runtime) NoteDial(member, dst string, err error) {
 // counts as penalised.
 func (r *Runtime) NoteProbe(member string, rtt time.Duration, err error) {
 	var sws []*SwitchEvent
+	var downs []string
 	r.mu.Lock()
 	now := r.now()
+	was := map[string]bool{}
+	for id := range r.mem {
+		was[id] = r.serverHealthyLocked(id, now)
+	}
 	st := r.stateFor(member)
 	st.probeAt, st.probed, st.forceProbe = now, true, false
 	if err == nil {
@@ -731,6 +837,23 @@ func (r *Runtime) NoteProbe(member string, rtt time.Duration, err error) {
 		}
 		st.probeFails++
 		st.probeErr = bounded(err.Error(), 200)
+		st.fails = append(recentFails(st.fails, now), now)
+		// The others are probed at once: one that passes shows the probe
+		// URL works and this server is the problem.
+		for id, ps := range r.mem {
+			if id != member && !ps.upSince.IsZero() && now.Sub(ps.probeAt) >= ProbeRetry {
+				ps.forceProbe = true
+			}
+		}
+	}
+	// A passed probe can make another server's earlier failures count.
+	for id, ok := range was {
+		if ok && !r.serverHealthyLocked(id, now) {
+			downs = append(downs, id)
+		}
+	}
+	if _, known := was[member]; !known && err != nil && !r.serverHealthyLocked(member, now) {
+		downs = append(downs, member)
 	}
 	c := r.defs.Load()
 	for _, gid := range c.byMember[member] {
@@ -749,6 +872,9 @@ func (r *Runtime) NoteProbe(member string, rtt time.Duration, err error) {
 	r.mu.Unlock()
 	for _, sw := range sws {
 		r.emit(sw)
+	}
+	for _, id := range downs {
+		r.unhealthy(id, "probe")
 	}
 }
 
@@ -786,6 +912,7 @@ func (r *Runtime) ResetSession() {
 	for _, st := range r.mem {
 		st.upSince, st.recoveredAt, st.failSince, st.trialAt = time.Time{}, time.Time{}, time.Time{}, time.Time{}
 		st.streak, st.probeFails, st.lastErrDst, st.probed, st.penaltyLogged = 0, 0, "", false, false
+		st.fails = nil
 	}
 	c := r.defs.Load()
 	for id, gs := range r.grp {
@@ -808,7 +935,8 @@ func (r *Runtime) DueProbes(members []string, every time.Duration) []string {
 	var out []string
 	for _, m := range members {
 		st := r.mem[m]
-		if st == nil || st.forceProbe || st.probeAt.IsZero() || now.Sub(st.probeAt) >= r.every {
+		if st == nil || st.forceProbe || st.probeAt.IsZero() || now.Sub(st.probeAt) >= r.every ||
+			st.probeFails > 0 && now.Sub(st.probeAt) >= ProbeRetry {
 			out = append(out, m)
 		}
 	}

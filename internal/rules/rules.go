@@ -682,6 +682,33 @@ func (s *Set) Profiles() []string {
 	return out
 }
 
+// FallbackServers are the servers of the Tunnel routes that have
+// fallbacks (the first one and the fallbacks, groups left out): their
+// health decides which one a connection takes, so they are probed like
+// group members.
+func (s *Set) FallbackServers() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(r *compiled) {
+		res := s.result(r)
+		if res.Action != Tunnel || len(res.Fallback) == 0 {
+			return
+		}
+		for _, id := range append([]string{res.Profile}, res.Fallback...) {
+			if id != "" && !strings.HasPrefix(id, "grp-") && !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	for i := range s.rules {
+		add(&s.rules[i])
+	}
+	add(nil)
+	sort.Strings(out)
+	return out
+}
+
 // firstMatch evaluates with a known domain ("" = domain rules don't match).
 func (s *Set) firstMatch(sub Subject, domain string) *compiled {
 	for i := range s.rules {

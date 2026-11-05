@@ -51,17 +51,24 @@ func (c *Core) resolve(res rules.Result, udp bool, h groups.Hint, commit bool) (
 		return res, groups.Pick{}
 	}
 	if !hasGroup(res) {
-		// The v1.0.0 path: the first usable server, else the primary one
-		// (refused).
-		if len(res.Fallback) == 0 || c.usable(res.Profile, udp) {
+		// The first healthy server (connected, and its probe and recent
+		// connections fine: a server can be connected while what is behind
+		// it, a cascade's next hop, is down), else the first connected
+		// one, else the primary one (refused).
+		if len(res.Fallback) == 0 {
 			return res, groups.Pick{}
 		}
-		for _, id := range res.Fallback {
-			if c.usable(id, udp) {
-				res.Profile = id
-				res.Rule += " (fallback)"
-				res.Failover = true
-				return res, groups.Pick{}
+		chain := append([]string{res.Profile}, res.Fallback...)
+		for _, pass := range []func(string) bool{c.healthyServer(udp), func(id string) bool { return c.usable(id, udp) }} {
+			for i, id := range chain {
+				if pass(id) {
+					if i > 0 {
+						res.Profile = id
+						res.Rule += " (fallback)"
+						res.Failover = true
+					}
+					return res, groups.Pick{}
+				}
 			}
 		}
 		return res, groups.Pick{}
@@ -124,7 +131,7 @@ func with(res rules.Result, p groups.Pick, idx int) rules.Result {
 // group asks its runtime (Peek/PeekUDP, or Choose/ChooseUDP to commit).
 func (c *Core) target(t string, udp bool, h groups.Hint, commit bool) (groups.Pick, bool) {
 	if !groups.IsGroupID(t) {
-		return groups.Pick{Member: t, Healthy: true}, c.usable(t, udp)
+		return groups.Pick{Member: t, Healthy: c.Groups == nil || c.Groups.ServerHealthy(t)}, c.usable(t, udp)
 	}
 	if c.Groups == nil {
 		return groups.Pick{}, false
@@ -139,6 +146,14 @@ func (c *Core) target(t string, udp bool, h groups.Hint, commit bool) (groups.Pi
 		return c.Groups.ChooseUDP(t, h, usable)
 	}
 	return c.Groups.Choose(t, h, usable)
+}
+
+// healthyServer: usable, and healthy by the groups runtime (no runtime:
+// usable is all).
+func (c *Core) healthyServer(udp bool) func(string) bool {
+	return func(id string) bool {
+		return c.usable(id, udp) && (c.Groups == nil || c.Groups.ServerHealthy(id))
+	}
 }
 
 // hint is what a group needs to know about a new flow: the program, the

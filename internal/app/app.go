@@ -33,6 +33,9 @@ type Session interface {
 	// still reflect the resets (before a disconnect closes the kill
 	// switch's pass; Stop resets any since).
 	ResetConnections()
+	// ResetServer resets the connections through a server that stopped
+	// being healthy (groups.Runtime.OnUnhealthy).
+	ResetServer(profile string)
 	SetRules(*rules.Set, []hysteria.Profile)
 	Flows() *flows.Registry
 	EngineFailed() bool

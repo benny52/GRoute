@@ -1020,3 +1020,48 @@ func TestReflectCollisionUsesDNSCache(t *testing.T) {
 		t.Fatalf("flags %x: %+v", i.pkt.TCPFlags(), v)
 	}
 }
+
+// A rule's server can be connected while what is behind it is down (a
+// cascade's next hop): its health from the groups runtime (the probe, the
+// connections through it) sends new connections to the fallback.
+func TestFallbackByHealth(t *testing.T) {
+	cfg := rules.Config{DefaultAction: rules.Direct, Rules: []rules.Rule{
+		{Name: "curl", App: &rules.AppMatch{Pattern: "curl.exe"}, Action: rules.Tunnel, Profile: "de", Fallback: []string{"nl"}},
+	}}
+	h := newHarness(t, cfg, Options{NoDefaultExclusions: true})
+	rt := groups.NewRuntime(nil)
+	h.c.Groups = rt
+	de, nl := &fakeTunnel{}, &fakeTunnel{}
+	de.up.Store(true)
+	nl.up.Store(true)
+	h.extra["de"], h.extra["nl"] = de, nl
+	rt.NoteState("de", true)
+	rt.NoteState("nl", true)
+	flow := func(src string) string {
+		t.Helper()
+		h.own(6, src, R, 100)
+		h.sendTCP(src, R, packet.FlagSYN, "")
+		h.next(t)
+		e := h.c.NAT.LookupFlow(nat.FlowKey{Src: netip.MustParseAddrPort(src), Dst: netip.MustParseAddrPort(R)})
+		if e == nil {
+			return ""
+		}
+		return e.Profile
+	}
+	if p := flow("192.168.1.5:42001"); p != "de" {
+		t.Fatalf("healthy primary: %q", p)
+	}
+	// de's probe fails while nl's passes: de is connected, not healthy.
+	rt.NoteProbe("de", 0, errors.New("нет ответа за 5 с"))
+	rt.NoteProbe("nl", 20*time.Millisecond, nil)
+	if p := flow("192.168.1.5:42002"); p != "nl" {
+		t.Fatalf("unhealthy primary kept: %q", p)
+	}
+	// Both unhealthy: the first connected one, as before.
+	for _, dst := range []string{"a:1", "b:1", "c:1"} {
+		rt.NoteDial("nl", dst, errors.New("socks5: host unreachable"))
+	}
+	if p := flow("192.168.1.5:42003"); p != "de" {
+		t.Fatalf("nothing healthy: %q", p)
+	}
+}

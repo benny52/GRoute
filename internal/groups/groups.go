@@ -83,9 +83,16 @@ const (
 	RevertAfter        = 30 * time.Second // failover revert stability
 	ProbeTimeout       = 5 * time.Second
 	ProbeFailLimit     = 2
-	ProbePeerWindow    = 3                // × interval: how recent a peer's probe success must be
-	ProbeGroupBudget   = 60 * time.Second // whole «Проверить» on a group
-	ProbeGroupWorkers  = 4
+	// ProbeRetry: a member whose probe failed is probed again this soon
+	// (not after the whole interval), so a dead one is left within seconds.
+	ProbeRetry = 10 * time.Second
+	// FlapFails failed probes within FlapWindow make a member that keeps
+	// coming back (works, fails, works) as bad as one that is down.
+	FlapFails         = 3
+	FlapWindow        = 5 * time.Minute
+	ProbePeerWindow   = 3                // × interval: how recent a peer's probe success must be
+	ProbeGroupBudget  = 60 * time.Second // whole «Проверить» on a group
+	ProbeGroupWorkers = 4
 
 	minInterval = 30
 	maxInterval = 600

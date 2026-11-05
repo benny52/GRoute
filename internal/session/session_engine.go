@@ -210,6 +210,26 @@ func (s *Session) ResetConnections() {
 	}
 }
 
+// ResetServer resets the relayed connections that go through a server
+// (its own, and those a rule or a group sent there): it stopped being
+// healthy, and the applications reconnect through a fallback.
+func (s *Session) ResetServer(profile string) {
+	if s.rel == nil || profile == "" {
+		return
+	}
+	now := time.Now()
+	s.rel.AbortWhere(func(e *nat.Entry) bool {
+		if e.Mode == nat.NoSniff && e.Profile == profile {
+			return true
+		}
+		if e.Rec == nil {
+			return false
+		}
+		v := e.Rec.View(now)
+		return v.Route == "tunnel" && v.Profile == profile
+	})
+}
+
 // SetRules starts the profiles the new rules need, swaps the rule set (new
 // flows use it) and stops the profiles no longer used.
 func (s *Session) SetRules(set *rules.Set, profiles []hysteria.Profile) {

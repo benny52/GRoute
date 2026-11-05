@@ -39,7 +39,8 @@ func (f *fakeSession) fail() {
 	f.cfg.OnEngineFail()
 }
 
-func (f *fakeSession) Stop() { f.stopped = true }
+func (f *fakeSession) Stop()              { f.stopped = true }
+func (f *fakeSession) ResetServer(string) {}
 func (f *fakeSession) ResetConnections() {
 	f.resets++
 	if f.onReset != nil {

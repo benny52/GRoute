@@ -23,6 +23,7 @@ var _ Session = NopSession{}
 
 func (NopSession) Stop()                                   {}
 func (NopSession) ResetConnections()                       {}
+func (NopSession) ResetServer(string)                      {}
 func (NopSession) SetRules(*rules.Set, []hysteria.Profile) {}
 func (NopSession) Flows() *flows.Registry                  { return nil }
 func (NopSession) EngineFailed() bool                      { return false }

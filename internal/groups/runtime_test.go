@@ -817,3 +817,109 @@ func TestRuntimeConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// A failed probe is retried after ProbeRetry, a failed connection has the
+// member probed at once: a dead server is found in seconds.
+func TestFastProbeRetry(t *testing.T) {
+	g := newRig(t, Group{ID: gid, Name: "G", Strategy: Failover, Members: []string{"a", "b"}})
+	g.set(true, "a", "b")
+	g.NoteProbe("a", 10*time.Millisecond, nil)
+	g.NoteProbe("b", 10*time.Millisecond, nil)
+	if due := g.DueProbes([]string{"a", "b"}, time.Minute); len(due) != 0 {
+		t.Fatalf("due %v", due)
+	}
+	g.NoteProbe("a", 0, errDial)
+	g.advance(ProbeRetry)
+	if due := g.DueProbes([]string{"a", "b"}, time.Minute); len(due) != 1 || due[0] != "a" {
+		t.Fatalf("a failed probe is not retried soon: %v", due)
+	}
+	g.NoteProbe("a", 10*time.Millisecond, nil)
+	g.advance(ProbeRetry)
+	g.NoteDial("b", "x:1", errDial)
+	if due := g.DueProbes([]string{"a", "b"}, time.Minute); len(due) != 1 || due[0] != "b" {
+		t.Fatalf("a failed connection does not probe: %v", due)
+	}
+}
+
+// A member that keeps dropping out (fails, passes, fails …) is left like
+// a dead one, and taken back only RevertAfter after its last failure.
+func TestFlappingMember(t *testing.T) {
+	g := newRig(t, Group{ID: gid, Name: "G", Strategy: Failover, Revert: true, Members: []string{"a", "b"}})
+	g.set(true, "a", "b")
+	g.advance(RevertAfter)
+	if p := g.choose(t, gid); p.Member != "a" {
+		t.Fatalf("%+v", p)
+	}
+	for i := range FlapFails {
+		g.NoteProbe("b", 10*time.Millisecond, nil)
+		g.NoteProbe("a", 0, errDial)
+		if i < FlapFails-1 {
+			g.advance(time.Second)
+			g.NoteProbe("a", 10*time.Millisecond, nil) // back again
+			if p := g.choose(t, gid); p.Member != "a" {
+				t.Fatalf("left after %d failures: %+v", i+1, p)
+			}
+			g.advance(time.Minute)
+		}
+	}
+	if p := g.choose(t, gid); p.Member != "b" {
+		t.Fatalf("a flapping member kept: %+v", p)
+	}
+	// It passes again, but its failures are recent: not taken back.
+	g.NoteProbe("a", 10*time.Millisecond, nil)
+	g.advance(RevertAfter)
+	if p := g.choose(t, gid); p.Member != "b" {
+		t.Fatalf("taken back within the flap window: %+v", p)
+	}
+	// The window passes without a failure: a is the primary again.
+	g.advance(FlapWindow)
+	g.NoteProbe("a", 10*time.Millisecond, nil)
+	g.NoteProbe("b", 10*time.Millisecond, nil)
+	if p := g.choose(t, gid); p.Member != "a" {
+		t.Fatalf("not reverted after a quiet window: %+v", p)
+	}
+}
+
+// A server outside groups (a rule's fallback chain): its probe and its
+// connections decide its health, and leaving it is reported once.
+func TestServerHealthy(t *testing.T) {
+	g := newRig(t)
+	var down []string
+	g.OnUnhealthy = func(id string) { down = append(down, id) }
+	g.set(true, "a", "b")
+	if !g.ServerHealthy("a") || !g.ServerHealthy("unknown") {
+		t.Fatal("a fresh server is healthy")
+	}
+	// a fails while b passes: a is the problem.
+	g.NoteProbe("a", 0, errDial)
+	if !g.ServerHealthy("a") {
+		t.Fatal("a failure without a peer's pass counts")
+	}
+	g.NoteProbe("b", 10*time.Millisecond, nil)
+	if g.ServerHealthy("a") || len(down) != 1 || down[0] != "a" {
+		t.Fatalf("healthy=%v down=%v", g.ServerHealthy("a"), down)
+	}
+	// It passes again: still out until RevertAfter has gone by.
+	g.NoteProbe("a", 10*time.Millisecond, nil)
+	if g.ServerHealthy("a") {
+		t.Fatal("taken back at once")
+	}
+	g.advance(RevertAfter)
+	if !g.ServerHealthy("a") {
+		t.Fatal("not back after RevertAfter")
+	}
+	// Failed connections to ChainStreak distinct destinations.
+	for i, dst := range []string{"x:1", "y:1", "z:1"} {
+		g.NoteDial("b", dst, errDial)
+		if healthy := g.ServerHealthy("b"); healthy != (i < ChainStreak-1) {
+			t.Fatalf("after %d failures healthy=%v", i+1, healthy)
+		}
+	}
+	if len(down) != 2 || down[1] != "b" {
+		t.Fatalf("down %v", down)
+	}
+	g.advance(PenaltyFor)
+	if !g.ServerHealthy("b") {
+		t.Fatal("penalty never ends")
+	}
+}
