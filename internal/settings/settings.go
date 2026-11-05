@@ -77,7 +77,7 @@ func (s *Settings) KillSwitchOn() bool      { return boolOr(s.KillSwitch, false)
 
 func (s *Settings) SniffTimeout() time.Duration {
 	if s.SniffTimeoutMs <= 0 {
-		return 800 * time.Millisecond
+		return 300 * time.Millisecond // relay.DefaultSniffTimeout
 	}
 	return time.Duration(s.SniffTimeoutMs) * time.Millisecond
 }

@@ -19,14 +19,14 @@ func TestParseDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.QUICBlocked() || !s.IPv6TunnelBlocked() || !s.RemoteDNS() || s.SniffTimeout() != 800*time.Millisecond {
+	if !s.QUICBlocked() || !s.IPv6TunnelBlocked() || !s.RemoteDNS() || s.SniffTimeout() != 300*time.Millisecond {
 		t.Fatalf("%+v", s)
 	}
 	if set == nil {
 		t.Fatal("no set")
 	}
-	s, _, err = Parse([]byte(`{"defaultAction":"tunnel","blockQUIC":false,"sniffTimeoutMs":300,"rules":[]}`))
-	if err != nil || s.QUICBlocked() || s.SniffTimeout() != 300*time.Millisecond || s.DefaultAction != rules.Tunnel {
+	s, _, err = Parse([]byte(`{"defaultAction":"tunnel","blockQUIC":false,"sniffTimeoutMs":900,"rules":[]}`))
+	if err != nil || s.QUICBlocked() || s.SniffTimeout() != 900*time.Millisecond || s.DefaultAction != rules.Tunnel {
 		t.Fatalf("%+v %v", s, err)
 	}
 	if _, _, err := Parse([]byte("\xef\xbb\xbf" + `{"defaultAction":"direct","rules":[]}`)); err != nil {

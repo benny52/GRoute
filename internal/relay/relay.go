@@ -78,6 +78,11 @@ var DefaultServerFirstPorts = map[uint16]bool{
 	21: true, 22: true, 25: true, 110: true, 143: true, 587: true, 3306: true, 5432: true,
 }
 
+// DefaultSniffTimeout bounds the wait for a client's first bytes. The
+// relay accepts on this machine, so a TLS or HTTP client's first bytes
+// arrive within milliseconds; the margin is for a loaded machine.
+const DefaultSniffTimeout = 300 * time.Millisecond
+
 type Server struct {
 	// Lookup maps the accepted peer (R, lp) to the NAT entry.
 	Lookup func(peer netip.AddrPort) *nat.Entry
@@ -104,8 +109,10 @@ type Server struct {
 	// PreferRemoteDNS sends the SNI/Host name (never a DNS-cache name, nor
 	// the Host of a request to a forward proxy) to SOCKS5 as ATYP=DOMAIN.
 	PreferRemoteDNS bool
-	// SniffTimeout bounds waiting for the first bytes (default 800ms);
-	// ServerFirstPorts use ServerFirstTimeout (default 150ms).
+	// SniffTimeout bounds waiting for the first bytes (default
+	// DefaultSniffTimeout); ServerFirstPorts use ServerFirstTimeout
+	// (default 150ms), learned server-first destinations silentWait
+	// (silent.go).
 	SniffTimeout       time.Duration
 	ServerFirstTimeout time.Duration
 	ServerFirstPorts   map[uint16]bool
@@ -121,6 +128,8 @@ type Server struct {
 		pass func(ctx context.Context, res rules.Result) (net.Conn, error))
 
 	Counters
+
+	silent silentSet // server-first destinations (silent.go)
 
 	port   uint16
 	lns    []net.Listener
@@ -485,6 +494,12 @@ func (s *Server) handle(c net.Conn) {
 	// take a broken upstream for a clean end of stream, nor keep a
 	// half-closed socket that outlives the NAT entry. The application side
 	// is shut down only once it has taken what it was sent (see settle).
+	if res.Stage == "sniff-timeout" && len(head) == 0 {
+		// The client said nothing: if the server speaks first, its address
+		// is remembered (silent.go).
+		dst := e.Flow.Dst
+		client.serverFirst = func() { s.silent.add(dst, time.Now()) }
+	}
 	res.Sent, res.Recv = socks5.Pipe(client, up)
 	res.Sent += int64(len(head))
 	c.Close()
@@ -583,7 +598,7 @@ func proxyRequest(head []byte) bool {
 func (s *Server) sniff(c net.Conn, e *nat.Entry) (head []byte, host string, src rules.DomainSource, stage string) {
 	timeout := s.SniffTimeout
 	if timeout == 0 {
-		timeout = 800 * time.Millisecond
+		timeout = DefaultSniffTimeout
 	}
 	sf := s.ServerFirstPorts
 	if sf == nil {
@@ -595,7 +610,11 @@ func (s *Server) sniff(c net.Conn, e *nat.Entry) (head []byte, host string, src 
 			timeout = 150 * time.Millisecond
 		}
 	}
-	_ = c.SetReadDeadline(time.Now().Add(timeout))
+	now := time.Now()
+	if s.silent.has(e.Flow.Dst, now) {
+		timeout = min(timeout, silentWait)
+	}
+	_ = c.SetReadDeadline(now.Add(timeout))
 	defer c.SetReadDeadline(time.Time{})
 	buf := make([]byte, 0, 4096)
 	tmp := make([]byte, 4096)
@@ -603,6 +622,10 @@ func (s *Server) sniff(c net.Conn, e *nat.Entry) (head []byte, host string, src 
 	for len(buf) < sniff.MaxTLS {
 		n, err := c.Read(tmp)
 		buf = append(buf, tmp[:n]...)
+		if len(buf) > 0 {
+			// This client talks first: whatever its server does.
+			s.silent.forget(e.Flow.Dst)
+		}
 		r := sniff.Parse(buf)
 		if r.Done {
 			switch {
@@ -665,10 +688,17 @@ type appConn struct {
 	s       *Server
 	rec     *flows.Record // nil: not recorded
 	written int64         // by the one goroutine that writes
+	// serverFirst, when set, is called if the first bytes of the
+	// connection come from the server: written before any were read.
+	serverFirst func()
+	read        atomic.Bool
 }
 
 func (c *appConn) Read(b []byte) (int, error) {
 	n, err := c.Conn.Read(b)
+	if n > 0 {
+		c.read.Store(true)
+	}
 	if c.rec != nil {
 		c.rec.Sent.Add(int64(n))
 	}
@@ -676,6 +706,9 @@ func (c *appConn) Read(b []byte) (int, error) {
 }
 
 func (c *appConn) Write(b []byte) (int, error) {
+	if c.written == 0 && len(b) > 0 && c.serverFirst != nil && !c.read.Load() {
+		c.serverFirst()
+	}
 	n, err := c.Conn.Write(b)
 	c.written += int64(n)
 	if c.rec != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -285,5 +286,102 @@ func TestSniffDecisionFailover(t *testing.T) {
 	<-f.done
 	if v := rec.View(time.Now()); !v.Failover || v.Group != "grp-000000000001" || v.Profile != "nl" || v.Route != "tunnel" || !v.Settled() {
 		t.Fatalf("%+v", v)
+	}
+}
+
+// greeter is a server-first server: it greets, then echoes.
+func greeter(t *testing.T) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				c.Write([]byte("220 hello\r\n"))
+				io.Copy(c, c)
+			}()
+		}
+	}()
+	return ln
+}
+
+func TestSniffLearnsServerFirst(t *testing.T) {
+	f, ch := sniffFixture(t, rules.Direct)
+	f.relay.SniffTimeout = 300 * time.Millisecond
+	g := greeter(t).Addr().(*net.TCPAddr).AddrPort()
+	go func() { // results are not looked at here
+		for range f.done {
+		}
+	}()
+	silent := func(dst netip.AddrPort) time.Duration {
+		t.Helper()
+		start := time.Now()
+		c := f.dialEntry(t, &nat.Entry{Mode: nat.Sniff, Flow: nat.FlowKey{Dst: dst}})
+		defer c.Close()
+		if d := <-ch; d.domain != "" {
+			t.Fatalf("%+v", d)
+		}
+		el := time.Since(start)
+		if dst == g {
+			got := make([]byte, 11)
+			c.SetReadDeadline(time.Now().Add(3 * time.Second))
+			if _, err := io.ReadFull(c, got); err != nil || string(got) != "220 hello\r\n" {
+				t.Fatalf("greeting %q %v", got, err)
+			}
+		} else {
+			echoRoundTrip(t, c, []byte("late"))
+		}
+		return el
+	}
+	// The first connection waits the timeout; the server greets.
+	if el := silent(g); el < 250*time.Millisecond {
+		t.Fatalf("first connection gave up after %v", el)
+	}
+	// Later ones to the same address do not wait.
+	if el := silent(g); el > 150*time.Millisecond {
+		t.Fatalf("learned server-first destination waited %v", el)
+	}
+	// A silent client of a server that does not speak first (the echo
+	// server) is not learned: it keeps the full wait.
+	echo := f.echo.Addr().(*net.TCPAddr).AddrPort()
+	silent(echo)
+	if el := silent(echo); el < 250*time.Millisecond {
+		t.Fatalf("client-first destination learned: waited %v", el)
+	}
+	// A client that talks first to the learned address is seen within the
+	// short wait and the address is forgotten.
+	c := f.dialEntry(t, &nat.Entry{Mode: nat.Sniff, Flow: nat.FlowKey{Dst: g}})
+	hello := clientHello(t, "talks.example.com")
+	c.Write(hello)
+	if d := <-ch; d.domain != "talks.example.com" {
+		t.Fatalf("%+v", d)
+	}
+	c.Close()
+	if f.relay.silent.has(g, time.Now()) {
+		t.Fatal("address not forgotten after a client spoke first")
+	}
+}
+
+func TestSilentSetBounded(t *testing.T) {
+	var s silentSet
+	now := time.Now()
+	for i := range silentMax + 10 {
+		s.add(netip.AddrPortFrom(netip.MustParseAddr("192.0.2.1"), uint16(i+1)), now)
+	}
+	if len(s.m) > silentMax {
+		t.Fatalf("%d entries", len(s.m))
+	}
+	k := netip.AddrPortFrom(netip.MustParseAddr("198.51.100.1"), 7)
+	s.add(k, now)
+	if !s.has(k, now.Add(silentTTL-time.Second)) || s.has(k, now.Add(silentTTL+time.Second)) {
+		t.Fatal("ttl")
 	}
 }
