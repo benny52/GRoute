@@ -116,7 +116,7 @@
     for (let a of text.split(/[,;\n]+/)) {
       a = a.trim().replace(/^"|"$/g, '');
       if (!a) continue;
-      if (!/[\\/.*?]/.test(a)) a += '.exe';
+      if (!ui.mac && !/[\\/.*?]/.test(a)) a += '.exe'; // macOS programs have no extension
       if (!r.apps!.some((x) => x.pattern.toLowerCase() === a.toLowerCase())) r.apps!.push({ pattern: a, inheritChildren: true });
     }
     appInput = '';
@@ -176,7 +176,7 @@
       const path = await api.BrowseExe();
       if (path) {
         r.apps!.push({ pattern: path, inheritChildren: true });
-        if (!r.name) r.name = path.split('\\').pop()?.replace(/\.exe$/i, '') ?? '';
+        if (!r.name) r.name = path.split(/[\\/]/).pop()?.replace(/\.exe$/i, '') ?? '';
       }
     } catch (e) {
       error = errText(e);
@@ -405,7 +405,7 @@
         <input
           class="chip-input"
           bind:value={appInput}
-          placeholder={r.apps!.length ? 'ещё программа…' : 'начните вводить: tele, disc, steam… или C:\\Games\\*'}
+          placeholder={r.apps!.length ? 'ещё программа…' : ui.mac ? 'начните вводить: tele, disc, steam… или /Applications/Steam.app/*' : 'начните вводить: tele, disc, steam… или C:\\Games\\*'}
           onfocus={() => {
             appOpen = true;
             suggestApps();
@@ -462,7 +462,11 @@
           </div>
         {/if}
       </div>
-      <div class="hint">Начните вводить имя, и HyRoute подскажет из запущенных программ. Ещё можно: имя файла (discord → Discord.exe), полный путь или папка с * — <code>C:\Games\*</code> значит всё внутри папки.</div>
+      {#if ui.mac}
+        <div class="hint">Начните вводить имя, и HyRoute подскажет из запущенных программ. Ещё можно: имя программы (<code>Discord</code>, <code>Telegram</code>), «Обзор…» с выбором программы в «Программах», полный путь или папка с * — <code>/Applications/Steam.app/*</code> значит всё внутри программы, вместе с её помощниками.</div>
+      {:else}
+        <div class="hint">Начните вводить имя, и HyRoute подскажет из запущенных программ. Ещё можно: имя файла (discord → Discord.exe), полный путь или папка с * — <code>C:\Games\*</code> значит всё внутри папки.</div>
+      {/if}
     </div>
 
     {#if r.apps!.length && r.domains!.length}

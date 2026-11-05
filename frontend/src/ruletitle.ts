@@ -5,9 +5,13 @@ import { cleanRule, portsText, type Rule } from './api';
 import { hide, ui, mainTarget } from './state.svelte';
 import { itemLabel, shortLabel } from './geo.svelte';
 
-// appLabel is a program's file name; a glob pattern is shown as is.
+// appLabel is a program's file name; a glob pattern is shown as is. On
+// macOS a Windows name is shown without .exe: it matches the program
+// without it there (rules.exeOptional).
 export function appLabel(p: string): string {
-  return /[*?]/.test(p) ? p : (p.split('\\').pop() ?? p);
+  if (/[*?]/.test(p)) return p;
+  const name = p.split(/[\\/]/).pop() || p;
+  return ui.mac ? name.replace(/\.exe$/i, '') : name;
 }
 
 export function siteLabel(d: string): string {
