@@ -480,6 +480,8 @@ func (g *GUI) GeoCategories(kind, query string) []string {
 }
 func (g *GUI) InstallCore() error            { return g.ctl.InstallCore() }
 func (g *GUI) RollbackCore() error           { return g.ctl.RollbackCore() }
+func (g *GUI) InstallXray() error            { return g.ctl.InstallXray() }
+func (g *GUI) RollbackXray() error           { return g.ctl.RollbackXray() }
 func (g *GUI) DownloadAppUpdate() error      { return g.ctl.DownloadAppUpdate() }
 func (g *GUI) SkipAppVersion(v string) error { return g.ctl.SkipAppVersion(v) }
 

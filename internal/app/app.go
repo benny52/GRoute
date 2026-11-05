@@ -95,6 +95,8 @@ type Controller struct {
 	// Device identifies this computer to subscription panels that limit
 	// devices (DeviceInfo; nil sends nothing).
 	Device func(host string) DeviceInfo
+	// xrayTest replaces hysteria.XrayTest in TestXray (tests).
+	xrayTest func(path string, cfg []byte) error
 	// Fetch overrides the subscription download (tests).
 	Fetch func(ctx context.Context, url string) (FetchResult, error)
 	// KillSwitch closes the internet when routing stops without a

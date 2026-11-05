@@ -503,6 +503,15 @@ export interface Updates {
   coreBusy: boolean;
   coreProgress: number;
   coreNeedsReconnect: boolean;
+  // The Xray core of VLESS servers, the same as the core* fields.
+  xray: {
+    info: CoreInfo;
+    update: CoreUpdate | null;
+    error: string;
+    busy: boolean;
+    progress: number;
+    needsReconnect: boolean;
+  };
 }
 
 export interface Subscription {
@@ -626,6 +635,8 @@ interface GUI {
   CheckUpdates(): Promise<Updates>;
   InstallCore(): Promise<void>;
   RollbackCore(): Promise<void>;
+  InstallXray(): Promise<void>;
+  RollbackXray(): Promise<void>;
   DownloadAppUpdate(): Promise<void>;
   ApplyAppUpdate(): Promise<void>;
   SkipAppVersion(v: string): Promise<void>;

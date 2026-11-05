@@ -1,12 +1,14 @@
-// Package core manages the Hysteria binary: the one shipped next to
-// HyRoute and updates downloaded from apernet/hysteria releases. Updated
-// cores live in a directory only administrators can write (HyRoute runs
+// Package core manages the cores HyRoute runs servers with: Hysteria (the
+// binary shipped next to HyRoute and updates from apernet/hysteria
+// releases) and Xray, for VLESS (XTLS/Xray-core releases). Updated cores
+// live in a directory only administrators can write (HyRoute runs
 // elevated and must not execute a file a normal process could replace),
 // are verified by SHA256 before every start, and the previous core is kept
 // for a rollback.
 package core
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +35,81 @@ const (
 	Major = 2
 )
 
+// Kind is a core a Manager keeps: where its releases are and how one
+// is checked.
+type Kind struct {
+	Name string // "Hysteria", "Xray": messages
+	Repo string
+	Exe  string // the file in Dir\<version>
+	// Accept picks the releases of the core (stable ones only are
+	// offered); Version is a release's version ("app/v2.12.4" → "v2.12.4").
+	Accept  func(tag string) bool
+	Version func(tag string) string
+	// Asset is the file of the release to download: the exe itself, or a
+	// zip holding it at Member.
+	Asset, Member string
+	// Sums are the release's official checksums of Asset; none means no
+	// update.
+	Sums func(ctx context.Context, c *release.Client, r release.Release, a release.Asset) []string
+}
+
+// Hysteria is apernet/hysteria's Windows binary, Hysteria 2 only.
+var Hysteria = Kind{
+	Name: "Hysteria", Repo: Repo, Exe: "hysteria.exe", Asset: AssetName,
+	Accept: func(tag string) bool {
+		v, err := release.Parse(tag)
+		return err == nil && strings.HasPrefix(tag, "app/") && v.Major == Major
+	},
+	Version: func(tag string) string { return strings.TrimPrefix(tag, "app/") },
+	// hashes.txt of the same release is the official list; GitHub's own
+	// digest is checked too when present.
+	Sums: func(ctx context.Context, c *release.Client, r release.Release, a release.Asset) []string {
+		var out []string
+		if h, has := r.Asset("hashes.txt"); has {
+			if list, err := c.Fetch(ctx, h.URL); err == nil {
+				if s := release.SumFor(list, AssetName); s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+		if d := a.SHA256(); d != "" {
+			out = append(out, d)
+		}
+		return out
+	},
+}
+
+// Xray is XTLS/Xray-core's Windows zip, which holds xray.exe. Its
+// versions are dates (v26.10.31) with no major one that would mark a
+// config change: a new core is offered whatever it is, and Manager.Test
+// keeps one that does not take HyRoute's configs.
+var Xray = Kind{
+	Name: "Xray", Repo: "XTLS/Xray-core", Exe: "xray.exe", Asset: "Xray-windows-64.zip", Member: "xray.exe",
+	Accept: func(tag string) bool {
+		_, err := release.Parse(tag)
+		return err == nil && strings.HasPrefix(tag, "v")
+	},
+	Version: func(tag string) string { return tag },
+	// The zip's .dgst file of the release ("SHA2-256= <hex>"), and
+	// GitHub's own digest.
+	Sums: func(ctx context.Context, c *release.Client, r release.Release, a release.Asset) []string {
+		var out []string
+		if h, has := r.Asset(a.Name + ".dgst"); has {
+			if b, err := c.Fetch(ctx, h.URL); err == nil {
+				if m := dgstSHA256.FindSubmatch(b); m != nil {
+					out = append(out, strings.ToLower(string(m[1])))
+				}
+			}
+		}
+		if d := a.SHA256(); d != "" {
+			out = append(out, d)
+		}
+		return out
+	},
+}
+
+var dgstSHA256 = regexp.MustCompile(`(?m)^SHA2-256=\s*([0-9a-fA-F]{64})\s*$`)
+
 type entry struct {
 	Version string `json:"version"`
 	SHA256  string `json:"sha256"`
@@ -43,13 +121,18 @@ type state struct {
 }
 
 type Manager struct {
-	// Dir holds <version>\hysteria.exe and core.json (protected).
+	// Kind is the core (zero: Hysteria).
+	Kind Kind
+	// Dir holds <version>\<exe> and core.json (protected).
 	Dir string
-	// Bundled is the hysteria.exe next to HyRoute.
+	// Bundled is the core next to HyRoute (its verified runtime copy).
 	Bundled string
 	Client  *release.Client
-	// Version runs "hysteria version" (hysteria.ExeVersion).
+	// Version runs "<core> version" (hysteria.ExeVersion, XrayVersion).
 	Version func(path string) (string, error)
+	// Test, when set, must accept a new core before it becomes current
+	// (Xray: the configs of the user's servers).
+	Test func(path string) error
 
 	mu       sync.Mutex
 	st       state
@@ -103,8 +186,16 @@ func (m *Manager) save() error {
 	return os.Rename(tmp, filepath.Join(m.Dir, "core.json"))
 }
 
+// kind is m.Kind, Hysteria when unset.
+func (m *Manager) kind() Kind {
+	if m.Kind.Repo == "" {
+		return Hysteria
+	}
+	return m.Kind
+}
+
 func (m *Manager) path(e *entry) string {
-	return filepath.Join(m.Dir, e.Version, "hysteria.exe")
+	return filepath.Join(m.Dir, e.Version, m.kind().Exe)
 }
 
 // verified reports whether e's file still has its recorded hash.
@@ -265,19 +356,17 @@ type Update struct {
 	sha256    []string
 }
 
-// Check finds the newest stable Hysteria 2 release newer than the core in
-// use. ok is false when the core is up to date.
+// Check finds the newest stable release of the core newer than the core
+// in use. ok is false when the core is up to date.
 func (m *Manager) Check(ctx context.Context) (u Update, ok bool, err error) {
-	list, err := m.Client.Releases(ctx, Repo)
+	k := m.kind()
+	list, err := m.Client.Releases(ctx, k.Repo)
 	if err != nil {
 		return u, false, err
 	}
-	r, found := release.Latest(list, false, func(tag string) bool {
-		v, err := release.Parse(tag)
-		return err == nil && strings.HasPrefix(tag, "app/") && v.Major == Major
-	})
+	r, found := release.Latest(list, false, k.Accept)
 	if !found {
-		return u, false, errors.New("стабильных релизов Hysteria 2 не найдено")
+		return u, false, fmt.Errorf("стабильных релизов %s не найдено", k.Name)
 	}
 	cur := m.version(m.Path())
 	if _, err := release.Parse(cur); err != nil {
@@ -287,25 +376,14 @@ func (m *Manager) Check(ctx context.Context) (u Update, ok bool, err error) {
 	if release.Compare(r.Tag, cur) <= 0 {
 		return u, false, nil
 	}
-	a, has := r.Asset(AssetName)
+	a, has := r.Asset(k.Asset)
 	if !has {
-		return u, false, fmt.Errorf("в релизе %s нет %s", r.Tag, AssetName)
+		return u, false, fmt.Errorf("в релизе %s нет %s", r.Tag, k.Asset)
 	}
-	u = Update{Version: strings.TrimPrefix(r.Tag, "app/"), Tag: r.Tag, Notes: r.Body, Published: r.Published, Page: r.Page, url: a.URL}
-	// hashes.txt of the same release is the official list; GitHub's own
-	// digest is checked too when present.
-	if h, has := r.Asset("hashes.txt"); has {
-		if list, err := m.Client.Fetch(ctx, h.URL); err == nil {
-			if s := release.SumFor(list, AssetName); s != "" {
-				u.sha256 = append(u.sha256, s)
-			}
-		}
-	}
-	if d := a.SHA256(); d != "" {
-		u.sha256 = append(u.sha256, d)
-	}
+	u = Update{Version: k.Version(r.Tag), Tag: r.Tag, Notes: r.Body, Published: r.Published, Page: r.Page, url: a.URL}
+	u.sha256 = k.Sums(ctx, m.Client, r, a)
 	if len(u.sha256) == 0 {
-		return u, false, errors.New("у релиза нет контрольных сумм (hashes.txt): обновление небезопасно")
+		return u, false, errors.New("у релиза нет контрольных сумм: обновление небезопасно")
 	}
 	return u, true, nil
 }
@@ -321,9 +399,16 @@ func (m *Manager) Install(ctx context.Context, u Update, progress func(done, tot
 	if err := ProtectDir(m.Dir); err != nil {
 		return fmt.Errorf("папка ядра: %w", err)
 	}
+	k := m.kind()
 	dir := filepath.Join(m.Dir, u.Version)
-	dst := filepath.Join(dir, "hysteria.exe")
-	sum, err := m.Client.Download(ctx, u.url, dst, 200<<20, progress, u.sha256...)
+	dst := filepath.Join(dir, k.Exe)
+	var sum string
+	var err error
+	if k.Member == "" {
+		sum, err = m.Client.Download(ctx, u.url, dst, 200<<20, progress, u.sha256...)
+	} else {
+		sum, err = m.downloadMember(ctx, u, dir, dst, progress)
+	}
 	if err != nil {
 		os.RemoveAll(dir)
 		return err
@@ -335,6 +420,12 @@ func (m *Manager) Install(ctx context.Context, u Update, progress func(done, tot
 			err = fmt.Errorf("сообщает версию %s", got)
 		}
 		return fmt.Errorf("новое ядро не запускается, обновление отменено: %v", err)
+	}
+	if m.Test != nil {
+		if err := m.Test(dst); err != nil {
+			os.RemoveAll(dir)
+			return fmt.Errorf("ядро %s %s не принимает настройки ваших серверов, обновление отменено: %v", k.Name, u.Version, err)
+		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -401,4 +492,49 @@ func fileSHA256(p string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// downloadMember downloads u's zip (checked against the release's sums)
+// into dir, takes the core out of it into dst and returns dst's SHA-256.
+// Only the one member is read, by its exact name, into a path HyRoute
+// chose: the archive's other files and names never reach the disk.
+func (m *Manager) downloadMember(ctx context.Context, u Update, dir, dst string, progress func(done, total int64)) (string, error) {
+	k := m.kind()
+	zipPath := filepath.Join(dir, k.Asset)
+	if _, err := m.Client.Download(ctx, u.url, zipPath, 200<<20, progress, u.sha256...); err != nil {
+		return "", err
+	}
+	defer os.Remove(zipPath)
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return "", fmt.Errorf("архив %s: %w", k.Asset, err)
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		if f.Name != k.Member {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		defer rc.Close()
+		out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+		if err != nil {
+			return "", err
+		}
+		h := sha256.New()
+		n, err := io.Copy(io.MultiWriter(out, h), io.LimitReader(rc, 200<<20+1))
+		if cerr := out.Close(); err == nil {
+			err = cerr
+		}
+		if err == nil && n > 200<<20 {
+			err = errors.New("файл больше 200 МБ")
+		}
+		if err != nil {
+			return "", fmt.Errorf("%s из архива: %w", k.Member, err)
+		}
+		return hex.EncodeToString(h.Sum(nil)), nil
+	}
+	return "", fmt.Errorf("в архиве %s нет %s", k.Asset, k.Member)
 }

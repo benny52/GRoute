@@ -29,6 +29,11 @@ func (cfg *Config) HysteriaPath() string {
 
 // XrayPath is the xray.exe a VLESS profile starts with.
 func (cfg *Config) XrayPath() string {
+	if cfg.Xray != nil {
+		if p := cfg.Xray(); p != "" {
+			return p
+		}
+	}
 	return filepath.Join(cfg.Dir, "xray.exe")
 }
 
@@ -62,7 +67,9 @@ type Config struct {
 	// Hysteria returns the hysteria.exe to launch (read at every profile
 	// start). Nil = Dir\hysteria.exe.
 	Hysteria func() string
-	RunDir   string
+	// Xray is the same for xray.exe (an updated core). Nil = Dir\xray.exe.
+	Xray   func() string
+	RunDir string
 	// Profiles are the profiles the rules use; each gets its own Hysteria.
 	Profiles []hysteria.Profile
 	// Stub replaces Hysteria with an in-process SOCKS5 server shared by

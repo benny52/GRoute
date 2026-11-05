@@ -320,3 +320,20 @@ func TestVLESSReasonWhileStarting(t *testing.T) {
 		}
 	}
 }
+
+func TestXrayVersionAndTestReason(t *testing.T) {
+	v, err := parseXrayVersion([]byte("Xray 26.10.31 (Xray, Penetrates Everything.) a4a3dff (go1.27.3 windows/amd64)\nA unified platform for anti-censorship.\n"))
+	if err != nil || v != "v26.10.31" {
+		t.Fatalf("%q %v", v, err)
+	}
+	if _, err := parseXrayVersion([]byte("Hysteria version v2")); err == nil {
+		t.Fatal("another program taken for Xray")
+	}
+	out := "Xray 26.10.31 (Xray, Penetrates Everything.)\n2026/11/05 [Info] infra/conf/serial: Reading config: stdin:\nFailed to start: main: failed to load config files: [stdin:] > infra/conf: unknown \"fingerprint\": x\n"
+	if r := xrayTestReason([]byte(out), errors.New("exit status 23")); r != `main: failed to load config files: [stdin:] > infra/conf: unknown "fingerprint": x` {
+		t.Fatalf("%q", r)
+	}
+	if r := xrayTestReason(nil, errors.New("exit status 1")); r != "exit status 1" {
+		t.Fatalf("%q", r)
+	}
+}

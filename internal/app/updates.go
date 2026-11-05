@@ -20,8 +20,10 @@ type Updater struct {
 	// self-update.
 	Repo string
 	// Dir is the protected staging directory for HyRoute packages.
-	Dir    string
-	Core   *core.Manager
+	Dir  string
+	Core *core.Manager
+	// Xray is the core of VLESS servers (nil = no Xray updates).
+	Xray   *core.Manager
 	Client *release.Client
 
 	mu    sync.Mutex
@@ -31,6 +33,7 @@ type Updater struct {
 	// coreSess is the session that ran when the core changed: its
 	// profiles keep the old core until a reconnect replaces it.
 	coreSess Session
+	xraySess Session // the same for Xray
 }
 
 // UpdatesState is shown in the UI.
@@ -54,7 +57,20 @@ type UpdatesState struct {
 	CoreProgress    float64      `json:"coreProgress"`
 	CoreNeedsReconn bool         `json:"coreNeedsReconnect"`
 
+	// Xray, the core of VLESS servers: the same as the Core fields.
+	Xray XrayState `json:"xray"`
+
 	staging string
+}
+
+// XrayState is the Xray core in UpdatesState.
+type XrayState struct {
+	Info           core.Info    `json:"info"`
+	Update         *core.Update `json:"update"`
+	Error          string       `json:"error"`
+	Busy           bool         `json:"busy"`
+	Progress       float64      `json:"progress"`
+	NeedsReconnect bool         `json:"needsReconnect"`
 }
 
 // IsDev reports builds that are not a release (no "vX.Y.Z" tag).
@@ -70,8 +86,20 @@ func (c *Controller) Updates() UpdatesState {
 	}
 	u.mu.Lock()
 	st := u.state
-	coreSess := u.coreSess
+	coreSess, xraySess := u.coreSess, u.xraySess
 	u.mu.Unlock()
+	if st.Xray.NeedsReconnect {
+		c.mu.Lock()
+		st.Xray.NeedsReconnect = c.sess != nil && c.sess == xraySess
+		c.mu.Unlock()
+		if !st.Xray.NeedsReconnect {
+			u.set(func(s *UpdatesState) {
+				if u.xraySess == xraySess {
+					s.Xray.NeedsReconnect, u.xraySess = false, nil
+				}
+			})
+		}
+	}
 	if st.CoreNeedsReconn {
 		// After a reconnect or a disconnect no profile runs the old core.
 		c.mu.Lock()
@@ -89,6 +117,9 @@ func (c *Controller) Updates() UpdatesState {
 	if u.Core != nil {
 		st.Core = u.Core.Info()
 	}
+	if u.Xray != nil {
+		st.Xray.Info = u.Xray.Info()
+	}
 	if st.App != nil {
 		st.AppSkipped = c.Prefs().SkipVersion == st.App.Version
 	}
@@ -101,7 +132,7 @@ func (u *Updater) set(f func(*UpdatesState)) {
 	u.mu.Unlock()
 }
 
-// CheckUpdates looks for a newer HyRoute and a newer Hysteria core.
+// CheckUpdates looks for a newer HyRoute, Hysteria core and Xray core.
 func (c *Controller) CheckUpdates() UpdatesState {
 	u := c.Updater
 	if u == nil {
@@ -112,7 +143,11 @@ func (c *Controller) CheckUpdates() UpdatesState {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		c.checkXray(ctx)
+	}()
 	go func() {
 		defer wg.Done()
 		if u.Repo == "" {

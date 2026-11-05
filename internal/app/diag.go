@@ -17,6 +17,9 @@ func (c *Controller) Diagnostics(system []string, privacy bool) string {
 	w("HyRoute: %s", c.Version)
 	if c.CoreVersion != nil {
 		w("Hysteria: %s", c.CoreVersion())
+		if u := c.Updater; u != nil && u.Xray != nil {
+			w("Xray: %s", u.Xray.Info().Version)
+		}
 	}
 	for _, l := range system {
 		w("%s", l)

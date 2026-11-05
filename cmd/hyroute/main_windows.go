@@ -215,10 +215,21 @@ func main() {
 		Version: hysteria.ExeVersion,
 	}
 	ctl.Base.Hysteria = coreMgr.Path
-	// The kill switch lets HyRoute and Hysteria through, so they can
-	// reconnect while the internet is closed.
+	// Xray, for VLESS servers: the bundled copy or an update, which must
+	// take the configs of the user's servers first (TestXray).
+	xrayMgr := &core.Manager{
+		Kind:    core.Xray,
+		Dir:     core.DefaultDir("xray"),
+		Bundled: filepath.Join(runtimeDir, "xray.exe"),
+		Client:  coreMgr.Client,
+		Version: hysteria.XrayVersion,
+		Test:    ctl.TestXray,
+	}
+	ctl.Base.Xray = xrayMgr.Path
+	// The kill switch lets HyRoute, Hysteria and Xray through, so they
+	// can reconnect while the internet is closed.
 	ctl.KillSwitch = &killswitch.Switch{Self: exe, Apps: func() []string {
-		return append([]string{exe, filepath.Join(runtimeDir, "xray.exe")}, coreMgr.Paths()...)
+		return append(append([]string{exe}, coreMgr.Paths()...), xrayMgr.Paths()...)
 	}}
 	ctl.InitKillSwitch()
 	// A block left from before is what a start at sign-in has to show:
@@ -233,7 +244,7 @@ func main() {
 	ctl.ProxyFirewall = func(tcp, udp []int) error { return fwrule.SetProxyPorts(exe, tcp, udp) }
 	ctl.LegacyProxyUDP = fwrule.LegacyProxyUDP
 	ctl.KeepV12ProxyUDP() // before the window can show a proxy
-	ctl.Updater = &app.Updater{Repo: updateRepo, Dir: core.DefaultDir("updates"), Core: coreMgr, Client: coreMgr.Client}
+	ctl.Updater = &app.Updater{Repo: updateRepo, Dir: core.DefaultDir("updates"), Core: coreMgr, Xray: xrayMgr, Client: coreMgr.Client}
 	cleanUpdates(ctl.Updater.Dir)
 
 	life, endLife := context.WithCancel(context.Background())

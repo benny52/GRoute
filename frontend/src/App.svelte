@@ -230,6 +230,19 @@
   // with the next poll, and a second click before it would get «нет
   // доступного обновления ядра» while the first install goes on.
   let coreInstalling = $state(false);
+  // The same for the Xray core, offered only with VLESS servers.
+  let xrayInstalling = $state(false);
+  let xrayLater = $state(false);
+  const hasVLESS = $derived(ui.profiles.some((p) => p.protocol === 'vless'));
+  async function installXray() {
+    xrayInstalling = true;
+    try {
+      await api.InstallXray();
+    } finally {
+      xrayInstalling = false;
+      refreshUpdates();
+    }
+  }
   async function installCore() {
     coreInstalling = true;
     try {
@@ -253,7 +266,7 @@
           <Icon name={p.icon} />
           <span>{p.label}</span>
           {#if p.id === 'rules' && st?.warnings?.length}<span class="count warn">{st.warnings.length}</span>{/if}
-          {#if p.id === 'settings' && (updates?.app || updates?.coreUpdate)}<span class="count">1</span>{/if}
+          {#if p.id === 'settings' && (updates?.app || updates?.coreUpdate || (updates?.xray?.update && hasVLESS))}<span class="count">1</span>{/if}
           {#if p.id === 'subs' && subAlerts().length}<span class="count warn" title="Подписки, которые скоро закончатся или закончились">{subAlerts().length}</span>{/if}
         </button>
       {/each}
@@ -304,6 +317,22 @@
           </button>
           <button class="ghost" onclick={() => (coreLater = true)}>Позже</button>
         </div>
+      {/if}
+      {#if updates?.xray?.update && hasVLESS && !xrayLater}
+        <div class="note info row">
+          <Icon name="download" size={16} />
+          <span class="grow"
+            >Доступно ядро Xray <b>{updates.xray.update.version}</b> для серверов VLESS (сейчас {updates.xray.info.version}). Перед переключением оно проверит
+            настройки ваших серверов.</span
+          >
+          <button class="primary" onclick={() => installXray().catch((e) => (actionError = errText(e)))} disabled={updates.xray.busy || xrayInstalling}>
+            {updates.xray.busy || xrayInstalling ? `Загрузка ${Math.round(updates.xray.progress * 100)}%` : 'Обновить'}
+          </button>
+          <button class="ghost" onclick={() => (xrayLater = true)}>Позже</button>
+        </div>
+      {/if}
+      {#if updates?.xray?.needsReconnect && online && hasVLESS}
+        <div class="note warn row"><span class="grow">Ядро Xray обновлено и заработает после переподключения.</span><button onclick={reconnect}>Переподключить</button></div>
       {/if}
       {#if updates?.coreNeedsReconnect && online}
         <div class="note warn row"><span class="grow">Ядро Hysteria обновлено и заработает после переподключения.</span><button onclick={reconnect}>Переподключить</button></div>

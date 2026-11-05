@@ -275,10 +275,25 @@
         {#if updates.core.error}<span></span><span class="err">{updates.core.error}</span>{/if}
         {#if updates.coreError}<span></span><span class="err">{updates.coreError}</span>{/if}
 
+        {#if updates.xray}
+          <span class="muted">Ядро Xray (VLESS)</span>
+          <span>
+            <b>{updates.xray.info.version}</b>
+            <span class="muted">{updates.xray.info.updated ? '(обновлённое)' : '(встроенное)'}</span>
+            {#if updates.xray.update}→ доступно <b>{updates.xray.update.version}</b>{/if}
+            {#if updates.xray.busy}(загрузка и проверка {Math.round(updates.xray.progress * 100)}%){/if}
+          </span>
+          {#if updates.xray.info.error}<span></span><span class="err">{updates.xray.info.error}</span>{/if}
+          {#if updates.xray.error}<span></span><span class="err">{updates.xray.error}</span>{/if}
+        {/if}
+
         <span class="muted">Проверено</span><span>{fmtDateTime(updates.checked)}</span>
       </div>
       {#if updates.coreNeedsReconnect && !offline}
         <div class="note warn">Новое ядро Hysteria будет использовано после переподключения.</div>
+      {/if}
+      {#if updates.xray?.needsReconnect && !offline}
+        <div class="note warn">Новое ядро Xray будет использовано после переподключения.</div>
       {/if}
       <div class="row">
         <button class="primary" onclick={() => run(() => api.CheckUpdates(), '')} disabled={updates.checking}>
@@ -293,6 +308,19 @@
         {#if updates.core.previous}
           <button onclick={() => confirm(`Вернуть ядро ${updates!.core.previous}?`) && run(() => api.RollbackCore(), 'Ядро возвращено')}>
             Откатить ядро ({updates.core.previous})
+          </button>
+        {/if}
+        {#if updates.xray?.update}
+          <button
+            onclick={() => run(() => api.InstallXray(), 'Ядро Xray обновлено')}
+            disabled={updates.xray.busy}
+            title="Перед переключением новое ядро проверяет настройки ваших серверов VLESS: если оно их не принимает, остаётся прежнее"
+            >Обновить ядро Xray</button
+          >
+        {/if}
+        {#if updates.xray?.info.previous}
+          <button onclick={() => confirm(`Вернуть ядро Xray ${updates!.xray.info.previous}?`) && run(() => api.RollbackXray(), 'Ядро Xray возвращено')}>
+            Откатить Xray ({updates.xray.info.previous})
           </button>
         {/if}
       </div>
