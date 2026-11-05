@@ -159,6 +159,10 @@ type liveRig struct {
 	slow         map[string]bool
 	web          *httptest.Server
 	room         int
+	// holdTemp, when set, holds every temporary runner's creation until
+	// closed; tempHeld is signalled first (TestProbeGroup makes its two
+	// calls overlap so).
+	holdTemp, tempHeld chan struct{}
 }
 
 func newLiveRig(t *testing.T) *liveRig {
@@ -194,6 +198,13 @@ func newLiveRig(t *testing.T) *liveRig {
 	t.Cleanup(func() { r.black.Close() })
 	factory := func(test bool) tunnels.Factory {
 		return func(p hysteria.Profile, h tunnels.Hooks) tunnels.Runner {
+			if test && r.holdTemp != nil {
+				select {
+				case r.tempHeld <- struct{}{}:
+				default:
+				}
+				<-r.holdTemp
+			}
 			srv := r.socks
 			r.mu.Lock()
 			if r.slow[p.ID] {
@@ -1014,10 +1025,12 @@ func TestProbeGroup(t *testing.T) {
 	de1, de2, nl1 := servers(t, c)
 	g := saveGroup(t, c, "Авто", groups.Latency, de1, de2, nl1)
 	// Disconnected: every member through a temporary Hysteria; two calls
-	// share one run.
+	// share one run. The first run is held at its first temporary
+	// Hysteria until the second call has come.
+	r.holdTemp, r.tempHeld = make(chan struct{}), make(chan struct{}, 1)
 	var wg sync.WaitGroup
 	views := make([]GroupView, 2)
-	for i := range views {
+	probe := func(i int) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -1028,7 +1041,13 @@ func TestProbeGroup(t *testing.T) {
 			views[i] = v
 		}()
 	}
+	probe(0)
+	<-r.tempHeld
+	probe(1)
+	time.Sleep(100 * time.Millisecond) // the second call joins the run
+	close(r.holdTemp)
 	wg.Wait()
+	r.holdTemp = nil
 	if n := r.temp.Load(); n != 3 {
 		t.Fatalf("%d temporary Hysterias for one check", n)
 	}
