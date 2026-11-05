@@ -642,6 +642,8 @@ interface GUI {
   SkipAppVersion(v: string): Promise<void>;
   StartupNotice(): Promise<string>;
   System(): Promise<SystemInfo>;
+  // macos: "windows" or "macos".
+  Platform(): Promise<string>;
   RemoveFirewallRule(): Promise<void>;
   DeleteStaleDriverService(): Promise<void>;
   OpenDataDir(): Promise<void>;

@@ -341,3 +341,7 @@ func windowsVersion() string {
 	maj, min, b := windows.RtlGetNtVersionNumbers()
 	return fmt.Sprintf("%d.%d.%d", maj, min, b)
 }
+
+// Platform tells the page which system it runs on (macos: the page hides
+// what only Windows has).
+func (g *GUI) Platform() string { return "windows" }

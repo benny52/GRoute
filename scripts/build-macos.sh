@@ -9,7 +9,6 @@
 #   scripts/build-macos.sh [version]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-root=$(pwd)
 version=${1:-$(git describe --tags --always 2>/dev/null || echo v0.0.0-dev)}
 build=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then build="$build-dirty"; fi

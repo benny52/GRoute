@@ -22,6 +22,10 @@ export type Theme = 'system' | 'light' | 'dark' | 'midnight';
 export type Accent = 'blue' | 'violet' | 'teal' | 'orange' | 'pink' | 'rainbow';
 
 export const ui = $state({
+  // macos: HyRoute for macOS (api.Platform): the parts only Windows has
+  // (autostart task, kill switch, WinDivert, firewall, hyroutectl, the
+  // browser extension) are hidden.
+  mac: false,
   privacy: get('privacy') === '1',
   profiles: [] as ProfileSummary[],
   status: null as Status | null,

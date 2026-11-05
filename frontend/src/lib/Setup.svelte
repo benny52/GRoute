@@ -525,7 +525,9 @@
       <h1>Запуск и защита</h1>
       <p class="lead">Последние настройки. Если не уверены — оставьте как есть.</p>
       <div class="opts">
-        {#if auto?.allowed}
+        {#if ui.mac}
+          <!-- macos: the service always starts with the Mac -->
+        {:else if auto?.allowed}
           <label class="opt">
             <input type="checkbox" bind:checked={wantAutostart} />
             <span><b>Запускать HyRoute вместе с Windows</b>
@@ -543,6 +545,7 @@
             <span>Не нужно каждый раз нажимать кнопку: VPN включится сам, как только HyRoute запустится.</span></span
           >
         </label>
+        {#if !ui.mac}
         <label class="opt">
           <input type="checkbox" bind:checked={wantKill} />
           <span><b>Kill switch: не пускать интернет мимо VPN</b>
@@ -552,6 +555,7 @@
             </span></span
           >
         </label>
+        {/if}
         {#if ext?.host && extBrowsers.length}
           <label class="opt">
             <input type="checkbox" bind:checked={wantBrowser} />
@@ -581,7 +585,7 @@
       <div class="summary">
         <div><span class="muted">Сервер</span><b>{mainText() || 'не добавлен'}</b></div>
         <div><span class="muted">Через VPN</span><b>{modeTitle}</b></div>
-        {#if auto}<div><span class="muted">Запуск с Windows</span><b>{wantAutostart && auto.allowed ? 'да' : 'нет'}</b></div>{/if}
+        {#if auto && !ui.mac}<div><span class="muted">Запуск с Windows</span><b>{wantAutostart && auto.allowed ? 'да' : 'нет'}</b></div>{/if}
       </div>
       <p class="lead">Осталось включить VPN. Потом включать и выключать его можно большой кнопкой на главной странице.</p>
       {#if wantBrowser && ext?.installed}

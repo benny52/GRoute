@@ -194,3 +194,6 @@ func (g *GUI) SetCLIMode(string) error { return errMac }
 // ServiceVersion lets the window see whether the service is its own
 // version (else it installs its copy).
 func (g *GUI) ServiceVersion() string { return version + " " + build }
+
+// Platform tells the page which system it runs on.
+func (g *GUI) Platform() string { return "macos" }

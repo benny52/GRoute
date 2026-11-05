@@ -30,7 +30,7 @@
   let needsReconnect = $state(false);
 
   const themes: { v: Theme; l: string }[] = [
-    { v: 'system', l: 'Как в Windows' },
+    { v: 'system', l: 'Как в системе' },
     { v: 'light', l: 'Светлая' },
     { v: 'dark', l: 'Тёмная' },
     { v: 'midnight', l: 'Полночь' },
@@ -341,7 +341,12 @@
 
   <section class="card">
     <h2><Icon name="power" size={17} /> Запуск</h2>
-    {#if autostart}
+    {#if ui.mac}
+      <p class="muted small">
+        Служба HyRoute запускается вместе с Mac всегда и подключается сама, если включено «Подключаться сразу после запуска». Окно HyRoute можно
+        закрыть: подключение остаётся.
+      </p>
+    {:else if autostart}
       <label class="check">
         <input type="checkbox" checked={autostart.enabled} disabled={!autostart.allowed && !autostart.enabled}
           onchange={(e) => settle(e, (el) => run(() => api.SetAutostart(el.checked), 'Сохранено'), () => autostart?.enabled)} />
@@ -365,11 +370,13 @@
       {/if}
       {#if autostart.error}<div class="note error small">{autostart.error}</div>{/if}
     {/if}
+    {#if !ui.mac}
     <label class="check">
       <input type="checkbox" checked={prefs.closeToTray ?? true} disabled={!prefsLoaded} onchange={(e) => settle(e, (el) => savePrefs({ closeToTray: el.checked }), () => prefs.closeToTray ?? true)} />
       Кнопка × сворачивает HyRoute в трей
     </label>
     <p class="muted small">Окно открывается щелчком по значку в трее. Выйти из программы — «Выход» в меню значка (правая кнопка мыши).</p>
+    {/if}
     <label class="check">
       <input type="checkbox" checked={prefs.autoConnect ?? false} disabled={!prefsLoaded} onchange={(e) => settle(e, (el) => savePrefs({ autoConnect: el.checked }), () => prefs.autoConnect ?? false)} />
       Подключаться сразу после запуска
@@ -381,11 +388,11 @@
     </p>
   </section>
 
-  <BrowserExtension />
+  {#if !ui.mac}<BrowserExtension />{/if}
 
-  {#if ui.expert}<CLISettings />{/if}
+  {#if ui.expert && !ui.mac}<CLISettings />{/if}
 
-  {#if routing}
+  {#if routing && !ui.mac}
     <section class="card">
       <h2><Icon name="shield" size={17} /> Kill switch</h2>
       <label class="check"><input type="checkbox" checked={routing.killSwitch ?? false} onchange={(e) => settle(e, (el) => saveRouting({ killSwitch: el.checked }), () => routing?.killSwitch ?? false)} />
@@ -492,6 +499,7 @@
     {#if ui.expert}
     <details class="card adv">
       <summary><Icon name="settings" size={17} /> Система: драйвер, брандмауэр, файлы</summary>
+      {#if !ui.mac}
       <h3>Драйвер WinDivert</h3>
       <p>{info.driver}{status?.stats?.driverVersion ? ` · версия ${status.stats.driverVersion}` : ''}</p>
       {#if info.legacy.length}
@@ -515,6 +523,7 @@
         >Удалить правило брандмауэра</button
       >
       {#if !offline}<span class="muted"> сначала отключитесь</span>{/if}
+      {/if}
 
       <h3>Данные</h3>
       <div class="kv">
@@ -523,7 +532,11 @@
         <span class="muted">Ядро Hysteria</span><span class="mono">{info.hysteriaPath}</span>
         <span class="muted">Сборка</span><span class="mono">{updates?.current ?? ''} ({info.build})</span>
       </div>
+      {#if ui.mac}
+      <p class="muted">Настройки, пароли профилей и ссылки подписок лежат в папке root: прочитать их могут только администраторы этого Mac.</p>
+      {:else}
       <p class="muted">Пароли профилей, ссылки подписок и адрес своего DNS-сервера зашифрованы средствами Windows (DPAPI) и расшифровываются только под вашей учётной записью.</p>
+      {/if}
       <button onclick={() => run(() => api.OpenDataDir(), '')}>Открыть папку</button>
       <p class="muted small credits">Флаги стран — Twemoji (© Twitter, CC-BY 4.0). Иконки по мотивам Lucide (ISC).</p>
     </details>

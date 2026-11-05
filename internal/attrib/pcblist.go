@@ -77,28 +77,34 @@ func ParsePCBList(buf []byte) []PCB {
 	return out
 }
 
-// parseInpcb reads struct xinpcb_n: ports at 16 and 18 (network order),
-// inp_vflag at 28, the foreign address at 32 and the local one at 48 (16
-// bytes each; IPv4 in the last four).
+// parseInpcb reads struct xinpcb_n: the ports at 16 and 18 (network
+// order), then inp_ppcb (8 bytes), inp_gencnt (8), inp_flags, inp_flow,
+// inp_vflag, then the foreign and the local address (16 bytes each, IPv4
+// in the last four). Packed to 4 bytes, as macOS lays it out, inp_vflag is
+// at 44 and the addresses at 48 and 64; aligned, they would be at 48, 52
+// and 68. The layout is told by inp_vflag, which holds INP_IPV4 or
+// INP_IPV6.
 func parseInpcb(b []byte) (PCB, bool) {
-	if len(b) < 64 {
+	vflagAt, faddr := 44, 48
+	switch {
+	case len(b) >= 80 && b[44]&(inpIPv4|inpIPv6) != 0 && b[44]&^(inpIPv4|inpIPv6) == 0:
+	case len(b) >= 84 && b[48]&(inpIPv4|inpIPv6) != 0 && b[48]&^(inpIPv4|inpIPv6) == 0:
+		vflagAt, faddr = 48, 52
+	default:
 		return PCB{}, false
 	}
 	fport := binary.BigEndian.Uint16(b[16:])
 	lport := binary.BigEndian.Uint16(b[18:])
-	vflag := b[28]
+	vflag := b[vflagAt]
 	addr := func(a []byte) netip.Addr {
 		if vflag&inpIPv4 != 0 {
 			return netip.AddrFrom4([4]byte(a[12:16]))
 		}
 		return netip.AddrFrom16([16]byte(a[:16])).Unmap()
 	}
-	if vflag&(inpIPv4|inpIPv6) == 0 {
-		return PCB{}, false
-	}
 	return PCB{
-		Remote: netip.AddrPortFrom(addr(b[32:48]), fport),
-		Local:  netip.AddrPortFrom(addr(b[48:64]), lport),
+		Remote: netip.AddrPortFrom(addr(b[faddr:faddr+16]), fport),
+		Local:  netip.AddrPortFrom(addr(b[faddr+16:faddr+32]), lport),
 	}, true
 }
 

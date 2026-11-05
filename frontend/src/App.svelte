@@ -124,6 +124,7 @@
   }
 
   onMount(() => {
+    api.Platform().then((p) => (ui.mac = p === 'macos')).catch(() => {}); // macos
     applyTheme();
     refresh();
     refreshProfiles();

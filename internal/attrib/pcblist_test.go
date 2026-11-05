@@ -2,6 +2,7 @@ package attrib
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"net/netip"
 	"testing"
 )
@@ -21,11 +22,13 @@ func pcbItems(packed bool, socks ...PCB) []byte {
 		return b
 	}
 	for _, s := range socks {
-		in := make([]byte, 92) // sizeof(xinpcb_n) is not a multiple of 8
+		// struct xinpcb_n as macOS 26 lays it out (pack 4).
+		in := make([]byte, 104)
 		le.PutUint32(in, uint32(len(in)))
 		le.PutUint32(in[4:], xsoInpcb)
 		binary.BigEndian.PutUint16(in[16:], s.Remote.Port())
 		binary.BigEndian.PutUint16(in[18:], s.Local.Port())
+		le.PutUint64(in[28:], 200) // inp_gencnt
 		put := func(at []byte, a netip.Addr) {
 			if a.Is4() {
 				a4 := a.As4()
@@ -36,12 +39,13 @@ func pcbItems(packed bool, socks ...PCB) []byte {
 			copy(at, a16[:])
 		}
 		if s.Local.Addr().Is4() {
-			in[28] = inpIPv4
+			in[44] = inpIPv4
 		} else {
-			in[28] = inpIPv6
+			in[44] = inpIPv6
 		}
-		put(in[32:], s.Remote.Addr())
-		put(in[48:], s.Local.Addr())
+		in[45] = 64 // ttl
+		put(in[48:], s.Remote.Addr())
+		put(in[64:], s.Local.Addr())
 		buf = pad(append(buf, in...))
 
 		size, proto, pids := 112, 40, 68
@@ -122,5 +126,20 @@ func TestMatchPCB(t *testing.T) {
 	}
 	if _, ok := MatchUDP(pcbs, ap("198.18.0.1:8000"), ap("9.9.9.9:53")); ok {
 		t.Fatal("two owners guessed")
+	}
+}
+
+// Items as a macOS 26 (arm64) kernel wrote them: a connection
+// 127.0.0.1:49200 -> 127.0.0.1:49199 of process 3598, run by uid 501.
+func TestParsePCBListMacOS26(t *testing.T) {
+	inpcb, _ := hex.DecodeString("6800000010000000b0b5c9ea1e33ed77c030c02fdb36e4e609a64d06c8000000000000000000800000010d00014000000000000000000000000000007f0000010000000000000000000000007f0000010000000000000000000000000000000039f2d18212000000")
+	sock, _ := hex.DecodeString("68000000010000005727bf0273d89089010000000400000000000311b0b5c9ea1e33ed7706000000020000000000000000000000000000000000000000000000f50100000e0e000000000000970e0000000000008000000000080001020000000000000000000000")
+	gen := make([]byte, 24)
+	binary.LittleEndian.PutUint32(gen, 24)
+	buf := append(append(append(append([]byte(nil), gen...), inpcb...), sock...), gen...)
+	got := ParsePCBList(buf)
+	want := PCB{Local: netip.MustParseAddrPort("127.0.0.1:49199"), Remote: netip.MustParseAddrPort("127.0.0.1:49200"), PID: 3598}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("%+v", got)
 	}
 }
