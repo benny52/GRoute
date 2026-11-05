@@ -357,6 +357,8 @@ export interface Status {
   dns?: DNSStatus;
   // netmodes: the network rules while «Сети» is on
   net?: NetState;
+  // Servers only local proxies use, down: routing is not affected.
+  proxiesDown?: string[];
 }
 
 export interface Flow {

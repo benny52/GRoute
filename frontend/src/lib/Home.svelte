@@ -365,6 +365,17 @@
 
   <HomeSubAlerts {go} />
 
+  {#if st?.proxiesDown?.length}
+    <div class="note warn row">
+      <span class="grow">
+        {st.proxiesDown.length === 1 ? 'Не работает прокси сервера' : `Не работают прокси ${st.proxiesDown.length} серверов`}:
+        {hide(st.proxiesDown.slice(0, 5).join(', '))}{st.proxiesDown.length > 5 ? ` и ещё ${st.proxiesDown.length - 5}` : ''}. Серверы недоступны; правила
+        и остальные прокси работают.
+      </span>
+      {#if ui.expert}<button onclick={() => go('proxies')}>Прокси</button>{/if}
+    </div>
+  {/if}
+
   {#if st?.groupsNote}
     <div class="note warn">{hide(st.groupsNote)}</div>
   {/if}

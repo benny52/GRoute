@@ -249,6 +249,33 @@ type Status struct {
 	DNS *DNSStatus `json:"dns,omitempty"`
 	// netmodes: the network rules while «Сети» is on (nil otherwise).
 	Net *NetState `json:"net,omitempty"`
+	// ProxiesDown: servers that run only for local proxies (no rule, the
+	// main target or a group sends traffic to them) and are down. They do
+	// not make the state tunnel-down: routing works, those proxies do not.
+	ProxiesDown []string `json:"proxiesDown,omitempty"`
+}
+
+// proxyOnlyLocked: the profiles that run only for enabled local proxies:
+// no rule, fallback, the main target or a group of theirs sends traffic to
+// them (c.mu held).
+func (c *Controller) proxyOnlyLocked() map[string]bool {
+	if c.set == nil {
+		return nil
+	}
+	set := *c.set
+	set.Main = c.mainTargetLocked()
+	routed := map[string]bool{}
+	for _, id := range set.Profiles() {
+		routed[id] = true
+	}
+	c.expandGroupsLocked(routed)
+	out := map[string]bool{}
+	for _, p := range c.proxies {
+		if id := c.proxyProfileLocked(p); p.Enabled && !routed[id] {
+			out[id] = true
+		}
+	}
+	return out
 }
 
 // down reports a profile that cannot carry traffic now: failed, or
@@ -275,6 +302,7 @@ func (c *Controller) Status() (st Status) {
 		st.Main, st.MainID = p.Name, p.ID
 	}
 	gst := c.groupStatusLocked(&st)
+	proxyOnly := c.proxyOnlyLocked()
 	st.DNS = c.dnsStatusLocked(s) // dns
 	if s != nil {
 		st.Since = c.since
@@ -312,6 +340,12 @@ func (c *Controller) Status() (st Status) {
 		case gst.viaGroup[t.ID] && down(t):
 			// A group-only member down (failed or reconnecting) changes
 			// nothing: groupsDown judges its group.
+		case proxyOnly[t.ID]:
+			// Only local proxies use it: its trouble is theirs, not the
+			// routing's (neither tunnel-down nor connecting).
+			if down(t) {
+				st.ProxiesDown = append(st.ProxiesDown, t.Name)
+			}
 		case down(t):
 			st.State = "tunnel-down"
 			m := fmt.Sprintf("%s недоступен, %d соединений отклонено", t.Name, t.Rejected)

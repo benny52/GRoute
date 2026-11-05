@@ -435,3 +435,38 @@ func TestGroupsRuntimeTakesLoadLogger(t *testing.T) {
 		t.Fatal("the groups runtime keeps the logger of New")
 	}
 }
+
+// A server that runs only for a local proxy and is down does not make
+// routing «tunnel-down» (nor «connecting»): it is listed in ProxiesDown.
+func TestProxyOnlyServerDown(t *testing.T) {
+	c, started := newCtl(t)
+	res, err := c.ImportURIs(link + "\nhy2://x@h2.example:8443")
+	if err != nil || len(res.Added) != 2 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	de, h2 := res.Added[0].ID, res.Added[1].ID
+	if _, err := c.SaveProxy(ProxyInput{LocalProxy: store.LocalProxy{Name: "p", Enabled: true, Port: 20000, Profile: h2}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	f := (*started)[0]
+	f.tunnels = []tunnels.Status{{ID: de, Name: "DE one", State: "connected"}, {ID: h2, Name: "h2.example", State: "connecting"}}
+	if s := c.Status(); s.State != "connected" || len(s.ProxiesDown) != 0 {
+		t.Fatalf("%+v", s)
+	}
+	f.tunnels[1] = tunnels.Status{ID: h2, Name: "h2.example", State: "failed", Message: "timeout", Rejected: 1}
+	if s := c.Status(); s.State != "connected" || len(s.ProxiesDown) != 1 || s.ProxiesDown[0] != "h2.example" || s.Message != "" {
+		t.Fatalf("%+v", s)
+	}
+	// Once a rule sends traffic to it, its trouble is the routing's.
+	st := c.Settings()
+	st.Rules = []rules.Rule{{Name: "yt", Domain: &rules.DomainMatch{Pattern: ".youtube.com"}, Action: rules.Tunnel, Profile: h2}}
+	if _, err := c.SaveSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	if s := c.Status(); s.State != "tunnel-down" || len(s.ProxiesDown) != 0 {
+		t.Fatalf("%+v", s)
+	}
+}
