@@ -177,7 +177,7 @@ func TestValidateEdited(t *testing.T) {
 	servers := map[string]bool{"a": true, "b": true}
 	has := func(id string) bool { return servers[id] }
 	g := Group{ID: "grp-000000000001", Name: "Авто", Strategy: Latency}
-	if err := ValidateEdited(g, has); err == nil || err.Error() != "Добавьте в группу хотя бы один сервер" {
+	if err := ValidateEdited(g, has); err == nil || err.Error() != "Добавьте в группу хотя бы один сервер или подписку" {
 		t.Fatal(err)
 	}
 	g.Members = []string{"a", "zz"}

@@ -868,11 +868,13 @@ func (c *Controller) DeleteSubscription(id string) error {
 	}
 	var list []hysteria.Profile
 	pins := c.subDeletePinsLocked(source)
+	had := map[string]bool{} // its servers: kept ones stay in the groups that followed it
 	for _, p := range c.profiles.List {
 		if p.Source != source {
 			list = append(list, p)
 			continue
 		}
+		had[p.ID] = true
 		if c.profileUsedLocked(p.ID) || pins[p.ID] {
 			p.Source, p.Missing = "", false
 			list = append(list, p)
@@ -883,6 +885,9 @@ func (c *Controller) DeleteSubscription(id string) error {
 	if err != nil && c.saveSubsLocked(c.subs) == nil {
 		c.mu.Unlock()
 		return err
+	}
+	if err == nil {
+		c.dropGroupSubLocked(id, had)
 	}
 	// Gone from subscriptions.json: when its profiles could not be saved
 	// either, they stay as those of a deleted subscription.

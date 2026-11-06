@@ -83,7 +83,7 @@ func groupsView(info app.GroupsInfo) ctl.GroupsView {
 	v := ctl.GroupsView{Groups: []ctl.GroupLine{}, LoadError: info.LoadError}
 	for _, g := range info.Groups {
 		l := ctl.GroupLine{ID: g.ID, Name: g.Name, Strategy: string(g.Strategy), Active: g.Active, Main: g.Main, Running: g.Running,
-			Up: g.Up, Total: len(g.Members), Rejected: g.Rejected, Members: []ctl.MemberLine{}}
+			Up: g.Up, Total: len(g.Views) - g.Missing, Rejected: g.Rejected, Members: []ctl.MemberLine{}}
 		for _, m := range g.Views {
 			if m.ID == g.Active {
 				l.ActiveName = m.Name

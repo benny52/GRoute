@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,10 @@ type Group struct {
 	Name     string   `json:"name"`
 	Strategy Strategy `json:"strategy"`
 	Members  []string `json:"members"`
+	// Subs: subscriptions (IDs) every server of which is a member too,
+	// after Members: the group follows them as they update (new servers
+	// join, removed ones leave).
+	Subs []string `json:"subs,omitempty"`
 	// Revert (failover): a member earlier in the list that has been
 	// healthy for RevertAfter takes over again.
 	Revert bool `json:"revert,omitempty"`
@@ -70,9 +75,14 @@ type File struct {
 }
 
 const (
-	FormatVersion      = 1
-	MaxGroups          = 64
-	MaxMembers         = 32
+	FormatVersion = 1
+	MaxGroups     = 64
+	MaxMembers    = 32
+	MaxSubs       = 8
+	// MaxRunning: the members of one group that run at once. A larger
+	// group (a subscription's hundreds of servers) runs its best ones and
+	// measures the others a few at a time (app's group scanner).
+	MaxRunning         = 10
 	MaxNameRunes       = 64
 	MaxFileSize        = 1 << 20
 	DefaultProbeURL    = "http://cp.cloudflare.com/generate_204"
@@ -255,7 +265,17 @@ func checkGroup(g Group) error {
 		return Errorf("Неизвестный способ выбора сервера %q", string(g.Strategy))
 	}
 	if len(g.Members) > MaxMembers {
-		return Errorf("В группе может быть не больше %d серверов", MaxMembers)
+		return Errorf("В группе может быть не больше %d серверов, выбранных по одному; все серверы подписки добавляются подпиской целиком", MaxMembers)
+	}
+	if len(g.Subs) > MaxSubs {
+		return Errorf("В группе может быть не больше %d подписок", MaxSubs)
+	}
+	subs := map[string]bool{}
+	for _, s := range g.Subs {
+		if s == "" || subs[s] {
+			return fmt.Errorf("подписка %q в группе «%s» пустая или дважды", s, g.Name)
+		}
+		subs[s] = true
 	}
 	seen := map[string]bool{}
 	for _, m := range g.Members {
@@ -283,8 +303,8 @@ func ValidateEdited(g Group, server func(id string) bool) error {
 	if err := nameErr(strings.TrimSpace(g.Name)); err != nil {
 		return err
 	}
-	if len(g.Members) == 0 {
-		return Errorf("Добавьте в группу хотя бы один сервер")
+	if len(g.Members) == 0 && len(g.Subs) == 0 {
+		return Errorf("Добавьте в группу хотя бы один сервер или подписку")
 	}
 	if err := checkGroup(g); err != nil {
 		return err
@@ -400,6 +420,7 @@ func (f *File) Clone() *File {
 	}
 	for i, g := range f.Groups {
 		g.Members = append([]string{}, g.Members...)
+		g.Subs = slices.Clone(g.Subs)
 		out.Groups[i] = g
 	}
 	return out

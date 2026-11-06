@@ -64,7 +64,7 @@
   }
 
   function edit(g: GroupView) {
-    editing = { id: g.id, name: g.name, strategy: g.strategy, members: [...g.members], revert: g.revert, toleranceMs: g.toleranceMs, switchAfterErrors: g.switchAfterErrors };
+    editing = { id: g.id, name: g.name, strategy: g.strategy, members: [...g.members], subs: [...(g.subs ?? [])], revert: g.revert, toleranceMs: g.toleranceMs, switchAfterErrors: g.switchAfterErrors };
   }
 
   function remove(g: GroupView) {
@@ -90,7 +90,11 @@
     run(() => api.SetProbe({ url: probeURL.trim(), intervalSec: +probeEvery }), 'Настройки проверки сохранены').finally(() => (probeSaving = false));
   }
 
-  const count = (g: GroupView) => g.members.length - g.missing;
+  const count = (g: GroupView) => g.memberViews.length - g.missing;
+  // A large group shows the members that run first, the rest on request.
+  let showAll = $state<Record<string, boolean>>({});
+  const shownMembers = (g: GroupView) =>
+    !g.runLimit || showAll[g.id] ? g.memberViews : g.memberViews.filter((m) => m.chosen || m.id === g.active);
   const current = (g: GroupView) => g.strategy === 'failover' || g.strategy === 'latency';
 
   function stateLine(g: GroupView): string {
@@ -191,8 +195,17 @@
           «Проверка задержки».
         </div>
       {/if}
+      {#if g.runLimit}
+        <div class="note info small row">
+          <span class="grow">
+            Серверов {g.memberViews.length}: одновременно работают {g.runLimit} самых быстрых, остальные HyRoute проверяет по очереди и подменяет, если найдёт
+            быстрее.
+          </span>
+          <button class="mini" onclick={() => (showAll[g.id] = !showAll[g.id])}>{showAll[g.id] ? 'Только работающие' : 'Показать все'}</button>
+        </div>
+      {/if}
       <div class="members">
-        {#each g.memberViews as m, i (m.id)}
+        {#each shownMembers(g) as m, i (m.id)}
           {@const d = detail(m)}
           <span class="chip" class:cur={current(g) && g.active === m.id} title={d.tip}>
             <span class="n">{i + 1}</span>

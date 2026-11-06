@@ -27,11 +27,14 @@
   ];
 
   const server = (id: string) => ui.profiles.find((p) => p.id === id);
+  // svelte-ignore state_referenced_locally
+  g.subs ??= [];
+  const followed = (p: ProfileSummary) => !!p.source && g.subs!.includes(p.source.replace(/^sub:/, ''));
   // Servers not yet in the group, by subscription (manual ones last).
   const sources = $derived.by(() => {
     const out = new Map<string, { name: string; list: ProfileSummary[] }>();
     for (const p of ui.profiles) {
-      if (g.members.includes(p.id)) continue;
+      if (g.members.includes(p.id) || followed(p)) continue;
       const key = p.source || '';
       if (!out.has(key)) out.set(key, { name: p.source ? hide(p.sourceName) : 'Добавленные вручную', list: [] });
       out.get(key)!.list.push(p);
@@ -45,9 +48,15 @@
     if (id && !g.members.includes(id)) g.members.push(id);
   }
 
+  // A subscription joins whole: its servers now and those it gets later.
   function addSub(source: string) {
-    for (const p of ui.profiles) if (p.source === source) add(p.id);
+    const id = source.replace(/^sub:/, '');
+    if (!g.subs!.includes(id)) g.subs!.push(id);
+    g.members = g.members.filter((m) => server(m)?.source !== source);
   }
+  const subName = (id: string) => hide(ui.profiles.find((p) => p.source === 'sub:' + id)?.sourceName ?? 'подписка');
+  const subCount = (id: string) => ui.profiles.filter((p) => p.source === 'sub:' + id).length;
+  const total = $derived(g.members.length + g.subs!.reduce((n, id) => n + subCount(id), 0));
 
   function move(i: number, by: -1 | 1) {
     const j = i + by;
@@ -58,7 +67,7 @@
   async function save() {
     error = '';
     saving = true;
-    const out: Group = { id: g.id, name: g.name.trim(), strategy: g.strategy, members: g.members };
+    const out: Group = { id: g.id, name: g.name.trim(), strategy: g.strategy, members: g.members, subs: g.subs ?? [] };
     if (g.strategy === 'failover' && g.revert) out.revert = true;
     if (g.strategy === 'latency') out.toleranceMs = +tolerance;
     if (errorsOn) out.switchAfterErrors = +errorsN;
@@ -139,7 +148,14 @@
           <button class="icon danger" onclick={() => g.members.splice(i, 1)} title="Убрать из группы"><Icon name="x" size={15} /></button>
         </div>
       {/each}
-      {#if g.members.length === 0}<p class="muted small">Серверов пока нет: добавьте хотя бы один.</p>{/if}
+      {#each g.subs ?? [] as id, i (id)}
+        <div class="member sub">
+          <span class="n"><Icon name="rss" size={11} /></span>
+          <span class="grow ellipsis">Все серверы подписки «{subName(id)}» — сейчас {subCount(id)}, новые добавятся сами</span>
+          <button class="icon danger" onclick={() => g.subs!.splice(i, 1)} title="Убрать подписку из группы"><Icon name="x" size={15} /></button>
+        </div>
+      {/each}
+      {#if g.members.length === 0 && !g.subs?.length}<p class="muted small">Серверов пока нет: добавьте хотя бы один или подписку.</p>{/if}
       <div class="row adds">
         {#if sources.length}
           <select
@@ -169,27 +185,32 @@
               el.value = '__add';
             }}
           >
-            <option value="__add" disabled>+ все серверы подписки…</option>
+            <option value="__add" disabled>+ подписка целиком…</option>
             {#each subs as [key, src] (key)}<option value={key}>{src.name}</option>{/each}
           </select>
         {/if}
       </div>
     </div>
     <div class="hint">{g.strategy === 'failover' ? 'Порядок важен: сверху — первый.' : 'Порядок нужен только при равенстве.'}</div>
-    {#if g.members.length > 10}
-      <div class="note warn small">Каждый сервер группы — отдельный процесс Hysteria, пока группа используется.</div>
+    {#if total > 10}
+      <div class="note info small">
+        Одновременно работают не больше 10 серверов группы — самые быстрые. Остальные HyRoute проверяет по очереди (по 4 за раз) и подменяет, если
+        найдёт быстрее.
+      </div>
     {/if}
 
     {#if error}<div class="note error">{hide(error)}</div>{/if}
     <div class="actions">
       <button onclick={onclose}>Отмена</button>
-      <button class="primary" onclick={save} disabled={saving || !g.name.trim() || g.members.length === 0}>Сохранить</button>
+      <button class="primary" onclick={save} disabled={saving || !g.name.trim() || (g.members.length === 0 && !g.subs?.length)}>Сохранить</button>
     </div>
   </div>
 </div>
 
 <style>
-  .ed { width: min(680px, 94vw); display: grid; gap: 8px; max-height: 92vh; overflow: auto; }
+  /* minmax(0, 1fr): a long server name must not widen the dialog past its
+     width (a grid track grows to the longest unbreakable row otherwise). */
+  .ed { width: min(680px, 94vw); display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-height: 92vh; overflow-y: auto; overflow-x: hidden; }
   .ed h2 { margin: 0; }
   .lbl { color: var(--muted); font-weight: 500; margin-top: 6px; }
   .strats { display: grid; gap: 4px; }
@@ -202,9 +223,12 @@
   .num { width: 72px; padding: 3px 6px; }
   .hint { font-size: 12px; color: var(--muted); }
   .warn-t { color: var(--warn); margin-top: 4px; }
-  .members { display: grid; gap: 4px; padding: 6px; border-radius: var(--radius-sm); background: var(--surface-2); }
-  .member { display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 8px; border-radius: var(--radius-sm); background: var(--surface); }
-  .n { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; background: var(--accent-soft); color: var(--accent); flex: none; }
+  .members { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 6px; border-radius: var(--radius-sm); background: var(--surface-2); }
+  .member { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 4px 2px 8px; border-radius: var(--radius-sm); background: var(--surface); }
+  .member .grow { min-width: 0; }
+  .member .badge { flex: 0 1 auto; min-width: 0; max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .member button { flex: none; }
+  .n { min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box; border-radius: 10px; display: grid; place-items: center; font-size: 11px; background: var(--accent-soft); color: var(--accent); flex: none; }
   .adds { gap: 8px; flex-wrap: wrap; }
   .adds select { width: auto; max-width: 300px; }
   .danger { color: var(--block); }

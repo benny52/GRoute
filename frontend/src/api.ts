@@ -946,6 +946,7 @@ export interface Group {
   name: string;
   strategy: Strategy;
   members: string[]; // server IDs, ordered
+  subs?: string[]; // subscription IDs: every server of each is a member too (after members)
   revert?: boolean; // failover
   toleranceMs?: number; // latency (0/undefined = 50)
   switchAfterErrors?: number; // 0/undefined = off, 2..20
@@ -966,6 +967,7 @@ export interface GroupMember {
   reason: '' | 'errors' | 'trial' | 'probe';
   missing: boolean; // not in the server list («удалён»)
   notInSub: boolean; // kept although its subscription dropped it («нет в подписке»)
+  chosen?: boolean; // a large group: one of the members that run
 }
 
 export interface GroupView extends Group {
@@ -978,6 +980,7 @@ export interface GroupView extends Group {
   rejected: number;
   probeBroken: boolean;
   memberViews: GroupMember[];
+  runLimit?: number; // more members than this: only the chosen ones run
 }
 
 export interface ProbeSettings {

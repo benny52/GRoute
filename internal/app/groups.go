@@ -51,7 +51,8 @@ type groupsState struct {
 	proxyWarnAt atomic.Int64
 	// runningMemo: the running groups for one Profiles() call (c.mu
 	// held throughout), so each server card does not recompute them.
-	runningMemo *[]string
+	runningMemo    *[]string
+	groupScanState // groupscan.go
 }
 
 // probeRun is one «Проверить» of a group; a second call waits for it.
@@ -122,7 +123,7 @@ func (c *Controller) syncGroupsLocked() {
 	var list []groups.Group
 	if c.groupsBroken == nil {
 		for _, g := range c.groupsFile.Groups {
-			g.Members = c.existingLocked(g.Members)
+			g.Members = c.membersLocked(&g)
 			list = append(list, g)
 		}
 	}
@@ -140,6 +141,67 @@ func (c *Controller) existingLocked(ids []string) []string {
 		}
 	}
 	return out
+}
+
+// membersLocked is a group's servers: its own members that exist, then
+// every server of its subscriptions (Group.Subs) in the server list's
+// order, each once.
+func (c *Controller) membersLocked(g *groups.Group) []string {
+	out := c.existingLocked(g.Members)
+	if len(g.Subs) == 0 {
+		return out
+	}
+	seen := make(map[string]bool, len(out))
+	for _, m := range out {
+		seen[m] = true
+	}
+	src := make(map[string]bool, len(g.Subs))
+	for _, s := range g.Subs {
+		src["sub:"+s] = true
+	}
+	for _, p := range c.profiles.List {
+		if src[p.Source] && !seen[p.ID] && !groups.IsGroupID(p.ID) {
+			seen[p.ID] = true
+			out = append(out, p.ID)
+		}
+	}
+	return out
+}
+
+// groupHasLocked: server id is a member of g (its own or a subscription's).
+func (c *Controller) groupHasLocked(g *groups.Group, id string) bool {
+	if slices.Contains(g.Members, id) {
+		return true
+	}
+	if p := c.profiles.Find(id); p != nil && strings.HasPrefix(p.Source, "sub:") {
+		return slices.Contains(g.Subs, strings.TrimPrefix(p.Source, "sub:"))
+	}
+	return false
+}
+
+// dropGroupSubLocked takes deleted subscription id out of the groups that
+// follow it; its servers that were kept (manual servers now: a rule names
+// one, or a used group would be emptied) become their own members.
+func (c *Controller) dropGroupSubLocked(id string, had map[string]bool) {
+	if c.groupsBroken != nil || !slices.ContainsFunc(c.groupsFile.Groups, func(g groups.Group) bool { return slices.Contains(g.Subs, id) }) {
+		return
+	}
+	next := c.groupsFile.Clone()
+	for i := range next.Groups {
+		g := &next.Groups[i]
+		if !slices.Contains(g.Subs, id) {
+			continue
+		}
+		g.Subs = slices.DeleteFunc(g.Subs, func(s string) bool { return s == id })
+		for _, p := range c.profiles.List {
+			if had[p.ID] && len(g.Members) < groups.MaxMembers && !slices.Contains(g.Members, p.ID) {
+				g.Members = append(g.Members, p.ID)
+			}
+		}
+	}
+	if err := c.saveGroupsLocked(next); err != nil {
+		c.Log.Warn("deleted subscription not removed from groups.json", "err", err)
+	}
 }
 
 // groupNamesLocked adds the group names to the names map (profileName).
@@ -199,7 +261,7 @@ func (c *Controller) expandGroupsLocked(used map[string]bool) []string {
 		delete(used, id)
 		if g := c.groupLocked(id); g != nil {
 			out = append(out, id)
-			for _, m := range c.existingLocked(g.Members) {
+			for _, m := range c.runMembersLocked(g) {
 				used[m] = true
 			}
 		}
@@ -259,6 +321,9 @@ type MemberView struct {
 	Missing    bool   `json:"missing"` // not in the server list («удалён»)
 	// NotInSub: dropped by its subscription and kept («нет в подписке»).
 	NotInSub bool `json:"notInSub"`
+	// Chosen: in a group of more than groups.MaxRunning members, one of
+	// those that run (groupscan.go).
+	Chosen bool `json:"chosen,omitempty"`
 }
 
 // GroupView is a group for the UI.
@@ -276,6 +341,9 @@ type GroupView struct {
 	// ProbeBroken: the probe URL failed through every probed member.
 	ProbeBroken bool         `json:"probeBroken"`
 	Views       []MemberView `json:"memberViews"`
+	// RunLimit: groups.MaxRunning when the group has more members: only
+	// the chosen ones run (0 otherwise).
+	RunLimit int `json:"runLimit,omitempty"`
 }
 
 // GroupsInfo is the «Группы» tab.
@@ -355,8 +423,21 @@ func (c *Controller) groupViewsLocked() ([]GroupView, Session) {
 			v.UsedBy = []string{}
 		}
 		v.Running = sess != nil && slices.Contains(used, g.ID)
-		for _, id := range g.Members {
-			mv := MemberView{ID: id, Name: c.profileName(id), State: "stopped"}
+		// Its own members (a deleted one too), then its subscriptions'.
+		ids := slices.Clone(g.Members)
+		all := c.membersLocked(&g)
+		for _, id := range all {
+			if !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
+		var chosen []string
+		if len(all) > groups.MaxRunning {
+			v.RunLimit = groups.MaxRunning
+			chosen = c.chosenLocked(g.ID, all)
+		}
+		for _, id := range ids {
+			mv := MemberView{ID: id, Name: c.profileName(id), State: "stopped", Chosen: slices.Contains(chosen, id)}
 			if p := c.profiles.Find(id); p != nil {
 				mv.FastOpen, mv.NotInSub = fastOpen(p), p.Missing
 			} else {
@@ -438,6 +519,13 @@ func (c *Controller) SaveGroup(g groups.Group) (GroupView, error) {
 		}
 	}
 	g.Members = members
+	var subs []string
+	for _, s := range g.Subs {
+		if !slices.Contains(subs, s) && slices.ContainsFunc(c.subs, func(x store.Subscription) bool { return x.ID == s }) {
+			subs = append(subs, s)
+		}
+	}
+	g.Subs = subs
 	if err := groups.ValidateEdited(g, func(id string) bool { return c.profiles.Find(id) != nil }); err != nil {
 		c.mu.Unlock()
 		return GroupView{}, err
@@ -463,7 +551,7 @@ func (c *Controller) SaveGroup(g groups.Group) (GroupView, error) {
 	if err != nil {
 		return GroupView{}, err
 	}
-	c.Log.Info("server group saved", "group", g.Name, "strategy", string(g.Strategy), "members", len(g.Members))
+	c.Log.Info("server group saved", "group", g.Name, "strategy", string(g.Strategy), "members", len(g.Members), "subscriptions", len(g.Subs))
 	c.changed()
 	return c.groupView(g.ID, nil)
 }
@@ -557,7 +645,7 @@ func (c *Controller) setMainGroupLocked(gid string) error {
 	if g == nil {
 		return groups.Errorf("Группа не найдена")
 	}
-	if len(c.existingLocked(g.Members)) == 0 {
+	if len(c.membersLocked(g)) == 0 {
 		return groups.Errorf("В группе «%s» нет серверов — её нельзя сделать основной", g.Name)
 	}
 	next := c.groupsFile.Clone()
@@ -599,10 +687,10 @@ func (c *Controller) deleteServerCheckLocked(id string) error {
 		return errors.New("groups.json не загружен: сервер не удаляется, пока нельзя проверить, в каких группах он состоит")
 	}
 	for _, g := range c.groupsFile.Groups {
-		if !slices.Contains(g.Members, id) {
+		if !c.groupHasLocked(&g, id) {
 			continue
 		}
-		if others := slices.DeleteFunc(c.existingLocked(g.Members), func(m string) bool { return m == id }); len(others) > 0 {
+		if others := slices.DeleteFunc(c.membersLocked(&g), func(m string) bool { return m == id }); len(others) > 0 {
 			continue
 		}
 		if refs := c.targetRefsLocked(g.ID); len(refs) > 0 {
@@ -654,7 +742,7 @@ func (c *Controller) groupPinsLocked(result []hysteria.Profile) map[string]bool 
 	}
 	pins := map[string]bool{}
 	for _, g := range c.groupsFile.Groups {
-		before := c.existingLocked(g.Members)
+		before := c.membersLocked(&g)
 		if len(before) == 0 || slices.ContainsFunc(before, func(m string) bool { return after[m] }) || !c.groupUsedLocked(g.ID) {
 			continue
 		}
@@ -719,7 +807,7 @@ func (c *Controller) groupCheckLocked(target string, fallback bool) (kind, text 
 	case fallback:
 		which = "в запасной группе"
 	}
-	existing := c.existingLocked(g.Members)
+	existing := c.membersLocked(g)
 	if len(existing) == 0 {
 		if fallback {
 			return "empty", fmt.Sprintf("%s «%s» нет серверов", which, g.Name), true
@@ -753,7 +841,7 @@ func (c *Controller) groupStatusLocked(st *Status) groupStatus {
 		st.MainID, st.Main = main, ""
 		if g := c.groupLocked(main); g != nil {
 			cp := *g
-			cp.Members = c.existingLocked(g.Members)
+			cp.Members = c.membersLocked(g)
 			gs.mainGroup, st.Main = &cp, g.Name
 		} else {
 			st.MainUnloaded = true
@@ -789,7 +877,7 @@ func (c *Controller) groupStatusLocked(st *Status) groupStatus {
 			continue
 		}
 		gs.names[gid] = g.Name
-		gs.members[gid] = c.existingLocked(g.Members)
+		gs.members[gid] = c.membersLocked(g)
 		for _, m := range gs.members[gid] {
 			if !direct[m] {
 				gs.viaGroup[m] = true
@@ -925,6 +1013,7 @@ func (c *Controller) startProber() {
 	c.probeStop = cancel
 	p := &groups.Prober{RT: c.groupsRT, Dial: c.probeDial, Targets: c.probeTargets, Log: c.Log}
 	go p.Run(ctx)
+	go c.scanGroups(ctx) // large groups: groupscan.go
 }
 
 // stopProber cancels it (lifeMu held); it does not wait: a probe cut by
@@ -960,7 +1049,7 @@ func (c *Controller) probeTargets() ([]string, groups.Probe) {
 	}
 	for _, gid := range used {
 		if g := c.groupLocked(gid); g != nil {
-			for _, m := range c.existingLocked(g.Members) {
+			for _, m := range c.membersLocked(g) {
 				if ep := c.sess.Endpoint(m); !seen[m] && ep != nil && ep.Available() {
 					seen[m] = true
 					out = append(out, m)
@@ -1015,7 +1104,7 @@ func (c *Controller) ProbeGroup(id string) (GroupView, error) {
 	c.probing[id] = run
 	sess := c.sess
 	var members []hysteria.Profile
-	for _, m := range g.Members {
+	for _, m := range c.membersLocked(g) {
 		if p := c.profiles.Find(m); p != nil {
 			members = append(members, *p)
 		}
@@ -1263,7 +1352,7 @@ func (c *Controller) groupDiagLines() []string {
 		if g.Running {
 			state = "работает"
 		}
-		line := fmt.Sprintf("   %q %s, серверов %d, %s", g.Name, groups.StrategyLabel(g.Strategy), len(g.Members), state)
+		line := fmt.Sprintf("   %q %s, серверов %d, %s", g.Name, groups.StrategyLabel(g.Strategy), len(g.Views), state)
 		if g.Main {
 			line += ", основная"
 		}
@@ -1319,7 +1408,7 @@ func (c *Controller) memberOfLocked(id string) []string {
 	}
 	var out []string
 	for _, gid := range used {
-		if g := c.groupLocked(gid); g != nil && slices.Contains(g.Members, id) {
+		if g := c.groupLocked(gid); g != nil && c.groupHasLocked(g, id) {
 			out = append(out, "группа «"+g.Name+"»")
 		}
 	}

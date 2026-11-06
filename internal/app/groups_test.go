@@ -429,14 +429,14 @@ func TestSaveGroupValidation(t *testing.T) {
 	de1, de2, _ := servers(t, c)
 	for g, want := range map[*groups.Group]string{
 		{Name: " ", Strategy: groups.Failover, Members: []string{de1}}:                          "Укажите название группы",
-		{Name: "A", Strategy: groups.Failover}:                                                  "Добавьте в группу хотя бы один сервер",
+		{Name: "A", Strategy: groups.Failover}:                                                  "Добавьте в группу хотя бы один сервер или подписку",
 		{Name: "A", Strategy: "best", Members: []string{de1}}:                                   `Неизвестный способ выбора сервера "best"`,
 		{Name: "A", Strategy: groups.Failover, SwitchAfterErrors: 1, Members: []string{de1}}:    "Число ошибок — от 2 до 20",
 		{Name: "A", Strategy: groups.Latency, ToleranceMs: 5, Members: []string{de1}}:           "Порог переключения — от 10 до 1000 мс",
 		{Name: strings.Repeat("я", 65), Strategy: groups.Failover, Members: []string{de1}}:      "Название группы — не длиннее 64 символов",
 		{ID: "grp-00000000000f", Name: "A", Strategy: groups.Failover, Members: []string{de1}}:  "Группа не найдена",
 		{Name: "A", Strategy: groups.Failover, Members: []string{de1, "grp-000000000001"}}:      "Сервер grp-000000000001 не найден",
-		{Name: "A", Strategy: groups.Failover, Members: []string{"gone0000000", "gone1111111"}}: "Добавьте в группу хотя бы один сервер",
+		{Name: "A", Strategy: groups.Failover, Members: []string{"gone0000000", "gone1111111"}}: "Добавьте в группу хотя бы один сервер или подписку",
 	} {
 		if _, err := c.SaveGroup(*g); err == nil || err.Error() != want {
 			t.Errorf("%+v: %v, want %q", *g, err, want)
