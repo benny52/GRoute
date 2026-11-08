@@ -195,7 +195,14 @@ type Prober struct {
 // used sits in TIME_WAIT.
 var slotNext [ProbeSlots]atomic.Uint32
 
+// Live is the slot of a Prober from an ordinary port: its connections go
+// through the user's running bypass, as a browser's do.
+const Live = -1
+
 func (p *Prober) port() int {
+	if p.Slot < 0 {
+		return 0 // the system's choice, outside the probe ports
+	}
 	lo, _ := ProbeSlot(p.Slot)
 	return lo + int(slotNext[p.Slot].Add(1)%ProbeSlotSize)
 }

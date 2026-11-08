@@ -117,6 +117,22 @@
     }
   }
 
+  // setHeal turns self-healing on or off at once (the rest as saved).
+  async function setHeal(on: boolean) {
+    if (!view) return;
+    error = saved = '';
+    const st = view.settings;
+    try {
+      await api.SaveZapret({ enabled: st.enabled, targets: st.targets ?? [], sites: st.sites ?? [], methods: st.methods ?? {}, autoHeal: on });
+      loaded = false;
+      await refresh();
+    } catch (e) {
+      error = errText(e);
+    }
+  }
+
+  const clock = (ms: number) => new Date(ms).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
   async function pick() {
     error = saved = '';
     picking = true;
@@ -246,6 +262,7 @@
         </p>
         {#if pickNow}
           <div class="progress"><div class="bar" style="width: {Math.round((100 * pickNow.done) / Math.max(1, pickNow.total))}%"></div></div>
+          {#if pickNow.auto}<div class="small using">Подбираю сам: {pickNow.why}</div>{/if}
           <div class="small">{pickNow.step}</div>
           <button onclick={() => api.ZapretPickCancel()}>Остановить</button>
         {:else}
@@ -254,6 +271,17 @@
           </button>
           {#if dirty}<span class="muted small">Сначала сохраните изменения.</span>{/if}
         {/if}
+        <label class="check heal">
+          <input type="checkbox" checked={view.settings.autoHeal !== false} disabled={dirty} onchange={(e) => setHeal(e.currentTarget.checked)} />
+          <span
+            >Следить и подбирать заново самому
+            <span class="muted small"
+              >— раз в 10 минут HyRoute открывает сервисы через обход. Если сервис перестал открываться, а блокировку можно обойти, подберёт метод
+              заново сам; на новой сети — тоже. Если не открывается и без обхода (нет интернета, блок по адресу), ничего не трогает.</span
+            ></span
+          >
+        </label>
+        {#if view.healNote && view.settings.autoHeal !== false}<div class="muted small">{view.healAt ? `${clock(view.healAt)}: ` : ''}{hide(view.healNote)}</div>{/if}
         {#if view.pick && !view.pick.running}
           {#if view.pick.error}
             <div class="note error small">{hide(view.pick.error)}</div>
@@ -346,6 +374,8 @@
   .progress { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
   .bar { height: 100%; background: var(--accent); transition: width 0.3s; }
   .tried { margin-top: 8px; }
+  .heal { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; }
+  .heal input { margin-top: 3px; flex: none; }
   .results { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
   .vpn { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
   .small-btn { padding: 4px 10px; font-size: 13px; }

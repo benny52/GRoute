@@ -161,6 +161,10 @@ type Settings struct {
 	// before 1.3.23); ViaRules: by the user's own rules (the bypass keeps
 	// no rule for it); else a server or group ID.
 	Via map[Target]string `json:"via,omitempty"`
+	// AutoHeal: HyRoute checks the services through the running bypass
+	// and picks again by itself when one stops opening, or on a network
+	// with no pick yet. nil = on.
+	AutoHeal *bool `json:"autoHeal,omitempty"`
 	// Picked: what auto-pick found, per network (NetKey).
 	Picked map[string]Picked `json:"picked,omitempty"`
 }
@@ -179,6 +183,9 @@ const (
 	MaxSites   = 500
 	MaxNetKeys = 32
 )
+
+// Heals reports that HyRoute looks after the bypass by itself (AutoHeal).
+func (s Settings) Heals() bool { return s.AutoHeal == nil || *s.AutoHeal }
 
 // On reports that t goes through the bypass.
 func (s Settings) On(t Target) bool { return s.Enabled && slices.Contains(s.Targets, t) }

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,7 +45,10 @@ func zapFixture(t *testing.T) (*Controller, func(slot int) string) {
 	var mu sync.Mutex
 	bySlot := map[int]string{}
 	spawn, settle, check := zapretSpawn, zapretSettle, zapretCheckFunc
-	t.Cleanup(func() { zapretSpawn, zapretSettle, zapretCheckFunc = spawn, settle, check })
+	t.Cleanup(func() {
+		c.stopHeal()
+		zapretSpawn, zapretSettle, zapretCheckFunc = spawn, settle, check
+	})
 	zapretSettle = time.Millisecond
 	zapretSpawn = func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) {
 		slot := -1 // the user's bypass
@@ -534,5 +538,116 @@ func TestZapretViaVPN(t *testing.T) {
 	}
 	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.YouTube, Via: "nope"}); err == nil {
 		t.Fatal("an unknown server")
+	}
+}
+
+// Self-healing: a first pick on a new network by itself; a method that
+// stops opening YouTube is replaced by a pick of its own; a network that
+// is down is left alone.
+func TestZapretHeal(t *testing.T) {
+	c, argsFor := zapFixture(t)
+	first, every, again, gap := zapretHealFirst, zapretHealEvery, zapretHealAgain, zapretHealGap
+	t.Cleanup(func() {
+		c.stopHeal()
+		zapretHealFirst, zapretHealEvery, zapretHealAgain, zapretHealGap = first, every, again, gap
+	})
+	zapretHealFirst, zapretHealEvery, zapretHealAgain = 10*time.Millisecond, 30*time.Millisecond, 5*time.Millisecond
+	zapretHealGap = 0
+	base := zapretCheckFunc
+	var mode atomic.Int32 // 0 as the fixture, 1 YouTube needs hostfakesplit, 2 the network is down
+	firstIs := func(line, m string) bool {
+		for _, a := range strings.Fields(line) {
+			if strings.HasSuffix(a, ":strategy=1") && strings.Contains(a, m) {
+				return true
+			}
+		}
+		return false
+	}
+	var liveChecks atomic.Int32
+	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+		if slot == zapret.Live {
+			liveChecks.Add(1)
+		}
+		switch mode.Load() {
+		case 2:
+			return failed(zapret.KindDNS)
+		case 1:
+			line := argsFor(slot)
+			if slot == zapret.Live && firstIs(line, "hostfakesplit") || slot > 0 && strings.Contains(line, "hostfakesplit") {
+				return zapret.Result{OK: true}
+			}
+			return failed(zapret.KindTLS)
+		}
+		return base(ctx, slot, urls)
+	}
+	picked := func() string {
+		c.zapretMu.Lock()
+		defer c.zapretMu.Unlock()
+		for _, pk := range c.zapretCfg.Picked { // one network
+			return pk.Methods[zapret.YouTube]
+		}
+		return ""
+	}
+	wait := func(what string, ok func() bool) {
+		t.Helper()
+		for range 2000 {
+			if ok() {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("%s: %+v", what, c.ZapretInfo().HealNote)
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
+		t.Fatal(err)
+	}
+	// No pick on this network yet: one by itself.
+	wait("the first pick", func() bool { return picked() != "" && !strings.Contains(picked(), "hostfakesplit") })
+	if v := c.ZapretInfo(); v.Pick == nil || !v.Pick.Auto || !strings.Contains(v.Pick.Why, "ещё не подбирали") {
+		t.Fatalf("%+v", v.Pick)
+	}
+	wait("a check", func() bool { return strings.HasPrefix(c.ZapretInfo().HealNote, "Проверено") })
+
+	// The method stops working: picked again, by itself.
+	mode.Store(1)
+	wait("the new pick", func() bool { return strings.Contains(picked(), "hostfakesplit") })
+	wait("the note", func() bool { return strings.Contains(c.ZapretInfo().HealNote, "подобрал заново") })
+	if v := c.ZapretInfo(); !strings.Contains(v.Pick.Why, "YouTube перестал открываться") {
+		t.Fatalf("%+v", v.Pick)
+	}
+
+	// Down: no pick, a note.
+	mode.Store(2)
+	wait("down", func() bool {
+		return strings.Contains(c.ZapretInfo().HealNote, "не открывается и без обхода")
+	})
+	if !strings.Contains(picked(), "hostfakesplit") {
+		t.Fatal(picked())
+	}
+
+	// Switched off: no more checks.
+	off := false
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}, AutoHeal: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if c.ZapretInfo().Settings.Heals() {
+		t.Fatal("still on")
+	}
+	n := liveChecks.Load()
+	time.Sleep(150 * time.Millisecond)
+	if liveChecks.Load() > n+2 { // one may have been under way
+		t.Fatalf("%d checks after off", liveChecks.Load()-n)
+	}
+}
+
+// Self-healing waits between picks on a network.
+func TestZapretHealGap(t *testing.T) {
+	c, _ := zapFixture(t)
+	c.pickMu.Lock()
+	c.autoPicks = map[string]autoPick{"": {at: time.Now(), found: false}}
+	c.pickMu.Unlock()
+	c.healPick(context.Background(), "", "YouTube перестал открываться", []zapret.Target{zapret.YouTube})
+	if v := c.ZapretInfo(); v.Pick != nil || !strings.Contains(v.HealNote, "подбирал недавно") {
+		t.Fatalf("%+v %q", v.Pick, v.HealNote)
 	}
 }

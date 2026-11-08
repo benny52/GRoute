@@ -48,6 +48,20 @@ type zapretState struct {
 	pickMu      sync.Mutex
 	zapretBusy  string      // «Скачиваю zapret2…» while staging
 	zapretShown *ZapretView // the last view built with zapretMu held
+	// Self-healing (zapretHeal): healStop ends it (zapretMu); healNote,
+	// healAt: its last finding for the page; autoPicks: when it last
+	// picked on a network and whether that found anything (pickMu).
+	healStop  context.CancelFunc
+	healWG    sync.WaitGroup
+	healNote  string
+	healAt    time.Time
+	autoPicks map[string]autoPick
+}
+
+// autoPick is a pick self-healing started on a network.
+type autoPick struct {
+	at    time.Time
+	found bool // it found a method for every service it was for
 }
 
 // ZapretRulePrefix starts the name of a rule the bypass keeps.
@@ -88,6 +102,9 @@ type ZapretView struct {
 	Busy string `json:"busy,omitempty"`
 	// HasServer: there is a main server to send a target through.
 	HasServer bool `json:"hasServer"`
+	// Heal: what self-healing last found ("" = nothing yet), and when.
+	HealNote string `json:"healNote,omitempty"`
+	HealAt   int64  `json:"healAt,omitempty"` // Unix ms
 }
 
 // ZapretDiag is how a target is blocked.
@@ -152,6 +169,9 @@ type ZapretPickView struct {
 	// Diagnosis: how a target is blocked without a bypass.
 	Diagnosis map[zapret.Target]ZapretDiag `json:"diagnosis,omitempty"`
 	Error     string                       `json:"error,omitempty"`
+	// Auto: started by self-healing, not by the user; Why: what made it.
+	Auto bool   `json:"auto,omitempty"`
+	Why  string `json:"why,omitempty"`
 }
 
 // ZapretInput is what the page saves.
@@ -160,6 +180,8 @@ type ZapretInput struct {
 	Targets []zapret.Target          `json:"targets"`
 	Sites   []string                 `json:"sites"`
 	Methods map[zapret.Target]string `json:"methods"`
+	// AutoHeal: nil keeps the setting.
+	AutoHeal *bool `json:"autoHeal,omitempty"`
 }
 
 // loadZapret reads zapret.json (Load).
@@ -284,6 +306,7 @@ func (c *Controller) zapretApplyLocked() {
 	run := c.zapretRunner()
 	c.syncZapretRules(cfg)
 	defer c.zapretWatchLocked(cfg)
+	defer c.zapretHealLocked(cfg)
 	if c.zapretErr != nil || !cfg.Enabled || len(cfg.Targets) == 0 || c.ZapretPrepare == nil || c.ZapretLists == "" {
 		c.zapretArgs = nil
 		run.Stop()
@@ -515,6 +538,7 @@ func (c *Controller) ZapretInfo() ZapretView {
 			v = *shown
 		}
 		v.Pick, v.Busy, v.Status = pick, busy, c.zapretRunner().Status()
+		v.HealNote, v.HealAt = c.healState()
 		return v
 	}
 	defer c.zapretMu.Unlock()
@@ -524,6 +548,7 @@ func (c *Controller) ZapretInfo() ZapretView {
 // zapretInfoLocked builds the view (zapretMu held).
 func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretView {
 	v := ZapretView{Available: c.ZapretPrepare != nil, Pick: pick, Busy: busy}
+	v.HealNote, v.HealAt = c.healState()
 	c.mu.Lock()
 	v.HasServer = c.mainTargetLocked() != ""
 	c.mu.Unlock()
@@ -634,6 +659,13 @@ func (c *Controller) SaveZapret(in ZapretInput) error {
 	next := c.zapretCfg
 	next.Enabled, next.Targets, next.Sites, next.Methods = in.Enabled, in.Targets, in.Sites, in.Methods
 	next.Via = cloneMap(next.Via)
+	if in.AutoHeal != nil {
+		v := *in.AutoHeal
+		next.AutoHeal = &v
+		if v {
+			next.AutoHeal = nil // the default
+		}
+	}
 	next.Normalize()
 	if next.On(zapret.Sites) && len(next.Sites) == 0 {
 		return errors.New("добавьте хотя бы один сайт или снимите «Свои сайты»")
@@ -666,8 +698,19 @@ func (c *Controller) ZapretPickCancel() {
 // service opens or the methods run out. What it found is kept for this
 // network, and the bypass starts with it.
 func (c *Controller) ZapretPick() (ZapretView, error) {
+	c.pickMu.Lock()
+	busy := c.pickCancel != nil && c.zapretPick != nil && c.zapretPick.Running
+	c.pickMu.Unlock()
+	if busy {
+		return c.ZapretInfo(), errors.New("подбор уже идёт")
+	}
 	c.zapretMu.Lock()
 	defer c.zapretMu.Unlock()
+	return c.zapretPickLocked("")
+}
+
+// zapretPickLocked is the pick; why is set when self-healing started it.
+func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 	cfg := c.zapretCfg
 	if c.zapretErr != nil || len(cfg.Targets) == 0 {
 		p, b, _ := c.pickState()
@@ -679,7 +722,7 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pick := &ZapretPickView{Running: true, Step: "Готовлю zapret2…", Total: len(zapret.Methods) + 1,
-		Results: map[zapret.Target]string{}, Diagnosis: map[zapret.Target]ZapretDiag{}}
+		Results: map[zapret.Target]string{}, Diagnosis: map[zapret.Target]ZapretDiag{}, Auto: why != "", Why: why}
 	c.pickMu.Lock()
 	c.zapretPick, c.pickCancel = pick, cancel
 	c.pickMu.Unlock()
@@ -847,13 +890,21 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 		}
 	}
 	if len(left) > 0 {
-		// 1. The library.
+		// 1. The library, and what worked here before (spares the
+		// generator made among them).
 		var lib []string
 		for _, m := range zapret.Methods {
 			lib = append(lib, m.ID)
 		}
+		for _, t := range left {
+			for _, id := range cfg.Picked[key].Working[t] {
+				if !slices.Contains(lib, id) {
+					lib = append(lib, id)
+				}
+			}
+		}
 		update(func(p *ZapretPickView) {
-			p.Step = fmt.Sprintf("Пробую %d известных методов сразу", len(lib))
+			p.Step = fmt.Sprintf("Пробую %d известных и найденных раньше методов сразу", len(lib))
 			p.Total = 1 + len(lib)
 		})
 		got, err := round(lib, left)

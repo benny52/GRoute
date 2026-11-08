@@ -1883,6 +1883,7 @@ export interface ZapretSettings {
   sites?: string[];
   methods?: Partial<Record<ZapretTarget, string>>; // '' / absent = automatic, 'none', 'vpn' or a method
   via?: Partial<Record<ZapretTarget, string>>; // with 'vpn': 'rules', a server/group ID; absent = the main server
+  autoHeal?: boolean; // absent = on
 }
 
 export interface ZapretStatus {
@@ -1912,6 +1913,8 @@ export interface ZapretPick {
   working?: Partial<Record<ZapretTarget, string[]>>; // every method that opened it, fastest first
   diagnosis?: Partial<Record<ZapretTarget, ZapretDiag>>; // how it is blocked without a bypass
   error?: string;
+  auto?: boolean; // started by self-healing; why: what made it
+  why?: string;
 }
 
 export interface ZapretDiag {
@@ -1934,6 +1937,8 @@ export interface ZapretView {
   pick?: ZapretPick;
   commandLine?: string;
   busy?: string;
+  healNote?: string; // self-healing's last finding, at healAt (Unix ms)
+  healAt?: number;
 }
 
 export interface ZapretInput {
@@ -1941,6 +1946,7 @@ export interface ZapretInput {
   targets: ZapretTarget[];
   sites: string[];
   methods: Partial<Record<ZapretTarget, string>>;
+  autoHeal?: boolean; // absent: kept
 }
 
 interface GUI {
