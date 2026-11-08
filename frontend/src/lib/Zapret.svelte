@@ -313,6 +313,12 @@
                 </li>
               {/each}
             </ul>
+            {#if view.pick.skipped?.length}
+              <div class="muted small tried">
+                Не проверялись — не открываются и без обхода, обход им не поможет: {hide(view.pick.skipped.join('; '))}. Проверьте адрес; если сайт
+                заблокирован по адресу, нужен VPN.
+              </div>
+            {/if}
           {/if}
         {/if}
       </section>

@@ -138,7 +138,9 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 		}
 		check = append(check, t)
 	}
-	failing := c.healCheck(ctx, zapret.Live, check, cfg.Sites)
+	// Own sites found dead here by the pick are not checked.
+	urls := func(t zapret.Target) []string { return zapret.ChecksSkip(t, cfg.Sites, cfg.Picked[key].SkippedSites) }
+	failing := c.healCheck(ctx, zapret.Live, check, urls)
 	if ctx.Err() != nil {
 		return
 	}
@@ -152,7 +154,7 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 		return
 	case <-time.After(zapretHealAgain):
 	}
-	failing = c.healCheck(ctx, zapret.Live, failing, cfg.Sites)
+	failing = c.healCheck(ctx, zapret.Live, failing, urls)
 	if len(failing) == 0 || ctx.Err() != nil {
 		return
 	}
@@ -161,7 +163,7 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 	var need []zapret.Target
 	var notes []string
 	for _, t := range failing {
-		r := zapretCheckFunc(ctx, 0, zapret.Checks(t, cfg.Sites))
+		r := zapretCheckFunc(ctx, 0, urls(t))
 		_, planned := cfg.PlanFor(t, key)
 		switch {
 		case r.OK && !planned:
@@ -187,14 +189,14 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 }
 
 // healCheck returns the targets that did not open from slot.
-func (c *Controller) healCheck(ctx context.Context, slot int, ts []zapret.Target, sites []string) []zapret.Target {
+func (c *Controller) healCheck(ctx context.Context, slot int, ts []zapret.Target, urls func(zapret.Target) []string) []zapret.Target {
 	type res struct {
 		t  zapret.Target
 		ok bool
 	}
 	ch := make(chan res, len(ts))
 	for _, t := range ts {
-		go func() { ch <- res{t, zapretCheckFunc(ctx, slot, zapret.Checks(t, sites)).OK} }()
+		go func() { ch <- res{t, zapretCheckFunc(ctx, slot, urls(t)).OK} }()
 	}
 	var bad []zapret.Target
 	for range ts {

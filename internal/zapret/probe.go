@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,12 +39,37 @@ func Checks(t Target, sites []string) []string {
 		return []string{"https://discord.com/", "https://gateway.discord.gg/",
 			"https://cdn.discordapp.com/stickers/781291131828699156.png", "https://media.discordapp.net/stickers/781291131828699156.png"}
 	}
+	return ChecksSkip(t, sites, nil)
+}
+
+// ChecksSkip is Checks without the own sites in skip (ones that do not
+// open even without a bypass in a way no bypass beats: a name that does
+// not exist, a block by address). The other targets are as Checks.
+func ChecksSkip(t Target, sites, skip []string) []string {
+	if t != Sites {
+		return Checks(t, sites)
+	}
 	// Names only: a bare address has no certificate of its own to check
 	// against.
 	var out []string
 	for _, s := range SiteNames(sites) {
 		if len(out) == 5 {
 			break // the first few say enough
+		}
+		if !slices.Contains(skip, s) {
+			out = append(out, "https://"+s+"/")
+		}
+	}
+	return out
+}
+
+// SiteProbes are the own sites a pick looks at first without a bypass,
+// to find the ones no bypass can open.
+func SiteProbes(sites []string) []string {
+	var out []string
+	for _, s := range SiteNames(sites) {
+		if len(out) == 20 {
+			break
 		}
 		out = append(out, "https://"+s+"/")
 	}

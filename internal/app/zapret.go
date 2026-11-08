@@ -116,14 +116,6 @@ type ZapretDiag struct {
 	Bypass bool `json:"bypass"`
 }
 
-func countWorks[T any](m map[zapret.Target][]T) int {
-	n := 0
-	for _, ws := range m {
-		n += len(ws)
-	}
-	return n
-}
-
 // methodIndex orders equal times: the library's order, generated ones
 // after it.
 func methodIndex(id string) int {
@@ -169,6 +161,9 @@ type ZapretPickView struct {
 	// Diagnosis: how a target is blocked without a bypass.
 	Diagnosis map[zapret.Target]ZapretDiag `json:"diagnosis,omitempty"`
 	Error     string                       `json:"error,omitempty"`
+	// Skipped: own sites left out: they do not open even without a bypass
+	// in a way none beats ("proxifile.com: имя сайта не находится").
+	Skipped []string `json:"skipped,omitempty"`
 	// Auto: started by self-healing, not by the user; Why: what made it.
 	Auto bool   `json:"auto,omitempty"`
 	Why  string `json:"why,omitempty"`
@@ -723,6 +718,10 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 	defer cancel()
 	pick := &ZapretPickView{Running: true, Step: "Готовлю zapret2…", Total: len(zapret.Methods) + 1,
 		Results: map[zapret.Target]string{}, Diagnosis: map[zapret.Target]ZapretDiag{}, Auto: why != "", Why: why}
+	checks := map[zapret.Target][]string{}
+	for _, t := range cfg.Targets {
+		checks[t] = zapret.Checks(t, cfg.Sites)
+	}
 	c.pickMu.Lock()
 	c.zapretPick, c.pickCancel = pick, cancel
 	c.pickMu.Unlock()
@@ -763,7 +762,7 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				r := zapretCheckFunc(ctx, slot, zapret.Checks(t, cfg.Sites))
+				r := zapretCheckFunc(ctx, slot, checks[t])
 				mu.Lock()
 				out[t] = r
 				mu.Unlock()
@@ -785,6 +784,25 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 	update(func(p *ZapretPickView) {
 		p.Step = "Проверяю без обхода: что блокируется и как"
 	})
+	// Own sites: one that does not exist or is blocked by address would
+	// fail the others' pick. They are left out, and said so.
+	var skipped []string
+	if slices.Contains(left, zapret.Sites) {
+		r := zapretCheckFunc(ctx, 0, zapret.SiteProbes(cfg.Sites))
+		var notes []string
+		for _, f := range r.Failed {
+			if !f.Kind.Bypassable() && !slices.Contains(skipped, f.Host) {
+				skipped = append(skipped, f.Host)
+				notes = append(notes, f.Host+" — "+f.Kind.Explain())
+			}
+		}
+		if cs := zapret.ChecksSkip(zapret.Sites, cfg.Sites, skipped); len(skipped) > 0 && len(cs) > 0 {
+			checks[zapret.Sites] = cs
+			update(func(p *ZapretPickView) { p.Skipped = notes })
+		} else {
+			skipped = nil // all of them: the diagnosis says why
+		}
+	}
 	for t, r := range checkAll(0, left) {
 		if r.OK {
 			update(func(p *ZapretPickView) { p.Results[t] = zapret.None })
@@ -884,6 +902,17 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 		})
 		return ws
 	}
+	// working: the variants that opened some target (one that opened two
+	// counts once).
+	workingCount := func() int {
+		seen := map[string]bool{}
+		for _, ws := range works {
+			for _, w := range ws {
+				seen[w.id] = true
+			}
+		}
+		return len(seen)
+	}
 	merge := func(got map[zapret.Target][]timed) {
 		for t, ws := range got {
 			works[t] = append(works[t], ws...)
@@ -948,7 +977,7 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 			batch := cands[:min(len(cands), zapret.ProbeSlots-1)]
 			cands = cands[len(batch):]
 			update(func(p *ZapretPickView) {
-				p.Step = fmt.Sprintf("Генерирую свои варианты: проверено %d, рабочих найдено %d", len(tried), countWorks(works))
+				p.Step = fmt.Sprintf("Генерирую свои варианты: проверено %d, рабочих найдено %d", len(tried), workingCount())
 				p.Total = p.Done + len(batch) + len(cands) + 1
 			})
 			got, err := round(batch, left)
@@ -1020,7 +1049,7 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 	if picked == nil {
 		picked = map[string]zapret.Picked{}
 	}
-	picked[key] = zapret.Picked{At: time.Now(), Methods: found, Working: working}
+	picked[key] = zapret.Picked{At: time.Now(), Methods: found, Working: working, SkippedSites: skipped}
 	trimPicked(picked)
 	c.zapretCfg.Picked = picked
 	if err := c.Store.SaveZapret(c.zapretCfg); err != nil {

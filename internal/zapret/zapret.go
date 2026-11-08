@@ -176,6 +176,9 @@ type Picked struct {
 	// Working: every method that opened the target, fastest first (the
 	// first is Methods[t]). The circular plan tries them before the rest.
 	Working map[Target][]string `json:"working,omitempty"`
+	// SkippedSites: own sites that did not open here even without a
+	// bypass in a way none beats; the checks leave them out.
+	SkippedSites []string `json:"skippedSites,omitempty"`
 }
 
 // Limits.

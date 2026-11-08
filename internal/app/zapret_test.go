@@ -651,3 +651,43 @@ func TestZapretHealGap(t *testing.T) {
 		t.Fatalf("%+v %q", v.Pick, v.HealNote)
 	}
 }
+
+// A dead own site (no such name) is left out of the pick, not let fail
+// the others; the checks after it leave it out too.
+func TestZapretPickSkipsDeadSite(t *testing.T) {
+	c, argsFor := zapFixture(t)
+	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+		var r zapret.Result
+		for _, u := range urls {
+			host := strings.TrimSuffix(strings.TrimPrefix(u, "https://"), "/")
+			switch {
+			case host == "dead.example":
+				r.Failed = append(r.Failed, zapret.Failure{Host: host, Kind: zapret.KindDNS, Text: "имя не найдено"})
+			case slot == 0 || !strings.Contains(argsFor(slot), "multidisorder"):
+				r.Failed = append(r.Failed, zapret.Failure{Host: host, Kind: zapret.KindTLS, Text: "сброс"})
+			}
+		}
+		r.OK = len(r.Failed) == 0 && len(urls) > 0
+		return r
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.Sites}, Sites: []string{"dead.example", "example.org"}}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := c.ZapretPick()
+	if err != nil || v.Pick.Results[zapret.Sites] == "" || len(v.Pick.Skipped) != 1 || !strings.Contains(v.Pick.Skipped[0], "dead.example") {
+		t.Fatalf("%v %+v", err, v.Pick)
+	}
+	for _, pk := range v.Settings.Picked {
+		if !slices.Equal(pk.SkippedSites, []string{"dead.example"}) {
+			t.Fatalf("%+v", pk)
+		}
+	}
+	// All of them dead: the diagnosis says so, as before.
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.Sites}, Sites: []string{"dead.example"}}); err != nil {
+		t.Fatal(err)
+	}
+	v, _ = c.ZapretPick()
+	if v.Pick.Results[zapret.Sites] != "" || len(v.Pick.Skipped) != 0 || v.Pick.Diagnosis[zapret.Sites].Kind != zapret.KindDNS {
+		t.Fatalf("%+v", v.Pick)
+	}
+}

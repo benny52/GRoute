@@ -1913,6 +1913,7 @@ export interface ZapretPick {
   working?: Partial<Record<ZapretTarget, string[]>>; // every method that opened it, fastest first
   diagnosis?: Partial<Record<ZapretTarget, ZapretDiag>>; // how it is blocked without a bypass
   error?: string;
+  skipped?: string[]; // own sites left out: dead even without a bypass
   auto?: boolean; // started by self-healing; why: what made it
   why?: string;
 }
