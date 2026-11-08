@@ -53,6 +53,7 @@ type GUI struct {
 
 	tray     trayState
 	quitting atomic.Bool // a real exit: the close button no longer hides
+	updating atomic.Bool // ApplyAppUpdate started the updater: HyRoute is exiting
 	quitOnce sync.Once
 	quitCh   chan struct{} // closed by quit: main ends HyRoute
 
@@ -216,11 +217,32 @@ func (g *GUI) systemLines() []string {
 
 // ---- updates ----
 
+// errUpdaterWaits: an updater already runs. It waits for HyRoute to exit
+// and then installs the update, so exiting is all it takes.
+var errUpdaterWaits = errors.New("обновление уже запущено и ждёт, пока HyRoute закроется. Выйдите из HyRoute (значок в трее → «Выход»): обновление установится само")
+
+// updaterRunning reports whether a hyroute-updater holds its mutex.
+func updaterRunning() bool {
+	name, _ := windows.UTF16PtrFromString(update.UpdaterMutex)
+	h, err := windows.OpenMutex(windows.SYNCHRONIZE, false, name)
+	if err != nil {
+		return false
+	}
+	windows.CloseHandle(h)
+	return true
+}
+
 // ApplyAppUpdate hands the verified package to hyroute-updater and exits:
 // filters are removed and every Hysteria stops first. The updater waits
 // for this process to end, swaps the files, starts the new version and
 // rolls back if it does not come up.
 func (g *GUI) ApplyAppUpdate() error {
+	if g.updating.Load() {
+		return errors.New("обновление уже устанавливается: HyRoute сейчас закроется")
+	}
+	if updaterRunning() {
+		return errUpdaterWaits
+	}
 	dir, ver, err := g.ctl.ReadyUpdate()
 	if err != nil {
 		return err
@@ -239,6 +261,11 @@ func (g *GUI) ApplyAppUpdate() error {
 		return err
 	}
 	if err := os.WriteFile(helper, b, 0o755); err != nil {
+		if errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+			// The copy runs: an updater of an earlier attempt (one from
+			// before 1.3.21 holds no mutex) waits for HyRoute to exit.
+			return errUpdaterWaits
+		}
 		return err
 	}
 	if sum, err := update.FileSHA256(helper); err != nil || !strings.EqualFold(sum, m.Files[update.UpdaterExe]) {
@@ -270,6 +297,7 @@ func (g *GUI) ApplyAppUpdate() error {
 		g.ctl.ResumeNetModes()
 		return fmt.Errorf("программа обновления не запустилась: %w", err)
 	}
+	g.updating.Store(true)
 	g.ctl.Log.Info("installing update: HyRoute exits, hyroute-updater replaces the files", "to", ver)
 	// The kill switch keeps the internet closed until the new version
 	// reconnects (or the user unblocks it there).

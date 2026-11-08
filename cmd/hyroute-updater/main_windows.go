@@ -12,6 +12,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -44,6 +45,16 @@ func main() {
 		}
 	}
 	log("start: pid=%d staging=%s target=%s exe=%s from=%s", *pid, *staging, *target, *exe, *from)
+	// One update at a time: a second one would swap files under the first.
+	mname, _ := windows.UTF16PtrFromString(update.UpdaterMutex)
+	mutex, err := windows.CreateMutex(nil, true, mname)
+	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		log("another updater is running")
+		fail("Обновление уже устанавливается: программа обновления ждёт, пока закроется HyRoute.")
+	}
+	if mutex != 0 {
+		defer windows.CloseHandle(mutex)
+	}
 	mainExe := filepath.Join(*target, *exe)
 	// to is the version that failed to install, for --update-failed: the
 	// staging directory is updates\<version>\files (update.Stage) until

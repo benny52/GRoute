@@ -26,6 +26,9 @@ const (
 	// Required files of a release package.
 	MainExe    = "HyRoute.exe"
 	UpdaterExe = "hyroute-updater.exe"
+	// UpdaterMutex is held by a running hyroute-updater (Windows): one
+	// update at a time, and HyRoute knows one is waiting for it to exit.
+	UpdaterMutex = `Global\HyRouteUpdater`
 )
 
 // Platform is the platform part of the release asset's name: the
