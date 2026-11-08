@@ -212,8 +212,18 @@ func dialOK(addr string) bool {
 	if err != nil {
 		return false
 	}
-	c.Close()
-	return true
+	defer c.Close()
+	return !selfConnected(c)
+}
+
+// selfConnected: the connection is to itself. Dialing a loopback port that
+// nothing listens on, from the ephemeral range the port came from, the
+// kernel may give the dial that same port as its source, and the two ends
+// meet (TCP simultaneous open): it "connects" though Hysteria never opened
+// the port. Seen on Linux CI as a supervisor reporting a deaf Hysteria
+// connected.
+func selfConnected(c net.Conn) bool {
+	return c.LocalAddr().String() == c.RemoteAddr().String()
 }
 
 // waitListening waits until Hysteria accepts connections on its SOCKS5

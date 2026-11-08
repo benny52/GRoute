@@ -709,3 +709,24 @@ func TestCleanRunDir(t *testing.T) {
 		}
 	}
 }
+
+// A connection to itself (TCP simultaneous open on loopback) is no
+// listener: a dial that met itself must not count as an open port.
+func TestSelfConnectedIsNoListener(t *testing.T) {
+	var self net.Conn
+	// Dial loopback ports from the port itself until one meets itself, as
+	// the kernel can arrange by chance; on systems that refuse it, skip.
+	for p := 41000; p < 41050 && self == nil; p++ {
+		d := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: p}, Timeout: 200 * time.Millisecond}
+		if c, err := d.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", p)); err == nil {
+			self = c
+		}
+	}
+	if self == nil {
+		t.Skip("this system does not connect a socket to itself")
+	}
+	defer self.Close()
+	if !selfConnected(self) {
+		t.Fatalf("%v -> %v", self.LocalAddr(), self.RemoteAddr())
+	}
+}
