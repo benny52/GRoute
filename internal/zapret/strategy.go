@@ -44,13 +44,19 @@ var fakeBlobs = map[string]string{
 // foolings: how a fake dies before reaching the server while DPI takes it.
 var foolings = map[string]string{
 	"ts":      "tcp_ts=-1000",
-	"md5":     "tcp_md5",
+	"md5":     "tcp_ts=-1000:tcp_md5",
 	"badsum":  "badsum",
 	"seq":     "tcp_seq=-3000",
 	"ack":     "tcp_ack=-66000:tcp_ts_up",
 	"ttl":     "ip_ttl=%d:ip6_ttl=%d",
 	"autottl": "ip_autottl=-%d,3-20:ip6_autottl=-%d,3-20",
 }
+
+// activeFoolings are the ones the generator makes. On Windows tcp_ts
+// spoils nothing (no TCP timestamps) and a badsum packet does not leave
+// the machine (Windows CI: the fakes reached example.com and broke the
+// handshake); stored strategies with them still parse.
+var activeFoolings = []string{"md5", "seq", "ack", "ttl", "autottl"}
 
 var foolingNames = map[string]string{
 	"ts": "старая метка времени", "md5": "TCP MD5", "badsum": "битая сумма", "seq": "сдвиг SEQ",
@@ -324,7 +330,7 @@ func Neighbors(s Strategy) []Strategy {
 		}
 	}
 	if s.Fool != "" {
-		for f := range foolings {
+		for _, f := range activeFoolings {
 			n := s
 			n.Fool, n.TTL = f, 0
 			switch f {
@@ -404,7 +410,7 @@ func fakeKeys() []string {
 func Broad(n int, seed uint64) []Strategy {
 	rnd := rand.New(rand.NewPCG(seed, seed^0x5eed))
 	pick := func(xs []string) string { return xs[rnd.IntN(len(xs))] }
-	fools := []string{"ts", "md5", "badsum", "seq", "ack", "ttl", "autottl"}
+	fools := activeFoolings
 	fakes := fakeKeys()
 	patterns := slices.DeleteFunc(slices.Clone(fakes), func(k string) bool { return k == "zero" })
 	var out []Strategy
@@ -462,12 +468,13 @@ func AsStrategy(id string) (Strategy, bool) {
 // libraryAsStrategy: the library methods the generator can vary, as
 // strategies (their parameters, not their exact text).
 var libraryAsStrategy = map[string]Strategy{
-	"fake-seqovl":      {Fake: "google", Fool: "ts", Repeats: 8, Split: "multisplit", Pos: "1,midsld", Seqovl: 681, Pattern: "google"},
-	"fake-seqovl-mod":  {Fake: "google", Fool: "ts", Repeats: 8, Mod: true, Split: "multisplit", Pos: "1,midsld", Seqovl: 681, Pattern: "google"},
+	"fake-seqovl":      {Fake: "google", Fool: "autottl", TTL: 2, Repeats: 8, Split: "multisplit", Pos: "1,midsld", Seqovl: 681, Pattern: "google"},
+	"fake-seqovl-mod":  {Fake: "google", Fool: "md5", Repeats: 8, Mod: true, Split: "multisplit", Pos: "1,midsld", Seqovl: 681, Pattern: "google"},
 	"fake-md5-seqovl":  {Fake: "google", Fool: "md5", Repeats: 7, Split: "multisplit", Pos: "1,midsld", Seqovl: 681, Pattern: "google"},
-	"fake":             {Fake: "google", Fool: "ts", Repeats: 7},
-	"fake-disorder":    {Fake: "google", Fool: "ts", Repeats: 7, Split: "multidisorder", Pos: "1,midsld"},
+	"fake":             {Fake: "google", Fool: "md5", Repeats: 7},
+	"fake-disorder":    {Fake: "google", Fool: "md5", Repeats: 7, Split: "multidisorder", Pos: "1,midsld"},
+	"fakedsplit":       {Fake: "google", Fool: "md5", Repeats: 7, Split: "fakedsplit", Pos: "2", Pattern: "google"},
 	"seqovl-vk":        {Split: "multisplit", Pos: "1", Seqovl: 568, Pattern: "vk"},
-	"fake-vk-seqovl":   {Fake: "vk", Fool: "ts", Repeats: 6, Split: "multisplit", Pos: "1,midsld", Seqovl: 681, Pattern: "vk"},
-	"hostfakesplit-vk": {Fake: "vk", Fool: "ts", Repeats: 6, Split: "hostfakesplit", Host: "vk.com"},
+	"fake-vk-seqovl":   {Fake: "vk", Fool: "md5", Repeats: 6, Split: "multisplit", Pos: "1,midsld", Seqovl: 681, Pattern: "vk"},
+	"hostfakesplit-vk": {Fake: "vk", Fool: "md5", Repeats: 6, Split: "hostfakesplit", Host: "vk.com"},
 }

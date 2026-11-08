@@ -99,9 +99,9 @@ func TestStrategyNameAndBuild(t *testing.T) {
 	for _, want := range []string{
 		"--blob=w_gosuslugi_ru:@" + filepath.Join(lists, "fake_w_gosuslugi_ru.bin"),
 		"--blob=w_ya_ru:@" + filepath.Join(lists, "fake_w_ya_ru.bin"),
-		"--lua-desync=fake:blob=w_ya_ru:tcp_md5:repeats=6:strategy=1",
+		"--lua-desync=fake:blob=w_ya_ru:tcp_ts=-1000:tcp_md5:repeats=6:strategy=1",
 		"--lua-desync=multisplit:pos=midsld:seqovl=568:seqovl_pattern=w_gosuslugi_ru:strategy=1",
-		"--lua-desync=fake:blob=google_tls:tcp_ts=-1000:repeats=7:strategy=2",
+		"--lua-desync=fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7:strategy=2",
 	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("no %q in\n%s", want, CommandLine(args))

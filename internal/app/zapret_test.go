@@ -80,7 +80,7 @@ func zapFixture(t *testing.T) (*Controller, func(slot int) string) {
 		switch {
 		case youtube && strings.Contains(line, "--hostlist="+filepath.Join(lists, zapret.ListYouTube)) && strings.Contains(line, "multidisorder"):
 			return zapret.Result{OK: true}
-		case !youtube && strings.Contains(line, "--hostlist="+filepath.Join(lists, zapret.ListDiscord)) && strings.Contains(line, "tcp_md5"):
+		case !youtube && strings.Contains(line, "--hostlist="+filepath.Join(lists, zapret.ListDiscord)) && strings.Contains(line, "repeats=7:tcp_md5"): // fake-md5-seqovl
 			return zapret.Result{OK: true}
 		}
 		return failed(zapret.KindTLS)
@@ -264,14 +264,15 @@ func TestZapretPickFastestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The library's two first, then what the generator made around
-	// fake-disorder: the same disorder with other fakes and foolings.
+	// The fastest of the library first, then what the generator made
+	// around the fastest two: the same splits with other fakes and
+	// foolings (as fast as fakedsplit, they come before fake-disorder).
 	ws := v.Pick.Working[zapret.YouTube]
-	if v.Pick.Results[zapret.YouTube] != "fakedsplit" || len(ws) != zapretKeep || !slices.Equal(ws[:2], []string{"fakedsplit", "fake-disorder"}) {
+	if v.Pick.Results[zapret.YouTube] != "fakedsplit" || len(ws) != zapretKeep || ws[0] != "fakedsplit" {
 		t.Fatalf("%+v", v.Pick)
 	}
-	for _, id := range ws[2:] {
-		if st, ok := zapret.ParseStrategy(id); !ok || st.Split != "multidisorder" {
+	for _, id := range ws[1:] {
+		if st, ok := zapret.ParseStrategy(id); id != "fake-disorder" && (!ok || st.Split != "fakedsplit" && st.Split != "multidisorder") {
 			t.Fatalf("generated %s", id)
 		}
 	}
@@ -279,10 +280,10 @@ func TestZapretPickFastestFirst(t *testing.T) {
 		t.Fatalf("tried %d", v.Pick.Tried)
 	}
 	// The page names the generated ones and offers them.
-	if !slices.ContainsFunc(v.Methods, func(m ZapretMethodView) bool { return m.ID == ws[2] && m.Generated && m.Name != "" }) {
+	if !slices.ContainsFunc(v.Methods, func(m ZapretMethodView) bool { return m.ID == ws[1] && m.Generated && m.Name != "" }) {
 		t.Fatalf("%+v", v.Methods)
 	}
-	if !strings.Contains(v.CommandLine, "fakedsplit:blob=google_tls:pos=2:strategy=1") || !strings.Contains(v.CommandLine, "multidisorder:pos=1,midsld:strategy=2") {
+	if !strings.Contains(v.CommandLine, "fakedsplit:pos=2:pattern=google_tls:tcp_ts=-1000:tcp_md5:strategy=1") {
 		t.Fatalf("%s", v.CommandLine)
 	}
 	z, _ := c.Store.LoadZapret()

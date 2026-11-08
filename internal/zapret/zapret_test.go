@@ -89,7 +89,7 @@ func TestBuild(t *testing.T) {
 		// circular before the payload filter, seeing every packet; the
 		// methods only the ClientHello.
 		"--in-range=-s5556 --lua-desync=circular:fails=3:retrans=2:nld=2 --in-range=x --payload=tls_client_hello --lua-desync=",
-		"hostfakesplit:host=discord.com:strategy=8", "--lua-desync=fake:blob=google_tls:tcp_ts=-1000:repeats=7 ",
+		"hostfakesplit:host=discord.com:tcp_ts=-1000:tcp_md5:strategy=8", "--lua-desync=fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7 ",
 	} {
 		if !strings.Contains(line+" ", want) {
 			t.Errorf("no %q in\n%s", want, CommandLine(args))

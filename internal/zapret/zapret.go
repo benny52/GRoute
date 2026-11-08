@@ -73,11 +73,16 @@ type Method struct {
 // through: the most often working first. Adapted from the presets of
 // TheFirstNoob/Zapret-2-GUI (MIT), built on zapret2's zapret-antidpi.lua.
 var Methods = []Method{
-	{ID: "fake-seqovl", Name: "Фейк + разрез с перекрытием", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=8",
+	// The fakes die by TCP MD5 or by TTL: Windows sends no TCP timestamps,
+	// so the presets' tcp_ts=-1000 spoils nothing there and the fake
+	// reaches the server, which breaks the handshake (Windows CI: example.com
+	// through each method). tcp_md5 keeps tcp_ts: on a system with
+	// timestamps both spoil it.
+	{ID: "fake-seqovl", Name: "Фейк (TTL по расстоянию) + разрез с перекрытием", tcp: []string{
+		"fake:blob=google_tls:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:repeats=8",
 		"multisplit:pos=1,midsld:seqovl=681:seqovl_pattern=google_tls"}},
 	{ID: "fake-seqovl-mod", Name: "Фейк со случайными полями + разрез с перекрытием", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=8:tls_mod=rnd,dupsid",
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=8:tls_mod=rnd,dupsid",
 		"multisplit:pos=1,midsld:seqovl=681:seqovl_pattern=google_tls"}},
 	{ID: "fake-md5-seqovl", Name: "Фейк с TCP MD5 + разрез с перекрытием", tcp: []string{
 		"fake:blob=google_tls:tcp_ts=-1000:repeats=7:tcp_md5",
@@ -86,27 +91,30 @@ var Methods = []Method{
 		"multisplit:pos=2:seqovl=681:seqovl_pattern=google_tls:repeats=7",
 		"multisplit:pos=2,midsld:repeats=7"}},
 	{ID: "fake", Name: "Только фейк", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=7"}},
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7"}},
 	{ID: "fake-disorder", Name: "Фейк + перестановка частей", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=7",
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7",
 		"multidisorder:pos=1,midsld"}},
+	// fakedsplit's fake parts are spoiled as its fakes are, and filled with
+	// the pattern (its "blob" would split that blob instead of the real
+	// ClientHello).
 	{ID: "fakedsplit", Name: "Фейк + разрез с фейковыми частями", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=7",
-		"fakedsplit:blob=google_tls:pos=2"}},
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7",
+		"fakedsplit:pos=2:pattern=google_tls:tcp_ts=-1000:tcp_md5"}},
 	{ID: "hostfakesplit", Name: "Фейк + подмена имени сайта в части", tcp: []string{
-		"fake:blob=google_tls:tcp_ts=-1000:repeats=7",
-		"hostfakesplit:host={host}"}},
+		"fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7",
+		"hostfakesplit:host={host}:tcp_ts=-1000:tcp_md5"}},
 	// Under a white-listed name (vk.com): against the "16-20 KB" cut of
 	// CDN addresses (Discord's media on Cloudflare), as Flowseal's general
 	// list does with 4pda.to.
 	{ID: "seqovl-vk", Name: "Разрез с перекрытием под vk.com", tcp: []string{
 		"multisplit:pos=1:seqovl=568:seqovl_pattern=vk_tls"}},
 	{ID: "fake-vk-seqovl", Name: "Фейк vk.com + разрез с перекрытием", tcp: []string{
-		"fake:blob=vk_tls:tcp_ts=-1000:repeats=6",
+		"fake:blob=vk_tls:tcp_ts=-1000:tcp_md5:repeats=6",
 		"multisplit:pos=1,midsld:seqovl=681:seqovl_pattern=vk_tls"}},
 	{ID: "hostfakesplit-vk", Name: "Фейк vk.com + подмена имени на vk.com", tcp: []string{
-		"fake:blob=vk_tls:tcp_ts=-1000:repeats=6",
-		"hostfakesplit:host=vk.com"}},
+		"fake:blob=vk_tls:tcp_ts=-1000:tcp_md5:repeats=6",
+		"hostfakesplit:host=vk.com:tcp_ts=-1000:tcp_md5"}},
 }
 
 // FindMethod is a method by ID.

@@ -52,8 +52,12 @@ Discord (домены из `lists.go`), «Discord (голос)» (`Discord.exe`,
   фейк QUIC) и медиа-TLS на портах 2053, 2083, 2087, 2096, 8443.
 
 **Методы** (`Methods`) переложены с пресетов [Zapret 2 GUI](https://github.com/TheFirstNoob/Zapret-2-GUI)
-(MIT): фейк ClientHello google.com с занижённым TCP timestamp или TCP MD5, `multisplit` с
-`seqovl`, `multidisorder`, `fakedsplit`, `hostfakesplit`. Ещё три — под «белым» именем: шаблон
+(MIT): фейк ClientHello google.com, `multisplit` с `seqovl`, `multidisorder`, `fakedsplit`,
+`hostfakesplit`. Фейки в них портятся TCP MD5 (вместе с `tcp_ts=-1000`) или TTL по расстоянию, а
+не одной меткой времени, как в пресетах: Windows не ставит метки времени TCP, `tcp_ts` там ничего
+не портит, фейк доходит до сервера и ломает рукопожатие — Windows CI видел это на example.com у 8
+методов из 11. `fakedsplit` получает `pattern=` (его `blob=` резал бы сам шаблон вместо настоящего
+ClientHello), `fakedsplit` и `hostfakesplit` — порчу для своих фейков. Ещё три — под «белым» именем: шаблон
 `seqovl` и фейк — ClientHello vk.com из архива zapret2 (`vk_tls`), `hostfakesplit:host=vk.com`.
 Так Flowseal (с ClientHello 4pda.to) обходит обрыв «16–20 КБ» у адресов хостингов и CDN, в том
 числе Cloudflare, где лежат вложения и видео Discord: ТСПУ не трогает соединение, начало которого
@@ -133,8 +137,10 @@ blockcheck2 (`blockcheck2.d/standard`):
   белого списка ТСПУ (`WhiteNames`: vk.com, ya.ru, gosuslugi.ru, max.ru, 4pda.to, ozon.ru), которые
   HyRoute собирает сам (`fakes.go`: utls, отпечаток Chrome 120 без постквантового ключа, чтобы фейк
   поместился в один пакет) и кладёт в защищённую папку списков; со случайными полями или без;
-- **порча фейка** (`foolings`): `tcp_ts=-1000`, `tcp_md5`, `badsum`, `tcp_seq=-3000`,
-  `tcp_ack=-66000:tcp_ts_up`, TTL 1–12, автоподбор TTL; число повторов 1–12;
+- **порча фейка** (`foolings`): TCP MD5 (с `tcp_ts=-1000`), `tcp_seq=-3000`,
+  `tcp_ack=-66000:tcp_ts_up`, TTL 1–12, автоподбор TTL; число повторов 1–12. Одна метка времени и
+  `badsum` разбираются из сохранённых стратегий, но генератор их не предлагает: на Windows такой
+  фейк доходит до сервера (метка не ставится, пакет с битой суммой не уходит);
 - **разрез настоящего ClientHello** (`splits`): `multisplit` (с `seqovl` 336/568/681 и шаблоном —
   любым ClientHello из списка), `multidisorder`, `fakedsplit`, `fakeddisorder`, `hostfakesplit` с
   «белым» именем; **где** (`positions`): 1, 2, середина домена, начало SNI, начало имени и пары.
@@ -155,7 +161,8 @@ ID стратегии — `g:` и её поля (`g:f=w_ya_ru;o=md5;r=6;s=multis
 библиотека. Страница называет сгенерированные стратегии словами («Фейк ya.ru (TCP MD5, ×6) + разрез на
 середине домена»), в режиме «Для опытных» их можно выбрать вручную. Windows CI запускает 24
 сгенерированные стратегии в настоящем winws2 (по 12 сразу) с проверкой example.com из их портов и
-падает на `LUA ERROR`/`desync ERROR`.
+падает на `LUA ERROR`/`desync ERROR`, а также если example.com открылся меньше чем через 3/4 из них
+(и через готовые методы — меньше чем через все без одного).
 
 **Смена сети.** Пока хоть один сервис в автоматическом режиме и есть подобранные методы,
 `zapretWatch` слушает те же уведомления, что «Сети» (`netwatch.Watch` раздаёт их всем подписчикам),

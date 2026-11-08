@@ -103,10 +103,12 @@ func TestWinws2Runs(t *testing.T) {
 			t.Logf("%s", out.String())
 		})
 	}
-	if opened == 0 {
-		t.Fatal("example.com opened through no method: the checks or the testers are broken")
-	}
+	// A method's fakes must die before the server: one that reaches it
+	// breaks an unblocked site's handshake (tcp_ts alone did on Windows).
 	t.Logf("example.com opened through %d of %d methods", opened, len(zapret.Methods))
+	if opened < len(zapret.Methods)-1 {
+		t.Fatalf("example.com opened through %d of %d methods: the fakes of the others reach the server", opened, len(zapret.Methods))
+	}
 }
 
 // stageZapret downloads and stages the pinned zapret2 (once per test) and
@@ -155,7 +157,7 @@ func TestWinws2Generated(t *testing.T) {
 	for _, s := range zapret.Neighbors(base)[:6] {
 		ids = append(ids, s.ID())
 	}
-	opened := 0
+	opened, total := 0, len(ids)
 	for len(ids) > 0 {
 		batch := ids[:min(len(ids), zapret.ProbeSlots-1)]
 		ids = ids[len(batch):]
@@ -215,9 +217,11 @@ func TestWinws2Generated(t *testing.T) {
 			}
 		}
 	}
-	if opened == 0 {
-		t.Fatal("example.com opened through no generated strategy")
+	t.Logf("example.com opened through %d of %d generated strategies", opened, total)
+	if opened*4 < total*3 {
+		t.Fatalf("example.com opened through %d of %d generated strategies: their fakes reach the server", opened, total)
 	}
+
 }
 
 // probePort matches a packet from or to a probe's port in winws2's log.
