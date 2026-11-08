@@ -231,7 +231,9 @@ func TestZapretPickFastestFirst(t *testing.T) {
 		mu.Lock()
 		last = slices.Clone(args)
 		mu.Unlock()
-		return spawn(exe, args, env, out)
+		ch, err := spawn(exe, args, env, out)
+		// Stopped, it no longer opens anything.
+		return &forget{Child: ch, kill: func() { mu.Lock(); last = nil; mu.Unlock() }}, err
 	}
 	zapretCheckFunc = func(ctx context.Context, urls []string) zapret.Result {
 		mu.Lock()
@@ -250,6 +252,7 @@ func TestZapretPickFastestFirst(t *testing.T) {
 	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
 		t.Fatal(err)
 	}
+	waitZapret(t, c, zapret.Running) // the pick stops this one first
 	v, err := c.ZapretPick()
 	if err != nil {
 		t.Fatal(err)
@@ -265,3 +268,10 @@ func TestZapretPickFastestFirst(t *testing.T) {
 		t.Fatalf("%+v", z.Picked)
 	}
 }
+
+type forget struct {
+	hysteria.Child
+	kill func()
+}
+
+func (f *forget) Kill() error { f.kill(); return f.Child.Kill() }
