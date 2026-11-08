@@ -148,3 +148,47 @@ func TestStageDownloadChecked(t *testing.T) {
 		}
 	}
 }
+
+// zapret2's files: winws2.exe and its DLLs in zapret\, the Lua libraries
+// in zapret\lua\, the fakes in zapret\blobs\, all from the release zip.
+func TestZapretFromRepoDeps(t *testing.T) {
+	b, err := os.ReadFile("../../build/deps.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := ZapretFromDeps(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range files {
+		names = append(names, f.Name)
+		if len(f.SHA256) != 64 || len(f.ArchiveSHA256) != 64 || f.Member == "" || !f.Fetched || !strings.HasPrefix(f.URL, "https://github.com/bol-van/zapret2/") {
+			t.Fatalf("%+v", f)
+		}
+	}
+	want := "zapret/WinDivert.dll zapret/WinDivert64.sys zapret/blobs/quic_initial_www_google_com.bin zapret/blobs/tls_clienthello_www_google_com.bin " +
+		"zapret/cygwin1.dll zapret/lua/zapret-antidpi.lua zapret/lua/zapret-auto.lua zapret/lua/zapret-lib.lua zapret/winws2.exe"
+	if strings.Join(names, " ") != want {
+		t.Fatalf("%s", strings.Join(names, " "))
+	}
+	// Staged into subfolders.
+	zb := zipOf(t, map[string]string{"z/lua/x.lua": "lua"})
+	dst := t.TempDir()
+	f := File{Name: "zapret/lua/x.lua", SHA256: sum([]byte("lua")), URL: "https://h/z.zip", Member: "z/lua/x.lua", ArchiveSHA256: sum(zb), Fetched: true}
+	// A download that fails says so (not «распакуйте архив HyRoute»).
+	if _, err := Stage(t.TempDir(), dst, []File{f}, func(string, int64) ([]byte, error) { return nil, errors.New("offline") }); err == nil ||
+		strings.Contains(err.Error(), "распакуйте") || !strings.Contains(err.Error(), "offline") {
+		t.Fatalf("%v", err)
+	}
+	if res, err := Stage(t.TempDir(), dst, []File{f}, func(string, int64) ([]byte, error) { return zb, nil }); err != nil || len(res.Downloaded) != 1 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if err := Verify(dst, []File{f}); err != nil {
+		t.Fatal(err)
+	}
+	// Staged once: not downloaded again.
+	if res, err := Stage(t.TempDir(), dst, []File{f}, nil); err != nil || len(res.Downloaded) != 0 {
+		t.Fatalf("%+v %v", res, err)
+	}
+}

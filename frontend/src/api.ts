@@ -1856,3 +1856,69 @@ interface GUI {
   UndoRestore(): Promise<BackupApplyResult>;
   ForgetRestoreUndo(): Promise<void>;
 }
+
+// ==== «Обход DPI» (zapret2) ====
+
+export type ZapretTarget = 'youtube' | 'discord' | 'sites';
+
+export interface ZapretSettings {
+  enabled: boolean;
+  targets: ZapretTarget[];
+  sites?: string[];
+  methods?: Partial<Record<ZapretTarget, string>>; // '' / absent = automatic
+}
+
+export interface ZapretStatus {
+  state: 'off' | 'running' | 'error';
+  error?: string;
+  restarts: number;
+  lines: string[];
+}
+
+export interface ZapretTargetView {
+  target: ZapretTarget;
+  name: string;
+  on: boolean;
+  fixed?: string; // method fixed by the user
+  picked?: string; // method found here, 'none' = not blocked
+  pickedAt?: number;
+  using: string;
+}
+
+export interface ZapretPick {
+  running: boolean;
+  step: string;
+  done: number;
+  total: number;
+  results: Partial<Record<ZapretTarget, string>>;
+  notes?: Partial<Record<ZapretTarget, string>>;
+  error?: string;
+}
+
+export interface ZapretView {
+  available: boolean;
+  settings: ZapretSettings;
+  status: ZapretStatus;
+  prepareError?: string;
+  loadError?: string;
+  network: string;
+  targets: ZapretTargetView[];
+  methods: { id: string; name: string }[];
+  pick?: ZapretPick;
+  commandLine?: string;
+  busy?: string;
+}
+
+export interface ZapretInput {
+  enabled: boolean;
+  targets: ZapretTarget[];
+  sites: string[];
+  methods: Partial<Record<ZapretTarget, string>>;
+}
+
+interface GUI {
+  ZapretInfo(): Promise<ZapretView>;
+  SaveZapret(i: ZapretInput): Promise<void>;
+  ZapretPick(): Promise<ZapretView>;
+  ZapretPickCancel(): Promise<void>;
+}

@@ -34,6 +34,8 @@ type File struct {
 	// URL serves the file itself or, with Member set, a zip archive that
 	// holds it at path Member; ArchiveSHA256 pins that archive.
 	URL, Member, ArchiveSHA256 string
+	// Fetched: never in the program folder, only downloaded (zapret2).
+	Fetched bool
 }
 
 // archive is a zip in deps.json and the files HyRoute takes from it
@@ -67,6 +69,38 @@ func FromDeps(b []byte) ([]File, error) {
 			out = append(out, File{Name: path.Base(p), SHA256: strings.ToLower(sum),
 				URL: a.URL, Member: p, ArchiveSHA256: strings.ToLower(a.SHA256)})
 		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// ZapretDir is the folder of zapret2's files among the staged copies.
+const ZapretDir = "zapret"
+
+// ZapretFromDeps reads the pinned zapret2 files (winws2.exe with its DLLs,
+// the Lua libraries, the fake payloads): staged on demand, when the DPI
+// bypass is turned on, into ZapretDir (lua\ and blobs\ under it).
+func ZapretFromDeps(b []byte) ([]File, error) {
+	var d struct {
+		Zapret archive `json:"zapret2"`
+	}
+	if err := json.Unmarshal(b, &d); err != nil {
+		return nil, fmt.Errorf("deps.json: %w", err)
+	}
+	if len(d.Zapret.Files) == 0 {
+		return nil, errors.New("deps.json: no zapret2 files")
+	}
+	var out []File
+	for p, s := range d.Zapret.Files {
+		name := path.Join(ZapretDir, path.Base(p))
+		switch {
+		case strings.HasSuffix(p, ".lua"):
+			name = path.Join(ZapretDir, "lua", path.Base(p))
+		case strings.HasSuffix(p, ".bin"):
+			name = path.Join(ZapretDir, "blobs", path.Base(p))
+		}
+		out = append(out, File{Name: name, SHA256: strings.ToLower(s), URL: d.Zapret.URL, Member: p,
+			ArchiveSHA256: strings.ToLower(d.Zapret.SHA256), Fetched: true})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
@@ -118,6 +152,20 @@ func Stage(src, dst string, files []File, get Getter) (Result, error) {
 		if b, err := os.ReadFile(target); err == nil && sum(b) == f.SHA256 {
 			continue
 		}
+		if f.Fetched {
+			if get == nil || f.URL == "" {
+				return res, fmt.Errorf("нет файла %s", f.Name)
+			}
+			b, err := download(f, get, archives)
+			if err != nil {
+				return res, err
+			}
+			res.Downloaded = append(res.Downloaded, f.Name)
+			if err := place(target, b); err != nil {
+				return res, err
+			}
+			continue
+		}
 		srcPath := filepath.Join(src, f.Name)
 		b, err := os.ReadFile(srcPath)
 		var bad error
@@ -142,21 +190,32 @@ func Stage(src, dst string, files []File, get Getter) (Result, error) {
 				res.Downloaded = append(res.Downloaded, f.Name)
 			}
 		}
-		tmp := target + ".new"
-		if err := os.WriteFile(tmp, b, 0o755); err != nil {
+		if err := place(target, b); err != nil {
 			return res, err
-		}
-		if err := os.Rename(tmp, target); err != nil {
-			os.Remove(tmp)
-			// The target may be in use (WinDivert.dll of a running
-			// session, a driver being loaded): an identical file is fine.
-			if cur, rerr := os.ReadFile(target); rerr == nil && bytes.Equal(cur, b) {
-				continue
-			}
-			return res, fmt.Errorf("не удалось обновить %s: %w", target, err)
 		}
 	}
 	return res, nil
+}
+
+// place writes b to target through a temporary file.
+func place(target string, b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	tmp := target + ".new"
+	if err := os.WriteFile(tmp, b, 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		os.Remove(tmp)
+		// The target may be in use (WinDivert.dll of a running
+		// session, a driver being loaded): an identical file is fine.
+		if cur, rerr := os.ReadFile(target); rerr == nil && bytes.Equal(cur, b) {
+			return nil
+		}
+		return fmt.Errorf("не удалось обновить %s: %w", target, err)
+	}
+	return nil
 }
 
 // download fetches f (from its archive when it has one) and checks every

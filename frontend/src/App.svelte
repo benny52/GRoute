@@ -24,13 +24,15 @@
   import { toast } from './toast.svelte'; // netmodes
   import { netAt } from './api'; // netmodes
   import BackupRestore from './lib/BackupRestore.svelte'; // backup
+  import Zapret from './lib/Zapret.svelte'; // zapret
 
-  // expert: the page is shown only in the full interface.
+  // expert: the page is shown only in the full interface; windows: not on macOS.
   const pages = [
     { id: 'home', label: 'Главная', icon: 'home' },
     { id: 'rules', label: 'Правила', icon: 'rules' },
     { id: 'servers', label: 'Серверы', icon: 'server' },
     { id: 'subs', label: 'Подписки', icon: 'rss' },
+    { id: 'dpi', label: 'Обход DPI', icon: 'shield', windows: true }, // zapret: winws2 is Windows-only
     { id: 'proxies', label: 'Прокси', icon: 'zap', expert: true },
     { id: 'networks', label: 'Сети', icon: 'wifi', expert: true }, // netmodes
     { id: 'lists', label: 'Списки', icon: 'database', expert: true },
@@ -39,7 +41,7 @@
     { id: 'logs', label: 'Журнал', icon: 'log', expert: true },
     { id: 'settings', label: 'Настройки', icon: 'settings' },
   ];
-  const shown = $derived(pages.filter((p) => ui.expert || !p.expert));
+  const shown = $derived(pages.filter((p) => (ui.expert || !p.expert) && !(ui.mac && p.windows)));
 
   function stored(): string {
     try {
@@ -354,6 +356,8 @@
         <Proxies />
       {:else if page === 'networks'}
         <Networks {go} />
+      {:else if page === 'dpi'}
+        <Zapret {go} />
       {:else if page === 'lists'}
         <Lists />
       {:else if page === 'connections'}

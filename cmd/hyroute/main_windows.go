@@ -241,6 +241,27 @@ func main() {
 	ctl.ListRunning = procinfo.ListRunning
 	// netmodes: New only allocates; nothing is read until «Сети» is used.
 	ctl.NetWatcher = netwatch.New()
+	// «Обход DPI»: zapret2's winws2 is not in HyRoute's archive (antivirus
+	// programs often flag it); it is downloaded from the release pinned in
+	// deps.json and verified when the bypass is first turned on, and runs
+	// from the protected runtime folder.
+	if zfiles, err := runtimefiles.ZapretFromDeps(buildfiles.Deps); err == nil {
+		ctl.ZapretLists = core.DefaultDir("zapret")
+		ctl.ZapretPrepare = func(ctx context.Context) (string, error) {
+			if err := core.ProtectDir(ctl.ZapretLists); err != nil {
+				return "", err
+			}
+			get := runtimefiles.HTTPGetter(ctx, &http.Client{Timeout: 4 * time.Minute}, "HyRoute/"+version)
+			res, err := runtimefiles.Stage(dir, runtimeDir, zfiles, get)
+			if err != nil {
+				return "", err
+			}
+			if len(res.Downloaded) > 0 {
+				ctl.Log.Info("zapret2 downloaded and verified", "files", len(res.Downloaded))
+			}
+			return filepath.Join(runtimeDir, runtimefiles.ZapretDir), nil
+		}
+	}
 	ctl.ProxyFirewall = func(tcp, udp []int) error { return fwrule.SetProxyPorts(exe, tcp, udp) }
 	ctl.LegacyProxyUDP = fwrule.LegacyProxyUDP
 	ctl.KeepV12ProxyUDP() // before the window can show a proxy
@@ -256,6 +277,7 @@ func main() {
 	// Set before any goroutine below can report a change.
 	ctl.CoreVersion = func() string { return coreMgr.Info().Version }
 	ctl.OnChange = gui.emitStatus
+	ctl.StartZapret() // «Обход DPI», when it is on
 	// Pages holding a copy of the settings reload (Status carries the
 	// revision too, for a missed event).
 	ctl.OnSettings = gui.emitSettings

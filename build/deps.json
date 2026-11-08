@@ -25,6 +25,22 @@
       "xray.exe": "d5b558191cccb1e92a5772b68b8cab67717b26f634b0f15153215f65ae982a7e"
     }
   },
+  "zapret2": {
+    "version": "v1.0.7",
+    "url": "https://github.com/bol-van/zapret2/releases/download/v1.0.7/zapret2-v1.0.7.zip",
+    "sha256": "35e14e4e1f345b870c3b87269fa45353efd597241a25304d38375c46b9fd2967",
+    "files": {
+      "zapret2-v1.0.7/binaries/windows-x86_64/winws2.exe": "9f25492575ff7c3f9e0d6211daac85704c309a0ca695423f0276d9ebde3156aa",
+      "zapret2-v1.0.7/binaries/windows-x86_64/cygwin1.dll": "103104a52e5293ce418944725df19e2bf81ad9269b9a120d71d39028e821499b",
+      "zapret2-v1.0.7/binaries/windows-x86_64/WinDivert.dll": "16abd6a029e65557c6a309bea7b13bf81fff4e193567582e1cddbf6719f323e0",
+      "zapret2-v1.0.7/binaries/windows-x86_64/WinDivert64.sys": "8da085332782708d8767bcace5327a6ec7283c17cfb85e40b03cd2323a90ddc2",
+      "zapret2-v1.0.7/lua/zapret-lib.lua": "6bf528fef1f0fc3c65e189216fc8a06bb873f6e25d1c29d2bfa4695a09b73440",
+      "zapret2-v1.0.7/lua/zapret-antidpi.lua": "6d1fa9168e5de1682fef91fd174f68b58c50f6739ef00f42ca7db2b940b6246d",
+      "zapret2-v1.0.7/lua/zapret-auto.lua": "23a9b99a776d868d92f4cc0ee5110f5c1f12fe746620d9c0337022dbc2f52df0",
+      "zapret2-v1.0.7/files/fake/tls_clienthello_www_google_com.bin": "936c2bee4cfb80aa3c426b2dcbcc834b3fbcd1adb17172959dc569c73a14275c",
+      "zapret2-v1.0.7/files/fake/quic_initial_www_google_com.bin": "f4589c57749f956bb30538197a521d7005f8b0a8723b4707e72405e51ddac50a"
+    }
+  },
   "macos": {
     "hysteria": {
       "version": "app/v2.12.3",

@@ -24,6 +24,10 @@ jobs:
         env:
           # The runner is elevated: test the kill switch with real WFP filters.
           HYROUTE_WFP_TEST: '1'
+      - name: zapret2 - the real winws2 accepts every command line HyRoute builds
+        run: go test -v -run Winws2 ./internal/zapret/
+        env:
+          HYROUTE_ZAPRET_TEST: '1'
       - name: hyroutectl smoke test (no HyRoute on the runner exits 3)
         shell: pwsh
         run: |

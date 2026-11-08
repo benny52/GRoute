@@ -108,6 +108,11 @@ type Controller struct {
 	KillSwitch KillSwitch
 	// ListRunning lists running programs (rule editor suggestions).
 	ListRunning func() []procinfo.Running
+	// ZapretPrepare stages winws2 and returns its folder (Windows; nil =
+	// no DPI bypass in this build). ZapretLists: the folder of its list
+	// files, writable by administrators only.
+	ZapretPrepare func(ctx context.Context) (string, error)
+	ZapretLists   string
 	// ProxyFirewall allows exactly these local proxy ports from the local
 	// network, TCP and UDP (an empty list removes that rule; nil = nothing
 	// to do).
@@ -194,6 +199,7 @@ type Controller struct {
 
 	// Feature state (one line per feature, landing order).
 	groupsState
+	zapretState // «Обход DPI» (zapret.go)
 	portsState
 	rulesetsState // rulesets: guarded by mu (rulesets.go)
 	dnsState      // dns: DNS policies (dns.go)
@@ -248,6 +254,7 @@ func (c *Controller) Load() error {
 		c.flushDNSAsync("start") // dns: answers of a run that crashed
 	}
 	c.loadStats() // stats: the collection mode (creates nothing)
+	c.loadZapret()
 	if c.Store != nil {
 		// Files a killed run left half-written; an hour old: none is
 		// being written now.

@@ -756,6 +756,8 @@ func (c *Controller) SwitchRuleset(id string, src Source, o SwitchOptions) (Swit
 	if err != nil {
 		return SwitchResult{}, err
 	}
+	// The bypass keeps its rules at the top of whichever profile is active.
+	go c.zapretApply()
 	if o.Reconnect && res.Connected {
 		if err := c.Reconnect(); err != nil {
 			res.ReconnectError = err.Error()

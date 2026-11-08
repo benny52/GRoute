@@ -143,6 +143,19 @@ func (g *GUI) RollbackSubscription(id string) (app.MergeStats, error) {
 
 func (g *GUI) DeleteSubscription(id string) error { return g.ctl.DeleteSubscription(id) }
 
+// ZapretInfo is the «Обход DPI» page.
+func (g *GUI) ZapretInfo() app.ZapretView { return g.ctl.ZapretInfo() }
+
+// SaveZapret saves the page and applies it (winws2 and the rules).
+func (g *GUI) SaveZapret(in app.ZapretInput) error { return g.ctl.SaveZapret(in) }
+
+// ZapretPick finds working methods on this network (takes up to a few
+// minutes; the page reads the progress with ZapretInfo).
+func (g *GUI) ZapretPick() (app.ZapretView, error) { return g.ctl.ZapretPick() }
+
+// ZapretPickCancel stops a pick under way.
+func (g *GUI) ZapretPickCancel() { g.ctl.ZapretPickCancel() }
+
 // SetSubscriptionProxies turns a subscription's proxies (one per server)
 // on, or off with nil.
 func (g *GUI) SetSubscriptionProxies(id string, in *app.SubProxiesInput) error {

@@ -155,17 +155,41 @@ func bestIndex() (uint32, bool) {
 var (
 	notifyOnce sync.Once
 	notifyCB   uintptr
-	// notifyCh is the channel of the current Watch (one at a time).
-	notifyCh atomic.Pointer[chan struct{}]
+	// notifySubs are the channels of the running Watches (network modes
+	// and the DPI bypass each have one), replaced whole under notifyMu so
+	// the callback reads them without a lock.
+	notifyMu   sync.Mutex
+	notifySubs atomic.Pointer[[]chan struct{}]
 )
+
+func subscribe(ch chan struct{}, add bool) {
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	var cur []chan struct{}
+	if p := notifySubs.Load(); p != nil {
+		cur = *p
+	}
+	next := make([]chan struct{}, 0, len(cur)+1)
+	for _, c := range cur {
+		if c != ch {
+			next = append(next, c)
+		}
+	}
+	if add {
+		next = append(next, ch)
+	}
+	notifySubs.Store(&next)
+}
 
 // notify is the one callback of the three MIB notifications (the number of
 // callbacks a process can make is limited): a non-blocking send only.
 func notify(callerContext, row, notificationType uintptr) uintptr {
-	if p := notifyCh.Load(); p != nil {
-		select {
-		case *p <- struct{}{}:
-		default:
+	if p := notifySubs.Load(); p != nil {
+		for _, ch := range *p {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
 		}
 	}
 	return 0
@@ -200,11 +224,11 @@ func (w *Watcher) Watch(ctx context.Context) (<-chan struct{}, error) {
 		}
 		handles = append(handles, h)
 	}
-	notifyCh.Store(&ch)
+	subscribe(ch, true)
 	go func() {
 		<-ctx.Done()
 		cancel()
-		notifyCh.CompareAndSwap(&ch, nil)
+		subscribe(ch, false)
 	}()
 	return ch, nil
 }

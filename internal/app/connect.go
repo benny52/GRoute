@@ -85,7 +85,8 @@ func (c *Controller) startLocked(recovering bool) error {
 	src := c.statsSource(&cfg) // stats
 	cfg.OnStatus = func(id string, s hysteria.Status) {
 		c.Log.Info("hysteria status", "profile", c.profileName(id), "state", s.State.String(), "msg", s.Message, "udp", s.UDPEnabled, "socks", s.SOCKS, "serverIPs", s.ServerIPs)
-		c.dnsTunnelUp(s) // dns
+		c.dnsTunnelUp(s)            // dns
+		go c.zapretServersChanged() // winws2 skips the servers' addresses
 		c.changed()
 	}
 	c.groupsSession(&cfg)

@@ -155,6 +155,7 @@ HyRoute. Данные WebView2 лежат не здесь, а в `%LOCALAPPDATA%
 | [updates.md](architecture/updates.md) | обновление ядра Hysteria и HyRoute, журнал и откат |
 | [backup.md](architecture/backup.md) | резервная копия: формат, разделы, план, применение, отмена |
 | [networks.md](architecture/networks.md) | «Сети»: чтение сети, идентичность, асимметричное решение |
+| [zapret.md](architecture/zapret.md) | «Обход DPI»: winws2 рядом с движком, правила, безопасная командная строка, методы, подбор |
 | [cli.md](architecture/cli.md) | hyroutectl: канал, права, протокол, режимы; расширение для браузера |
 | [macos.md](architecture/macos.md) | macOS: utun, атрибуция, служба и окно, kill switch на pf, обновления |
 | [testing.md](architecture/testing.md) | что покрыто тестами |

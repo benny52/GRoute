@@ -5,8 +5,8 @@ package build
 
 import _ "embed"
 
-// Deps is deps.json: versions and SHA-256 of hysteria.exe, WinDivert and
-// Xray (xray.exe, for VLESS servers).
+// Deps is deps.json: versions and SHA-256 of hysteria.exe, WinDivert,
+// Xray (xray.exe, for VLESS servers) and zapret2 (downloaded on demand).
 // The copies in the program folder are checked against it before they run
 // elevated; scripts/fetch-deps.ps1 downloads by it.
 //
