@@ -16,8 +16,16 @@ var (
 		"youtube.com", "youtu.be", "yt.be", "youtube-nocookie.com", "youtubekids.com",
 		"googlevideo.com", "ytimg.com", "ggpht.com",
 		"youtubei.googleapis.com", "youtube.googleapis.com", "yt3.googleusercontent.com",
-		"wide-youtube.l.google.com",
+		"youtubeembeddedplayer.googleapis.com", "jnn-pa.googleapis.com",
+		"wide-youtube.l.google.com", "youtube-ui.l.google.com", "yt-video-upload.l.google.com", "ytimg.l.google.com",
 	}
+	// discordECH: the name a ClientHello shows when ECH hides the real one.
+	// Discord's CDN (cdn.discordapp.com: attachments, videos) offers ECH,
+	// and Discord, a Chromium, uses it: winws2 must take these handshakes
+	// too. Only winws2's list: as a rule it would send every Cloudflare
+	// site with ECH direct (HyRoute itself knows the real name from DNS).
+	discordECH = []string{"cloudflare-ech.com"}
+
 	discordDomains = []string{
 		"discord.com", "discord.gg", "discord.media", "discordapp.com", "discordapp.net",
 		"discordcdn.com", "discord.dev", "discord.co", "discord.gift", "discord.gifts",
@@ -58,7 +66,7 @@ func WriteLists(dir string, sites []string, servers []netip.Addr) error {
 	ips = slices.Compact(ips)
 	files := map[string][]string{
 		ListYouTube:  youTubeDomains,
-		ListDiscord:  discordDomains,
+		ListDiscord:  append(slices.Clone(discordDomains), discordECH...),
 		ListSites:    sites,
 		ListExcluded: ips,
 	}

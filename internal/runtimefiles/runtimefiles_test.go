@@ -167,7 +167,7 @@ func TestZapretFromRepoDeps(t *testing.T) {
 			t.Fatalf("%+v", f)
 		}
 	}
-	want := "zapret/WinDivert.dll zapret/WinDivert64.sys zapret/blobs/quic_initial_www_google_com.bin zapret/blobs/tls_clienthello_www_google_com.bin " +
+	want := "zapret/WinDivert.dll zapret/WinDivert64.sys zapret/blobs/quic_initial_www_google_com.bin zapret/blobs/tls_clienthello_vk_com.bin zapret/blobs/tls_clienthello_www_google_com.bin " +
 		"zapret/cygwin1.dll zapret/lua/zapret-antidpi.lua zapret/lua/zapret-auto.lua zapret/lua/zapret-lib.lua zapret/winws2.exe"
 	if strings.Join(names, " ") != want {
 		t.Fatalf("%s", strings.Join(names, " "))

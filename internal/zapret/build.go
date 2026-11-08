@@ -14,6 +14,10 @@ var (
 	BlobFiles = map[string]string{ // blob name -> file
 		"google_tls":  "tls_clienthello_www_google_com.bin",
 		"quic_google": "quic_initial_www_google_com.bin",
+		// A site on TSPU's white list: a ClientHello naming it keeps the
+		// connection out of the "16-20 KB" cut of hosting and CDN
+		// addresses (Flowseal does the same with 4pda.to's).
+		"vk_tls": "tls_clienthello_vk_com.bin",
 	}
 )
 
@@ -99,7 +103,7 @@ func Build(c BuildConfig) ([]string, error) {
 	for _, f := range libs {
 		args = append(args, "--lua-init=@"+filepath.Join(c.Dir, "lua", f))
 	}
-	for _, name := range []string{"google_tls", "quic_google"} {
+	for _, name := range []string{"google_tls", "quic_google", "vk_tls"} {
 		args = append(args, "--blob="+name+":@"+filepath.Join(c.Dir, "blobs", BlobFiles[name]))
 	}
 	if c.Filter != "" {

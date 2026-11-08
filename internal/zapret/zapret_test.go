@@ -85,7 +85,7 @@ func TestBuild(t *testing.T) {
 	line := strings.Join(args, " ")
 	for _, want := range []string{
 		"--wf-tcp-out=80,443," + discordMediaTCP, "--wf-udp-out=443," + discordVoiceUDP, "--wf-tcp-in=80,443",
-		"zapret-auto.lua", "--blob=google_tls:@", "--filter-l7=discord,stun",
+		"zapret-auto.lua", "--blob=google_tls:@", "--blob=vk_tls:@", "--filter-l7=discord,stun",
 		// circular before the payload filter, seeing every packet; the
 		// methods only the ClientHello.
 		"--in-range=-s5556 --lua-desync=circular:fails=3:retrans=2:nld=2 --in-range=x --payload=tls_client_hello --lua-desync=",
@@ -133,8 +133,14 @@ func TestWriteLists(t *testing.T) {
 		t.Fatalf("%q", b)
 	}
 	b, _ = os.ReadFile(filepath.Join(dir, ListDiscord))
-	if !strings.Contains(string(b), "\ndiscord.media\n") {
+	if !strings.Contains(string(b), "\ndiscord.media\n") || !strings.Contains(string(b), "\ncloudflare-ech.com\n") ||
+		!strings.Contains(string(b), "\ndiscord-attachments-uploads-prd.storage.googleapis.com\n") {
 		t.Fatalf("%q", b)
+	}
+	// ECH's outer name is winws2's only: as a rule it would send every
+	// Cloudflare site with ECH direct.
+	if slices.Contains(Domains(Discord, nil), "cloudflare-ech.com") {
+		t.Fatal("cloudflare-ech.com in Discord's rule")
 	}
 }
 

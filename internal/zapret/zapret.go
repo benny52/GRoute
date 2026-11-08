@@ -96,6 +96,17 @@ var Methods = []Method{
 	{ID: "hostfakesplit", Name: "Фейк + подмена имени сайта в части", tcp: []string{
 		"fake:blob=google_tls:tcp_ts=-1000:repeats=7",
 		"hostfakesplit:host={host}"}},
+	// Under a white-listed name (vk.com): against the "16-20 KB" cut of
+	// CDN addresses (Discord's media on Cloudflare), as Flowseal's general
+	// list does with 4pda.to.
+	{ID: "seqovl-vk", Name: "Разрез с перекрытием под vk.com", tcp: []string{
+		"multisplit:pos=1:seqovl=568:seqovl_pattern=vk_tls"}},
+	{ID: "fake-vk-seqovl", Name: "Фейк vk.com + разрез с перекрытием", tcp: []string{
+		"fake:blob=vk_tls:tcp_ts=-1000:repeats=6",
+		"multisplit:pos=1,midsld:seqovl=681:seqovl_pattern=vk_tls"}},
+	{ID: "hostfakesplit-vk", Name: "Фейк vk.com + подмена имени на vk.com", tcp: []string{
+		"fake:blob=vk_tls:tcp_ts=-1000:repeats=6",
+		"hostfakesplit:host=vk.com"}},
 }
 
 // FindMethod is a method by ID.

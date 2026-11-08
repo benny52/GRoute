@@ -53,7 +53,16 @@ Discord (домены из `lists.go`), «Discord (голос)» (`Discord.exe`,
 
 **Методы** (`Methods`) переложены с пресетов [Zapret 2 GUI](https://github.com/TheFirstNoob/Zapret-2-GUI)
 (MIT): фейк ClientHello google.com с занижённым TCP timestamp или TCP MD5, `multisplit` с
-`seqovl`, `multidisorder`, `fakedsplit`, `hostfakesplit`.
+`seqovl`, `multidisorder`, `fakedsplit`, `hostfakesplit`. Ещё три — под «белым» именем: шаблон
+`seqovl` и фейк — ClientHello vk.com из архива zapret2 (`vk_tls`), `hostfakesplit:host=vk.com`.
+Так Flowseal (с ClientHello 4pda.to) обходит обрыв «16–20 КБ» у адресов хостингов и CDN, в том
+числе Cloudflare, где лежат вложения и видео Discord: ТСПУ не трогает соединение, начало которого
+называет сайт из его белого списка.
+
+**ECH.** CDN Discord (`cdn.discordapp.com`) объявляет ECH в DNS, и Discord (Chromium) прячет имя
+сайта: в ClientHello видно только `cloudflare-ech.com`. Это имя есть в списке Discord для winws2
+(`discordECH`), но не в правиле HyRoute: правило с ним отправило бы напрямую любой сайт Cloudflare с
+ECH, а HyRoute и так знает настоящее имя из DNS.
 
 **План** сервиса (`PlanFor`): метод, выбранный вручную, — один; «Не нужен» или подбор, показавший,
 что сервис не блокируется, — профиля нет; иначе круговой перебор, начиная с методов, которые подбор
@@ -108,7 +117,8 @@ Windows). Основной winws2 получает `--wf-raw-filter=!tcp or (<н
 занят — следующий), делает TLS-рукопожатие с отпечатком Chrome (`refraction-networking/utls`,
 `HelloChrome_Auto`: ТСПУ может обращаться с рукопожатием Go иначе, чем с браузерным) и запрос по
 HTTP/2 или HTTP/1.1, читает до 64 КБ ответа. Среди адресов сервиса есть большие страницы (главная
-YouTube, discord.com), чтобы перейти порог заморозки. Сервис открыт, только если все его адреса
+YouTube, discord.com, официальный стикер Discord на 470 КБ на `cdn.discordapp.com` и
+`media.discordapp.net`), чтобы перейти порог заморозки. Сервис открыт, только если все его адреса
 ответили **дважды подряд** (`Passes`); время — самый медленный адрес, в среднем по проходам. 8 с на
 адрес.
 

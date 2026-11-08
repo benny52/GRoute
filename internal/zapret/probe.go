@@ -32,7 +32,11 @@ func Checks(t Target, sites []string) []string {
 	case YouTube:
 		return []string{"https://www.youtube.com/", "https://redirector.googlevideo.com/report_mapping", "https://i.ytimg.com/generate_204"}
 	case Discord:
-		return []string{"https://discord.com/", "https://gateway.discord.gg/", "https://cdn.discordapp.com/embed/avatars/0.png"}
+		// The media: an official sticker (470 KB) on both CDN names, where
+		// attachments and videos come from. Cloudflare's addresses get the
+		// "16-20 KB" cut a small picture never shows.
+		return []string{"https://discord.com/", "https://gateway.discord.gg/",
+			"https://cdn.discordapp.com/stickers/781291131828699156.png", "https://media.discordapp.net/stickers/781291131828699156.png"}
 	}
 	var out []string
 	for _, s := range sites {
