@@ -256,3 +256,41 @@ func TestRunnerWaitsForExit(t *testing.T) {
 		t.Fatalf("overlap %v, last gone %v", overlap, last.gone.Load())
 	}
 }
+
+// A winws2 that did not initialize (0xC0000142) starts again at once, not
+// after the backoff: a pick's tester would otherwise count as not working.
+func TestRunnerRetriesInit(t *testing.T) {
+	old := dllInitFailed
+	t.Cleanup(func() { dllInitFailed = old })
+	errInit := errors.New("exit status 0xc0000142")
+	dllInitFailed = func(err error) bool { return err == errInit }
+	var mu sync.Mutex
+	starts := 0
+	r := &Runner{Exe: "winws2.exe", Spawn: func(string, []string, []string, io.Writer) (hysteria.Child, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		starts++
+		if starts <= 2 {
+			return initFails{errInit}, nil
+		}
+		return &fakeChild{done: make(chan struct{})}, nil
+	}}
+	r.Start([]string{"--x"})
+	defer r.Stop()
+	deadline := time.Now().Add(1500 * time.Millisecond) // well under the 2 s backoff
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := starts
+		mu.Unlock()
+		if st := r.Status(); n == 3 && st.State == Running && st.Restarts == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("starts %d, %+v", starts, r.Status())
+}
+
+type initFails struct{ err error }
+
+func (f initFails) Wait() error { return f.err }
+func (f initFails) Kill() error { return nil }

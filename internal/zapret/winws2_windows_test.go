@@ -61,14 +61,7 @@ func TestWinws2Runs(t *testing.T) {
 				t.Fatal(err)
 			}
 			args = append([]string{"--debug=1"}, args...) // shows the packets it took
-			var out syncBuffer
-			cmd := exec.Command(filepath.Join(dir, "winws2.exe"), args...)
-			cmd.Stdout, cmd.Stderr = &out, &out
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			exited := make(chan error, 1)
-			go func() { exited <- cmd.Wait() }()
+			cmd, out, exited := startWinws(t, filepath.Join(dir, "winws2.exe"), args)
 			select {
 			case err := <-exited:
 				t.Fatalf("winws2 exited (%v):\n%s\n%s", err, zapret.CommandLine(args), out.String())
@@ -173,13 +166,8 @@ func TestWinws2Generated(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: %v", id, err)
 			}
-			r := run{out: &syncBuffer{}, exited: make(chan error, 1)}
-			r.cmd = exec.Command(filepath.Join(dir, "winws2.exe"), append([]string{"--debug=1"}, args...)...)
-			r.cmd.Stdout, r.cmd.Stderr = r.out, r.out
-			if err := r.cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			go func() { r.exited <- r.cmd.Wait() }()
+			var r run
+			r.cmd, r.out, r.exited = startWinws(t, filepath.Join(dir, "winws2.exe"), append([]string{"--debug=1"}, args...))
 			runs[i] = r
 		}
 		time.Sleep(3 * time.Second)
@@ -222,6 +210,35 @@ func TestWinws2Generated(t *testing.T) {
 		t.Fatalf("example.com opened through %d of %d generated strategies: their fakes reach the server", opened, total)
 	}
 
+}
+
+// startWinws starts winws2 as the Runner does: again, at once, when it
+// did not initialize (0xC0000142, cygwin1.dll as another winws2 dies).
+func startWinws(t *testing.T, exe string, args []string) (*exec.Cmd, *syncBuffer, chan error) {
+	t.Helper()
+	for try := 0; ; try++ {
+		out := &syncBuffer{}
+		cmd := exec.Command(exe, args...)
+		cmd.Stdout, cmd.Stderr = out, out
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		exited := make(chan error, 1)
+		go func() { exited <- cmd.Wait() }()
+		select {
+		case err := <-exited:
+			if zapret.DLLInitFailed(err) && try < 3 {
+				t.Logf("winws2 did not initialize (%v): again", err)
+				time.Sleep(300 * time.Millisecond)
+				continue
+			}
+			again := make(chan error, 1)
+			again <- err
+			return cmd, out, again
+		case <-time.After(time.Second):
+			return cmd, out, exited
+		}
+	}
 }
 
 // probePort matches a packet from or to a probe's port in winws2's log.

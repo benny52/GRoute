@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -121,8 +122,21 @@ func (r *Runner) current(gen uint64) bool {
 	return r.gen == gen
 }
 
+// DLLInitFailed: the process ended with STATUS_DLL_INIT_FAILED
+// (0xC0000142), before running: cygwin1.dll did not initialize. It happens
+// when a winws2 starts right as another is killed (a pick starts twelve);
+// starting it again works.
+func DLLInitFailed(err error) bool {
+	var ee *exec.ExitError
+	return errors.As(err, &ee) && uint32(ee.ExitCode()) == 0xC0000142
+}
+
+// dllInitFailed is DLLInitFailed (tests replace it).
+var dllInitFailed = DLLInitFailed
+
 func (r *Runner) supervise(gen uint64, args []string) {
 	backoff := 2 * time.Second
+	fast := 0 // quick retries after a failed initialization
 	for r.current(gen) {
 		out := &lineWriter{add: func(l string) { r.line(gen, l) }}
 		start := r.Spawn
@@ -157,6 +171,14 @@ func (r *Runner) supervise(gen uint64, args []string) {
 			if r.gen != gen {
 				r.mu.Unlock()
 				return // stopped or restarted on purpose
+			}
+			if dllInitFailed(werr) && time.Since(began) < 2*time.Second && fast < 3 {
+				fast++
+				r.child, r.exited, r.lines = nil, nil, nil
+				r.mu.Unlock()
+				r.log().Warn("zapret: winws2 did not initialize; starting it again", "err", werr)
+				time.Sleep(300 * time.Millisecond)
+				continue
 			}
 			r.child, r.exited, r.state = nil, nil, Failed
 			r.lastErr = exitReason(werr, r.lines)
