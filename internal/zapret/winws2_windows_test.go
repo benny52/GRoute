@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -80,9 +81,7 @@ func TestWinws2Runs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.slot > 0 {
-				args = append([]string{"--debug=1"}, args...) // shows the packets it took
-			}
+			args = append([]string{"--debug=1"}, args...) // shows the packets it took
 			var out syncBuffer
 			cmd := exec.Command(filepath.Join(dir, "winws2.exe"), args...)
 			cmd.Stdout, cmd.Stderr = &out, &out
@@ -113,6 +112,13 @@ func TestWinws2Runs(t *testing.T) {
 					mu.Unlock()
 				}
 			}
+			if c.slot == 0 {
+				// The user's bypass: a probe's packets never reach it.
+				(&zapret.Prober{Slot: 1}).Check(context.Background(), []string{"https://example.com/"})
+				if m := probePort.FindString(out.String()); m != "" {
+					t.Errorf("the user's winws2 took a probe's packet: %s", m)
+				}
+			}
 			cmd.Process.Kill()
 			<-exited
 			t.Logf("%s", out.String())
@@ -123,6 +129,9 @@ func TestWinws2Runs(t *testing.T) {
 	}
 	t.Logf("example.com opened through %d of %d methods", opened, len(zapret.Methods))
 }
+
+// probePort matches a packet from or to a probe's port in winws2's log.
+var probePort = regexp.MustCompile(`[sd]port=(30\d\d\d|31[0-8]\d\d|319[0-4]\d)\b`)
 
 type syncBuffer struct {
 	mu sync.Mutex

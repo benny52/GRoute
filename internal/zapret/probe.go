@@ -79,11 +79,15 @@ func portsFilter(lo, hi int) string {
 	return fmt.Sprintf("(outbound and tcp.SrcPort >= %d and tcp.SrcPort <= %d) or (inbound and tcp.DstPort >= %d and tcp.DstPort <= %d)", lo, hi, lo, hi)
 }
 
-// ProbeExclude keeps the probes' packets from the bypass the user runs.
+// ProbeExclude keeps the probes' packets from the bypass the user runs:
+// TCP with neither port in the range (a probe's local port is the source
+// going out and the destination coming in; the other side is 80, 443…).
+// WinDivert refuses a negated compound like "not (a or b)" ("The parameter
+// is incorrect"), so the filter only negates "tcp", as winws2's own do.
 func ProbeExclude() string {
 	lo, _ := ProbeSlot(0)
 	_, hi := ProbeSlot(ProbeSlots - 1)
-	return "not (" + portsFilter(lo, hi) + ")"
+	return fmt.Sprintf("!tcp or ((tcp.SrcPort < %d or tcp.SrcPort > %d) and (tcp.DstPort < %d or tcp.DstPort > %d))", lo, hi, lo, hi)
 }
 
 // ProbeOnly limits a tester's winws2 to the probes of slot i.

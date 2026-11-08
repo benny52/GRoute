@@ -149,7 +149,7 @@ func TestProbeFilters(t *testing.T) {
 	if top >= 49152 || len(Methods)+1 > ProbeSlots {
 		t.Fatalf("slots end at %d for %d methods", top, len(Methods))
 	}
-	if !strings.HasPrefix(ProbeExclude(), "not (") || !strings.Contains(ProbeOnly(2), "tcp.SrcPort >= 30300") {
+	if strings.Contains(ProbeExclude(), "not") || !strings.Contains(ProbeExclude(), "tcp.SrcPort > 31949") || !strings.Contains(ProbeOnly(2), "tcp.SrcPort >= 30300") {
 		t.Fatalf("%s\n%s", ProbeExclude(), ProbeOnly(2))
 	}
 }
