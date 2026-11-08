@@ -564,6 +564,9 @@ func (r *compiled) coversApp(b *appPat) bool {
 
 func (a *domPat) covers(b *domPat) bool {
 	under := func(y string) bool { return strings.HasSuffix(y, "."+a.dom) }
+	if a.kind == domGeo && b.kind != domGeo {
+		return a.geoCovers(b)
+	}
 	switch {
 	case a.kind >= domKeyword || b.kind >= domKeyword:
 		if a.kind == domKeyword && b.kind <= domSuffix {
@@ -585,4 +588,23 @@ func (a *domPat) covers(b *domPat) bool {
 		return under(b.dom)
 	}
 	return b.dom == a.dom || under(b.dom)
+}
+
+// allMatcher is a category that can tell whether a name and every name
+// under it are in it (geodata.DomainSet).
+type allMatcher interface{ MatchAll(name string) bool }
+
+// geoCovers: every name b matches is in a's geosite category.
+func (a *domPat) geoCovers(b *domPat) bool {
+	if a.geo == nil {
+		return false
+	}
+	switch b.kind {
+	case domExact:
+		return a.geo.Match(b.dom)
+	case domSub, domSuffix:
+		m, ok := a.geo.(allMatcher)
+		return ok && m.MatchAll(b.dom)
+	}
+	return false
 }

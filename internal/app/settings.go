@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
 	"time"
 
+	"github.com/lardan099/hyroute/internal/geodata"
 	"github.com/lardan099/hyroute/internal/rules"
 	"github.com/lardan099/hyroute/internal/settings"
 	"github.com/lardan099/hyroute/internal/store"
@@ -533,4 +535,57 @@ func usesAddresses(cfg rules.Config) bool {
 func cleanTarget(s string) string {
 	h, _, _ := splitTarget(s)
 	return h
+}
+
+// TidyView is «Навести порядок» for an edited (unsaved) rule list: the
+// suggestions and, when some were accepted, the rules with them applied.
+type TidyView struct {
+	rules.TidyResult
+	Rules []rules.Rule `json:"rules"`
+}
+
+// TidyRules lists the suggestions for st's rules; with accept (their IDs)
+// it also applies those. The page saves the result as any edit.
+func (c *Controller) TidyRules(st settings.Settings, accept []string) TidyView {
+	c.initGeo()
+	o := rules.TidyOptions{
+		Managed: isZapretRule,
+		Route: func(id string) string {
+			if id == "" {
+				return "основной сервер"
+			}
+			return c.profileName(id)
+		},
+		Categories: c.serviceCategories,
+	}
+	v := TidyView{TidyResult: rules.TidyRules(st.Config, o)}
+	if len(accept) > 0 {
+		v.Rules = rules.ApplyTidy(st.Config, o, accept).Rules
+	}
+	if v.Rules == nil {
+		v.Rules = []rules.Rule{}
+	}
+	return v
+}
+
+// serviceCategories: the geosite categories of names that name a service
+// (youtube, discord), not a region, a registry or a broad category-*.
+func (c *Controller) serviceCategories(names []string) (map[string][]rules.SiteCategory, error) {
+	found, err := c.geo.db.FindSites(names)
+	if errors.Is(err, geodata.ErrNoData) {
+		return nil, errors.New("база правил не скачана: подсказки из неё появятся, когда она скачается (Настройки → Базы правил)")
+	}
+	if err != nil {
+		return nil, geoErr(err)
+	}
+	out := map[string][]rules.SiteCategory{}
+	for n, hits := range found {
+		for _, h := range hits {
+			if _, broad := tagPriority("geosite:" + h.Category); broad || strings.HasPrefix(h.Category, "category-") || strings.Contains(h.Category, "@") {
+				continue
+			}
+			out[n] = append(out[n], rules.SiteCategory{Name: h.Category, Size: h.Size, Subdomains: h.Subdomains})
+		}
+	}
+	return out, nil
 }

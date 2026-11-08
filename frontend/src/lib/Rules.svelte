@@ -13,6 +13,7 @@
   import RouteWizard from './RouteWizard.svelte';
   import RulesetBar, { showSwitchResult, showRulesetError } from './RulesetBar.svelte';
   import RulesetDialog from './RulesetDialog.svelte';
+  import TidyDialog from './TidyDialog.svelte';
   import { shownTemplates, tplApps, tplHint, ruleFromTemplate, schemes, applyScheme, schemeTemplates, type Scheme } from './templates';
   import { itemLabel, loadGeo, geo } from '../geo.svelte';
   import { ruleTitle as title, appLabel, siteLabel, locateRule, sameRule } from '../ruletitle';
@@ -40,6 +41,7 @@
   let asText = $state(false);
   let importing = $state(false); // «Импорт»: rules of another program
   let wizard = $state(false);
+  let tidying = $state(false); // «Навести порядок»
   let dragFrom = $state<number | null>(null);
   let dragOver = $state<number | null>(null);
   // The list a drag started on: a drop on a reloaded list is cancelled.
@@ -118,7 +120,7 @@
   // a network rule) also reloads; in edit mode the profile list's revision
   // does (the edited profile was edited elsewhere, switched to or deleted).
   $effect(() => {
-    if (!s || pending || editing || asText || importing || wizard || dragFrom !== null || reloading) return;
+    if (!s || pending || editing || asText || importing || wizard || tidying || dragFrom !== null || reloading) return;
     const r = ui.status?.ruleset;
     if (editId) {
       if (!r || r.rev <= editRev || r.rev <= triedEditAt) return;
@@ -382,6 +384,9 @@
       title={editId ? 'Пошагово настраивает включённый профиль правил: вернитесь к нему' : 'Все правила по шагам с объяснениями: сервисы, программы, сайты, блокировка, серверы'}
       ><Icon name="wand" size={16} />Пошагово</button
     >
+    <button onclick={() => (tidying = true)} disabled={!s || !s.rules.length} title="Найти лишние правила и повторы, объединить правила с одним маршрутом, заменить домены списками из базы правил"
+      ><Icon name="check" size={16} />Навести порядок</button
+    >
     <button onclick={() => (picking = true)} disabled={!s}><Icon name="sparkles" size={16} />Шаблоны</button>
     <button onclick={() => (importing = true)} disabled={!s} title="Правила из SwitchyOmega, v2rayN, Throne, FoxyProxy, Clash, PAC-файла или списка сайтов"
       ><Icon name="download" size={16} />Импорт</button
@@ -566,6 +571,20 @@
         toast({ tone: 'ok', text: () => `Создан профиль правил «${hide(name)}»`, actions: [{ label: () => 'Открыть', run: () => setEdit(id) }] });
       }
       load();
+    }}
+  />
+{/if}
+
+{#if tidying && s}
+  <TidyDialog
+    settings={cleanSettings(s, mainTarget()?.id)}
+    onclose={() => (tidying = false)}
+    onapply={async (list, n) => {
+      const next = clone();
+      next.rules = list.map(toLists);
+      await persist(next);
+      tidying = false;
+      toast({ tone: 'ok', text: () => `Готово: ${n} ${plural(n, 'изменение', 'изменения', 'изменений')}` });
     }}
   />
 {/if}

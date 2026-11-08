@@ -60,6 +60,48 @@ func (d *DomainSet) Match(name string) bool {
 	return false
 }
 
+// MatchAll reports whether name and every name under it are in the
+// category: a domain: entry for it or a parent, or a keyword it contains.
+func (d *DomainSet) MatchAll(name string) bool {
+	if name == "" {
+		return false
+	}
+	for s := name; ; {
+		if has(d.suffix, s) {
+			return true
+		}
+		i := strings.IndexByte(s, '.')
+		if i < 0 {
+			break
+		}
+		s = s[i+1:]
+	}
+	for _, k := range d.keyword {
+		if strings.Contains(name, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// MatchSome reports whether the category may hold name or a name under
+// it. A keyword or a regexp entry may match some name under any domain,
+// so a category with them always may.
+func (d *DomainSet) MatchSome(name string) bool {
+	if d.Match(name) || len(d.keyword) > 0 || len(d.regex) > 0 {
+		return true
+	}
+	under := "." + name
+	for _, l := range [][]string{d.full, d.suffix} {
+		for _, e := range l {
+			if strings.HasSuffix(e, under) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func has(sorted []string, s string) bool {
 	_, ok := slices.BinarySearch(sorted, s)
 	return ok

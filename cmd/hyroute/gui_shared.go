@@ -388,3 +388,7 @@ func (g *GUI) SwitchRulesetFromTray(id string) error {
 	_, err := g.ctl.SwitchRuleset(id, app.SourceTray, app.SwitchOptions{})
 	return err
 }
+
+func (g *GUI) TidyRules(s settings.Settings, accept []string) app.TidyView {
+	return g.ctl.TidyRules(s, accept)
+}

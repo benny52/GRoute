@@ -475,3 +475,32 @@ func TestIPSetOverlaps(t *testing.T) {
 		t.Error("another type is not known")
 	}
 }
+
+func TestFindSites(t *testing.T) {
+	db := testDB(t)
+	got, err := db.FindSites([]string{"m.youtube.com", "youtu.be", "fonts.gstatic.com", "ggpht1.com", "nothing.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]SiteCover{
+		"m.youtube.com":     {{Category: "youtube", Size: 3, Subdomains: true}},
+		"youtu.be":          {{Category: "youtube", Size: 3}},
+		"fonts.gstatic.com": {{Category: "google", Size: 4, Subdomains: true}},
+		"ggpht1.com":        {{Category: "google", Size: 4}},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%+v", got)
+	}
+	for n, w := range want {
+		if !slices.Equal(got[n], w) {
+			t.Fatalf("%s: %+v", n, got[n])
+		}
+	}
+	yt, err := db.Site("youtube")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !yt.MatchAll("youtube.com") || yt.MatchAll("youtu.be") || !yt.MatchSome("be") || yt.MatchSome("example.com") {
+		t.Fatal("MatchAll/MatchSome")
+	}
+}

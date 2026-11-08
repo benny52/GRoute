@@ -243,6 +243,21 @@ export interface GeoInfo {
   popular: GeoCategory[];
 }
 
+// «Навести порядок»: suggestions for the rule list (rules.Tidy).
+export type Tidy = {
+  id: string;
+  kind: 'drop' | 'sites' | 'merge' | 'geo';
+  title: string;
+  details: string[] | null;
+  rules: string[];
+  sites?: string[];
+  category?: string;
+  name?: string;
+  changes: boolean; // applying it changes where some connections go
+};
+
+export type TidyView = { items: Tidy[]; geoNote?: string; rules: Rule[] };
+
 export interface LintIssue {
   index: number;
   severity: 'warn' | 'info';
@@ -616,6 +631,7 @@ interface GUI {
   ParseRulesText(text: string): Promise<RulesTextResult>;
   ApplyRulesText(text: string, replace: boolean, guard: EditGuard): Promise<RulesTextResult>;
   LintRules(s: Settings): Promise<LintIssue[]>;
+  TidyRules(s: Settings, accept: string[]): Promise<TidyView>;
   DuplicateRule(list: Rule[], r: Rule, skip: number): Promise<number>; // index, -1 = none
   Explain(q: { app: string; target: string; proto: string; port?: number }, s: Settings | null): Promise<Explanation>;
   BrowseExe(): Promise<string>;

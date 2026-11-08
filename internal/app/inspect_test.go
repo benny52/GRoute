@@ -147,3 +147,35 @@ func TestRootDomain(t *testing.T) {
 		}
 	}
 }
+
+// «Навести порядок» with the real database: service lists only, the DPI
+// rule left alone; without a database a note, the rest still there.
+func TestTidyRulesGeo(t *testing.T) {
+	c := geoCtl(t)
+	st := c.Settings()
+	st.Rules = []rules.Rule{
+		{ID: "dpi", Name: ZapretRulePrefix + "YouTube", Domains: []string{".youtube.com"}, Action: rules.Direct},
+		{ID: "ai", Name: "ИИ", Domains: []string{".openai.com", "chatgpt.com", ".claude.ai"}, Action: rules.Tunnel},
+		{ID: "yt", Name: "YouTube", Domains: []string{".youtube.com", "youtu.be", "www.youtube.com"}, Action: rules.Tunnel},
+	}
+	v := c.TidyRules(st, nil)
+	var got []string
+	for _, t := range v.Items {
+		got = append(got, t.ID)
+	}
+	// ai: openai (category-ai-chat-!cn is a category-*, geolocation a
+	// region); yt: its repeat, then youtube (named after it, one site
+	// left after the repeat goes is enough, plus youtu.be).
+	if strings.Join(got, " ") != "sites:yt merge:ai,yt geo:ai:openai geo:yt:youtube" || v.GeoNote != "" {
+		t.Fatalf("%v %q", got, v.GeoNote)
+	}
+	v = c.TidyRules(st, []string{"geo:ai:openai", "sites:yt"})
+	if len(v.Rules) != 3 || strings.Join(v.Rules[1].Domains, " ") != ".claude.ai geosite:openai" || strings.Join(v.Rules[2].Domains, " ") != ".youtube.com youtu.be" {
+		t.Fatalf("%+v", v.Rules)
+	}
+	c.geo.db.Dir = t.TempDir()
+	c.geo.db.Forget()
+	if v := c.TidyRules(st, nil); !strings.Contains(v.GeoNote, "не скачана") || len(v.Items) != 2 {
+		t.Fatalf("%+v", v)
+	}
+}
