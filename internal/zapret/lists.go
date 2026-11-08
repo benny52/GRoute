@@ -23,7 +23,9 @@ var (
 		"discordcdn.com", "discord.dev", "discord.co", "discord.gift", "discord.gifts",
 		"discord.new", "discord.store", "discord.tools", "discord.design", "discordstatus.com",
 		"discordsays.com", "discord-activities.com", "discordactivities.com", "discordmerch.com",
-		"discordpartygames.com", "dis.gd",
+		"discordpartygames.com", "dis.gd", "discord.app", "discord.status", "discordsez.com",
+		// Attachments are uploaded straight to this bucket.
+		"discord-attachments-uploads-prd.storage.googleapis.com",
 	}
 )
 
