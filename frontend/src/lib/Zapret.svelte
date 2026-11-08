@@ -141,6 +141,10 @@
     return `быстрее всех открывает «${name}»` + (spare > 0 ? `; если перестанет, есть ещё ${spare} ${spare === 1 ? 'рабочий метод' : spare < 5 ? 'рабочих метода' : 'рабочих методов'}` : '');
   }
   const viaVPNNow = (t: ZapretTarget) => view?.settings.methods?.[t] === 'vpn';
+  // How many of the working strategies the generator made (not the library).
+  const genFound = $derived(
+    new Set(Object.values(view?.pick?.working ?? {}).flatMap((ws) => (ws ?? []).filter((id) => id.startsWith('g:')))).size,
+  );
 </script>
 
 <div class="page">
@@ -190,7 +194,12 @@
               ><span>{t.name}</span>
               <select bind:value={methods[t.target]}>
                 <option value="">Автоматически (перебор, если перестал работать)</option>
-                {#each view.methods as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
+                {#each view.methods.filter((m) => !m.generated) as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
+                {#if view.methods.some((m) => m.generated)}
+                  <optgroup label="Найдены генератором в этой сети">
+                    {#each view.methods.filter((m) => m.generated) as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
+                  </optgroup>
+                {/if}
                 <option value="none">Не нужен</option>
                 <option value="vpn">Через VPN</option>
               </select></label
@@ -226,8 +235,10 @@
       <section class="card">
         <h2>Подобрать метод</h2>
         <p class="muted small">
-          У каждого провайдера работают свои методы. HyRoute выяснит, как именно блокируется каждый сервис, попробует все методы сразу и запомнит для этой
-          сети{view.network ? ` («${hide(view.network)}»)` : ''} самый быстрый и запасные. Займёт полминуты; обход при этом продолжает работать.
+          У каждого провайдера работают свои методы. HyRoute выяснит, как именно блокируется каждый сервис, попробует известные методы, а потом
+          сам соберёт и проверит десятки своих вариантов: рядом с теми, что сработали, а если не сработало ничего — по всем приёмам zapret2 и с фейками
+          сайтов из белого списка. Для этой сети{view.network ? ` («${hide(view.network)}»)` : ''} запомнит самый быстрый и запасные. Займёт от полуминуты до
+          трёх минут; обход при этом продолжает работать.
         </p>
         {#if pickNow}
           <div class="progress"><div class="bar" style="width: {Math.round((100 * pickNow.done) / Math.max(1, pickNow.total))}%"></div></div>
@@ -243,6 +254,7 @@
           {#if view.pick.error}
             <div class="note error small">{hide(view.pick.error)}</div>
           {:else}
+            {#if view.pick.tried}<div class="muted small tried">Проверено вариантов: {view.pick.tried}{#if genFound > 0}, из них свои, собранные генератором, рабочие: {genFound}{/if}.</div>{/if}
             <ul class="results">
               {#each view.targets.filter((t) => t.target in (view?.pick?.results ?? {})) as t (t.target)}
                 {@const d = view.pick.diagnosis?.[t.target]}
@@ -315,6 +327,7 @@
   .dot.ok { background: var(--direct); }
   .progress { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
   .bar { height: 100%; background: var(--accent); transition: width 0.3s; }
+  .tried { margin-top: 8px; }
   .results { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
   .vpn { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
   .small-btn { padding: 4px 10px; font-size: 13px; }

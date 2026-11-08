@@ -106,6 +106,7 @@ func Build(c BuildConfig) ([]string, error) {
 	for _, name := range []string{"google_tls", "quic_google", "vk_tls"} {
 		args = append(args, "--blob="+name+":@"+filepath.Join(c.Dir, "blobs", BlobFiles[name]))
 	}
+	args = append(args, fakeArgs(c.Lists, c.Plans)...)
 	if c.Filter != "" {
 		args = append(args, "--wf-raw-filter="+c.Filter)
 	}

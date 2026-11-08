@@ -1891,6 +1891,7 @@ export interface ZapretPick {
   done: number;
   total: number;
   results: Partial<Record<ZapretTarget, string>>;
+  tried: number; // strategies tried: the library and the generator's
   working?: Partial<Record<ZapretTarget, string[]>>; // every method that opened it, fastest first
   diagnosis?: Partial<Record<ZapretTarget, ZapretDiag>>; // how it is blocked without a bypass
   error?: string;
@@ -1912,7 +1913,7 @@ export interface ZapretView {
   loadError?: string;
   network: string;
   targets: ZapretTargetView[];
-  methods: { id: string; name: string }[];
+  methods: { id: string; name: string; generated?: boolean }[]; // generated: made by the generator on this network
   pick?: ZapretPick;
   commandLine?: string;
   busy?: string;

@@ -29,28 +29,7 @@ func TestWinws2Runs(t *testing.T) {
 	if os.Getenv("HYROUTE_ZAPRET_TEST") == "" {
 		t.Skip("HYROUTE_ZAPRET_TEST=1 runs it: downloads zapret2, needs administrator rights")
 	}
-	files, err := runtimefiles.ZapretFromDeps(buildfiles.Deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Not t.TempDir: the WinDivert driver loaded from this folder keeps
-	// WinDivert64.sys locked until Windows unloads it, so the folder is
-	// removed best-effort.
-	staged, err := os.MkdirTemp("", "hyroute-zapret-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(staged) })
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	if _, err := runtimefiles.Stage(t.TempDir(), staged, files, runtimefiles.HTTPGetter(ctx, http.DefaultClient, "HyRoute-test")); err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Join(staged, runtimefiles.ZapretDir)
-	lists := t.TempDir()
-	if err := zapret.WriteLists(lists, []string{"example.org"}, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")}); err != nil {
-		t.Fatal(err)
-	}
+	dir, lists := stageZapret(t)
 	all := func(p zapret.Plan) map[zapret.Target]zapret.Plan {
 		m := map[zapret.Target]zapret.Plan{}
 		for _, tg := range zapret.Targets {
@@ -128,6 +107,117 @@ func TestWinws2Runs(t *testing.T) {
 		t.Fatal("example.com opened through no method: the checks or the testers are broken")
 	}
 	t.Logf("example.com opened through %d of %d methods", opened, len(zapret.Methods))
+}
+
+// stageZapret downloads and stages the pinned zapret2 (once per test) and
+// writes the lists: example.com is an own site, so a probe to it goes
+// through the methods (their Lua runs on it).
+func stageZapret(t *testing.T) (dir, lists string) {
+	t.Helper()
+	files, err := runtimefiles.ZapretFromDeps(buildfiles.Deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Not t.TempDir: the WinDivert driver loaded from this folder keeps
+	// WinDivert64.sys locked until Windows unloads it, so the folder is
+	// removed best-effort.
+	staged, err := os.MkdirTemp("", "hyroute-zapret-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(staged) })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if _, err := runtimefiles.Stage(t.TempDir(), staged, files, runtimefiles.HTTPGetter(ctx, http.DefaultClient, "HyRoute-test")); err != nil {
+		t.Fatal(err)
+	}
+	lists = t.TempDir()
+	if err := zapret.WriteLists(lists, []string{"example.com", "example.org"}, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")}); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(staged, runtimefiles.ZapretDir), lists
+}
+
+// TestWinws2Generated runs generated strategies (a spread over the whole
+// space and the neighbors of a library method) in the real winws2, twelve
+// at once as a pick does, each with a probe to example.com from its
+// ports: no Lua function may fail on a real connection.
+func TestWinws2Generated(t *testing.T) {
+	if os.Getenv("HYROUTE_ZAPRET_TEST") == "" {
+		t.Skip("HYROUTE_ZAPRET_TEST=1 runs it: downloads zapret2, needs administrator rights")
+	}
+	dir, lists := stageZapret(t)
+	var ids []string
+	for _, s := range zapret.Broad(18, 42) {
+		ids = append(ids, s.ID())
+	}
+	base, _ := zapret.AsStrategy("fake-vk-seqovl")
+	for _, s := range zapret.Neighbors(base)[:6] {
+		ids = append(ids, s.ID())
+	}
+	opened := 0
+	for len(ids) > 0 {
+		batch := ids[:min(len(ids), zapret.ProbeSlots-1)]
+		ids = ids[len(batch):]
+		type run struct {
+			cmd    *exec.Cmd
+			out    *syncBuffer
+			exited chan error
+		}
+		runs := make([]run, len(batch))
+		for i, id := range batch {
+			args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: lists, Filter: zapret.ProbeOnly(i + 1),
+				Plans: map[zapret.Target]zapret.Plan{zapret.Sites: {Methods: []string{id}}}})
+			if err != nil {
+				t.Fatalf("%s: %v", id, err)
+			}
+			r := run{out: &syncBuffer{}, exited: make(chan error, 1)}
+			r.cmd = exec.Command(filepath.Join(dir, "winws2.exe"), append([]string{"--debug=1"}, args...)...)
+			r.cmd.Stdout, r.cmd.Stderr = r.out, r.out
+			if err := r.cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			go func() { r.exited <- r.cmd.Wait() }()
+			runs[i] = r
+		}
+		time.Sleep(3 * time.Second)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		for i, id := range batch {
+			select {
+			case err := <-runs[i].exited:
+				t.Errorf("%s: winws2 exited (%v):\n%s", id, err, runs[i].out.String())
+				continue
+			default:
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				r := (&zapret.Prober{Slot: i + 1}).Check(context.Background(), []string{"https://example.com/"})
+				mu.Lock()
+				defer mu.Unlock()
+				if r.OK {
+					opened++
+				}
+				t.Logf("%s: ok %v %v", id, r.OK, r.Failed)
+			}()
+		}
+		wg.Wait()
+		for i, id := range batch {
+			runs[i].cmd.Process.Kill()
+			<-runs[i].exited
+			out := runs[i].out.String()
+			if strings.Contains(out, "LUA ERROR") || strings.Contains(out, "desync ERROR") {
+				t.Errorf("%s failed in winws2:\n%s", id, out)
+			}
+			if !strings.Contains(out, "hostlist check for example.com : positive") && !strings.Contains(out, "example.com : positive") {
+				t.Logf("%s: the probe did not reach its profile", id)
+			}
+		}
+	}
+	if opened == 0 {
+		t.Fatal("example.com opened through no generated strategy")
+	}
 }
 
 // probePort matches a packet from or to a probe's port in winws2's log.

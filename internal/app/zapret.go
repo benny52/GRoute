@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math/rand/v2"
 	"net/netip"
 	"path/filepath"
 	"slices"
@@ -54,8 +55,15 @@ const ZapretRulePrefix = "Обход DPI: "
 
 // Test hooks.
 var (
-	zapretSettle    = 1500 * time.Millisecond // winws2 opens WinDivert and reads its lists
-	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+	zapretSettle = 1500 * time.Millisecond // winws2 opens WinDivert and reads its lists
+	// The generator: candidates tried around what worked, over the whole
+	// space when nothing did, the strategies kept per target, the time.
+	zapretRefine     = 24
+	zapretBroad      = 60
+	zapretKeep       = 8
+	zapretPickBudget = 3 * time.Minute
+	zapretSeed       = rand.Uint64
+	zapretCheckFunc  = func(ctx context.Context, slot int, urls []string) zapret.Result {
 		return (&zapret.Prober{Slot: slot}).Check(ctx, urls)
 	}
 	zapretSpawn func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) // nil = winws2
@@ -91,8 +99,21 @@ type ZapretDiag struct {
 	Bypass bool `json:"bypass"`
 }
 
+func countWorks[T any](m map[zapret.Target][]T) int {
+	n := 0
+	for _, ws := range m {
+		n += len(ws)
+	}
+	return n
+}
+
+// methodIndex orders equal times: the library's order, generated ones
+// after it.
 func methodIndex(id string) int {
-	return slices.IndexFunc(zapret.Methods, func(m zapret.Method) bool { return m.ID == id })
+	if i := slices.IndexFunc(zapret.Methods, func(m zapret.Method) bool { return m.ID == id }); i >= 0 {
+		return i
+	}
+	return len(zapret.Methods)
 }
 
 // ZapretTargetView is one service of the page.
@@ -113,6 +134,8 @@ type ZapretTargetView struct {
 type ZapretMethodView struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Generated: made by the generator (on this network), not the library.
+	Generated bool `json:"generated,omitempty"`
 }
 
 // ZapretPickView is an auto-pick under way or just done.
@@ -122,6 +145,8 @@ type ZapretPickView struct {
 	Done    int                      `json:"done"`
 	Total   int                      `json:"total"`
 	Results map[zapret.Target]string `json:"results"` // a method ID, "none", or "" (none worked)
+	// Tried: strategies tried (the library and generated ones).
+	Tried int `json:"tried"`
 	// Working: every method that opened the target, fastest first.
 	Working map[zapret.Target][]string `json:"working,omitempty"`
 	// Diagnosis: how a target is blocked without a bypass.
@@ -503,6 +528,31 @@ func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretV
 	}
 	key, name := c.zapretKey, c.zapretNet // as of the last apply: the page does not read the network
 	v.Network = name
+	// The generated strategies this network uses, the user's fixed ones
+	// and the pick's: they can be chosen too, and the page names them.
+	gen := func(id string) {
+		if !strings.HasPrefix(id, zapret.GenPrefix) || slices.ContainsFunc(v.Methods, func(m ZapretMethodView) bool { return m.ID == id }) {
+			return
+		}
+		if m, ok := zapret.FindMethod(id); ok {
+			v.Methods = append(v.Methods, ZapretMethodView{ID: id, Name: m.Name, Generated: true})
+		}
+	}
+	for _, ws := range c.zapretCfg.Picked[key].Working {
+		for _, id := range ws {
+			gen(id)
+		}
+	}
+	for _, id := range c.zapretCfg.Methods {
+		gen(id)
+	}
+	if pick != nil {
+		for _, ws := range pick.Working {
+			for _, id := range ws {
+				gen(id)
+			}
+		}
+	}
 	cfg := c.zapretCfg
 	v.Settings = cfg
 	if v.Settings.Targets == nil {
@@ -686,74 +736,182 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 		return finish(errors.New("подбор остановлен"))
 	}
 
-	// Every method at once, each in its own winws2 that sees only the
-	// probes of its slot: the fastest that opens a target goes first, the
-	// others that open it are its spares.
+	// The generator, in rounds of candidates tried at once, each in its own
+	// winws2 that sees only the probes of its slot:
+	//  1. the library;
+	//  2. strategies one change away from what worked (a faster one,
+	//     spares), or, for a target nothing opened, a spread over the whole
+	//     space; until the time is up;
+	//  3. the best of each target once more: a strategy is kept only when
+	//     it opened it every time.
 	type timed struct {
 		id string
 		d  time.Duration
 	}
+	deadline := time.Now().Add(zapretPickBudget)
+	tried := map[string]bool{}
 	works := map[zapret.Target][]timed{}
-	if len(left) > 0 {
-		update(func(p *ZapretPickView) {
-			p.Step = fmt.Sprintf("Пробую %d методов обхода сразу", len(zapret.Methods))
+	round := func(cands []string, targets []zapret.Target) (map[zapret.Target][]timed, error) {
+		out := map[zapret.Target][]timed{}
+		for len(cands) > 0 && ctx.Err() == nil {
+			batch := cands[:min(len(cands), zapret.ProbeSlots-1)]
+			cands = cands[len(batch):]
+			testers := make([]*zapret.Runner, len(batch))
+			for i, id := range batch {
+				tried[id] = true
+				plans := map[zapret.Target]zapret.Plan{}
+				for _, t := range targets {
+					plans[t] = zapret.Plan{Methods: []string{id}}
+				}
+				args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Filter: zapret.ProbeOnly(i + 1)})
+				if err != nil {
+					return nil, err
+				}
+				testers[i] = &zapret.Runner{Exe: filepath.Join(dir, "winws2.exe"), Log: c.Log, Spawn: zapretSpawn}
+				testers[i].Start(args)
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(zapretSettle):
+			}
+			var mu sync.Mutex
+			var wg sync.WaitGroup
+			started, firstErr := 0, ""
+			for i, id := range batch {
+				if st := testers[i].Status(); st.State != zapret.Running {
+					c.Log.Warn("zapret: tester not running", "method", id, "err", st.Error)
+					if firstErr == "" {
+						firstErr = st.Error
+					}
+					testers[i].Stop()
+					update(func(p *ZapretPickView) { p.Done++ })
+					continue
+				}
+				started++
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for t, r := range checkAll(i+1, targets) {
+						if r.OK && ctx.Err() == nil {
+							mu.Lock()
+							out[t] = append(out[t], timed{id, r.Elapsed})
+							mu.Unlock()
+						}
+					}
+					testers[i].Stop()
+					update(func(p *ZapretPickView) { p.Done++; p.Tried = len(tried) })
+				}()
+			}
+			wg.Wait()
+			if started == 0 {
+				return nil, fmt.Errorf("winws2 не работает: %s", firstErr)
+			}
+		}
+		return out, nil
+	}
+	fastest := func(ws []timed) []timed {
+		ws = slices.Clone(ws)
+		slices.SortStableFunc(ws, func(a, b timed) int {
+			if d := cmp.Compare(a.d, b.d); d != 0 {
+				return d
+			}
+			return cmp.Compare(methodIndex(a.id), methodIndex(b.id))
 		})
-		testers := make([]*zapret.Runner, len(zapret.Methods))
-		defer func() {
-			for _, r := range testers {
-				if r != nil {
-					r.Stop()
+		return ws
+	}
+	merge := func(got map[zapret.Target][]timed) {
+		for t, ws := range got {
+			works[t] = append(works[t], ws...)
+		}
+	}
+	if len(left) > 0 {
+		// 1. The library.
+		var lib []string
+		for _, m := range zapret.Methods {
+			lib = append(lib, m.ID)
+		}
+		update(func(p *ZapretPickView) {
+			p.Step = fmt.Sprintf("Пробую %d известных методов сразу", len(lib))
+			p.Total = 1 + len(lib)
+		})
+		got, err := round(lib, left)
+		if err != nil {
+			return finish(err)
+		}
+		merge(got)
+
+		// 2. Around what worked, or over the whole space.
+		var cands []string
+		add := func(id string) {
+			if !tried[id] && !slices.Contains(cands, id) {
+				cands = append(cands, id)
+			}
+		}
+		lost := false
+		for _, t := range left {
+			ws := fastest(works[t])
+			if len(ws) == 0 {
+				lost = true
+				continue
+			}
+			for _, w := range ws[:min(2, len(ws))] {
+				if st, ok := zapret.AsStrategy(w.id); ok {
+					for _, n := range zapret.Neighbors(st) {
+						add(n.ID())
+					}
 				}
 			}
-		}()
-		for i, m := range zapret.Methods {
-			plans := map[zapret.Target]zapret.Plan{}
-			for _, t := range left {
-				plans[t] = zapret.Plan{Methods: []string{m.ID}}
+		}
+		budget := zapretRefine
+		if lost {
+			for _, st := range zapret.Broad(zapretBroad, zapretSeed()) {
+				add(st.ID())
 			}
-			args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Filter: zapret.ProbeOnly(i + 1)})
+			budget = zapretRefine + zapretBroad
+		}
+		// Neighbors of the fastest first, then the spread.
+		cands = cands[:min(len(cands), budget)]
+		for len(cands) > 0 && ctx.Err() == nil && time.Now().Before(deadline) {
+			batch := cands[:min(len(cands), zapret.ProbeSlots-1)]
+			cands = cands[len(batch):]
+			update(func(p *ZapretPickView) {
+				p.Step = fmt.Sprintf("Генерирую свои варианты: проверено %d, рабочих найдено %d", len(tried), countWorks(works))
+				p.Total = p.Done + len(batch) + len(cands) + 1
+			})
+			got, err := round(batch, left)
 			if err != nil {
 				return finish(err)
 			}
-			testers[i] = &zapret.Runner{Exe: filepath.Join(dir, "winws2.exe"), Log: c.Log, Spawn: zapretSpawn}
-			testers[i].Start(args)
+			merge(got)
 		}
-		select {
-		case <-ctx.Done():
-			return finish(errors.New("подбор остановлен"))
-		case <-time.After(zapretSettle):
-		}
-		var mu sync.Mutex
-		var wg sync.WaitGroup
-		var started int
-		var firstErr string
-		for i, m := range zapret.Methods {
-			if st := testers[i].Status(); st.State != zapret.Running {
-				c.Log.Warn("zapret: tester not running", "method", m.ID, "err", st.Error)
-				if firstErr == "" {
-					firstErr = st.Error
+
+		// 3. The best once more.
+		var again []string
+		for _, t := range left {
+			for _, w := range fastest(works[t])[:min(zapretKeep, len(works[t]))] {
+				if !slices.Contains(again, w.id) {
+					again = append(again, w.id)
 				}
-				update(func(p *ZapretPickView) { p.Done++ })
-				continue
 			}
-			started++
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for t, r := range checkAll(i+1, left) {
-					if r.OK && ctx.Err() == nil {
-						mu.Lock()
-						works[t] = append(works[t], timed{m.ID, r.Elapsed})
-						mu.Unlock()
+		}
+		if len(again) > 0 && ctx.Err() == nil {
+			update(func(p *ZapretPickView) {
+				p.Step = fmt.Sprintf("Перепроверяю %d лучших", len(again))
+				p.Total = p.Done + len(again)
+			})
+			got, err := round(again, left)
+			if err != nil {
+				return finish(err)
+			}
+			for _, t := range left {
+				var kept []timed
+				for _, w := range works[t] {
+					if i := slices.IndexFunc(got[t], func(g timed) bool { return g.id == w.id }); i >= 0 {
+						kept = append(kept, timed{w.id, (w.d + got[t][i].d) / 2})
 					}
 				}
-				testers[i].Stop()
-				update(func(p *ZapretPickView) { p.Done++ })
-			}()
-		}
-		wg.Wait()
-		if started == 0 {
-			return finish(fmt.Errorf("winws2 не работает: %s", firstErr))
+				works[t] = kept
+			}
 		}
 	}
 	if ctx.Err() != nil {
@@ -762,15 +920,8 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 	working := map[zapret.Target][]string{}
 	results := map[zapret.Target]string{}
 	for _, t := range left {
-		ws := works[t]
-		// The fastest first; equal times keep the library's order.
-		slices.SortStableFunc(ws, func(a, b timed) int {
-			if d := cmp.Compare(a.d, b.d); d != 0 {
-				return d
-			}
-			return cmp.Compare(methodIndex(a.id), methodIndex(b.id))
-		})
-		for _, w := range ws {
+		ws := fastest(works[t])
+		for _, w := range ws[:min(zapretKeep, len(ws))] {
 			working[t] = append(working[t], w.id)
 		}
 		results[t] = "" // none worked

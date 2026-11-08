@@ -264,14 +264,29 @@ func TestZapretPickFastestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Pick.Results[zapret.YouTube] != "fakedsplit" || !slices.Equal(v.Pick.Working[zapret.YouTube], []string{"fakedsplit", "fake-disorder"}) {
+	// The library's two first, then what the generator made around
+	// fake-disorder: the same disorder with other fakes and foolings.
+	ws := v.Pick.Working[zapret.YouTube]
+	if v.Pick.Results[zapret.YouTube] != "fakedsplit" || len(ws) != zapretKeep || !slices.Equal(ws[:2], []string{"fakedsplit", "fake-disorder"}) {
 		t.Fatalf("%+v", v.Pick)
+	}
+	for _, id := range ws[2:] {
+		if st, ok := zapret.ParseStrategy(id); !ok || st.Split != "multidisorder" {
+			t.Fatalf("generated %s", id)
+		}
+	}
+	if v.Pick.Tried <= len(zapret.Methods) {
+		t.Fatalf("tried %d", v.Pick.Tried)
+	}
+	// The page names the generated ones and offers them.
+	if !slices.ContainsFunc(v.Methods, func(m ZapretMethodView) bool { return m.ID == ws[2] && m.Generated && m.Name != "" }) {
+		t.Fatalf("%+v", v.Methods)
 	}
 	if !strings.Contains(v.CommandLine, "fakedsplit:blob=google_tls:pos=2:strategy=1") || !strings.Contains(v.CommandLine, "multidisorder:pos=1,midsld:strategy=2") {
 		t.Fatalf("%s", v.CommandLine)
 	}
 	z, _ := c.Store.LoadZapret()
-	if !slices.Equal(z.Picked[""].Working[zapret.YouTube], []string{"fakedsplit", "fake-disorder"}) {
+	if !slices.Equal(z.Picked[""].Working[zapret.YouTube], ws) {
 		t.Fatalf("%+v", z.Picked)
 	}
 }
@@ -366,5 +381,45 @@ func TestZapretPickSkipsVPN(t *testing.T) {
 	}
 	if _, err := c.ZapretPick(); err == nil {
 		t.Fatal("a pick with everything through the VPN")
+	}
+}
+
+// Nothing of the library opens the service: the generator goes over the
+// whole space and finds a strategy with one of its own fakes.
+func TestZapretGeneratorBroad(t *testing.T) {
+	c, argsFor := zapFixture(t)
+	seed := zapretSeed
+	t.Cleanup(func() { zapretSeed = seed })
+	zapretSeed = func() uint64 { return 7 }
+	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+		if strings.Contains(argsFor(slot), "blob=w_") {
+			return zapret.Result{OK: true, Elapsed: time.Second}
+		}
+		return failed(zapret.KindFreeze)
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.Discord}}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := c.ZapretPick()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := v.Pick.Results[zapret.Discord]
+	st, ok := zapret.ParseStrategy(got)
+	made := st.Fake
+	if !strings.HasPrefix(made, "w_") {
+		made = st.Pattern // as the overlap's pattern
+	}
+	if !ok || !strings.HasPrefix(made, "w_") || len(v.Pick.Working[zapret.Discord]) < 2 {
+		t.Fatalf("%+v", v.Pick)
+	}
+	// winws2 runs it, with its fake.
+	if !strings.Contains(v.CommandLine, "--blob="+made+":@") {
+		t.Fatalf("%s", v.CommandLine)
+	}
+	if !slices.ContainsFunc(v.Targets, func(tv ZapretTargetView) bool {
+		return tv.Target == zapret.Discord && strings.Contains(tv.Using, st.Name())
+	}) {
+		t.Fatalf("%+v", v.Targets)
 	}
 }

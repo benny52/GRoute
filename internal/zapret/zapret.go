@@ -111,6 +111,9 @@ var Methods = []Method{
 
 // FindMethod is a method by ID.
 func FindMethod(id string) (Method, bool) {
+	if st, ok := ParseStrategy(id); ok {
+		return Method{ID: id, Name: st.Name(), tcp: st.instances()}, true
+	}
 	i := slices.IndexFunc(Methods, func(m Method) bool { return m.ID == id })
 	if i < 0 {
 		return Method{}, false

@@ -76,18 +76,27 @@ func WriteLists(dir string, sites []string, servers []netip.Addr) error {
 			// An empty hostlist would make its profile match every host.
 			body = []byte("# HyRoute: пусто\nexample.invalid\n")
 		}
-		path := filepath.Join(dir, name)
-		if cur, err := os.ReadFile(path); err == nil && bytes.Equal(cur, body) {
-			continue
-		}
-		tmp := path + ".new"
-		if err := os.WriteFile(tmp, body, 0o644); err != nil {
+		if err := writeIfChanged(filepath.Join(dir, name), body); err != nil {
 			return err
 		}
-		if err := os.Rename(tmp, path); err != nil {
-			os.Remove(tmp)
-			return err
-		}
+	}
+	// The generator's fakes live next to the lists.
+	return WriteFakes(dir)
+}
+
+// writeIfChanged replaces path with body through a temporary file, unless
+// it already holds body (winws2 rereads a list file that changes).
+func writeIfChanged(path string, body []byte) error {
+	if cur, err := os.ReadFile(path); err == nil && bytes.Equal(cur, body) {
+		return nil
+	}
+	tmp := path + ".new"
+	if err := os.WriteFile(tmp, body, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
 	}
 	return nil
 }
