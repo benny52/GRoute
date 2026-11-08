@@ -95,6 +95,26 @@
     saving = false;
   }
 
+  // viaVPN sends one service through the VPN (or back to the bypass) and
+  // saves at once: the rest of the form stays as saved.
+  async function viaVPN(t: ZapretTarget, on: boolean) {
+    if (!view) return;
+    error = saved = '';
+    const st = view.settings;
+    const m = { ...(st.methods ?? {}) };
+    if (on) m[t] = 'vpn';
+    else delete m[t];
+    try {
+      await api.SaveZapret({ enabled: st.enabled, targets: st.targets ?? [], sites: st.sites ?? [], methods: m });
+      loaded = false;
+      await refresh();
+      const name = view?.targets.find((x) => x.target === t)?.name ?? t;
+      saved = on ? `${name} теперь идёт через VPN` : `${name} снова идёт через обход`;
+    } catch (e) {
+      error = errText(e);
+    }
+  }
+
   async function pick() {
     error = saved = '';
     picking = true;
@@ -115,11 +135,12 @@
   function resultText(t: ZapretTarget): string {
     const m = view?.pick?.results[t];
     if (m === 'none') return 'не блокируется — обход не нужен';
-    if (!m) return 'ни один метод не открыл — работает автоматический перебор';
+    if (!m) return view?.pick?.diagnosis?.[t]?.bypass === false ? 'обход тут не поможет' : 'ни один метод не открыл';
     const spare = (view?.pick?.working?.[t]?.length ?? 1) - 1;
     const name = view?.methods.find((x) => x.id === m)?.name ?? m;
     return `быстрее всех открывает «${name}»` + (spare > 0 ? `; если перестанет, есть ещё ${spare} ${spare === 1 ? 'рабочий метод' : spare < 5 ? 'рабочих метода' : 'рабочих методов'}` : '');
   }
+  const viaVPNNow = (t: ZapretTarget) => view?.settings.methods?.[t] === 'vpn';
 </script>
 
 <div class="page">
@@ -149,6 +170,9 @@
               <b>{t.name}</b>
               <span class="muted small">{hints[t.target]}</span>
               {#if t.on && enabled}<span class="small using">Сейчас: {t.using}</span>{/if}
+              {#if t.on && enabled && viaVPNNow(t.target) && !dirty}
+                <button class="link small" onclick={(e) => { e.preventDefault(); viaVPN(t.target, false); }}>Вернуть обход</button>
+              {/if}
             </span>
           </label>
         {/each}
@@ -168,6 +192,7 @@
                 <option value="">Автоматически (перебор, если перестал работать)</option>
                 {#each view.methods as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
                 <option value="none">Не нужен</option>
+                <option value="vpn">Через VPN</option>
               </select></label
             >
           {/each}
@@ -201,8 +226,8 @@
       <section class="card">
         <h2>Подобрать метод</h2>
         <p class="muted small">
-          У каждого провайдера работают свои методы. HyRoute сам проверит, открываются ли выбранные сервисы без обхода и с каждым методом, и запомнит
-          подходящие для этой сети{view.network ? ` («${hide(view.network)}»)` : ''}. HyRoute пробует все методы и ставит самый быстрый первым, а остальные рабочие — запасными. Займёт около минуты; на это время обход выключается.
+          У каждого провайдера работают свои методы. HyRoute выяснит, как именно блокируется каждый сервис, попробует все методы сразу и запомнит для этой
+          сети{view.network ? ` («${hide(view.network)}»)` : ''} самый быстрый и запасные. Займёт полминуты; обход при этом продолжает работать.
         </p>
         {#if pickNow}
           <div class="progress"><div class="bar" style="width: {Math.round((100 * pickNow.done) / Math.max(1, pickNow.total))}%"></div></div>
@@ -220,9 +245,27 @@
           {:else}
             <ul class="results">
               {#each view.targets.filter((t) => t.target in (view?.pick?.results ?? {})) as t (t.target)}
+                {@const d = view.pick.diagnosis?.[t.target]}
+                {@const res = view.pick.results[t.target]}
                 <li>
                   <b>{t.name}</b>: {resultText(t.target)}
-                  {#if !view.pick.results[t.target] && view.pick.notes?.[t.target]}<div class="muted small">{hide(view.pick.notes[t.target])}</div>{/if}
+                  {#if d && res !== 'none'}<div class="muted small">Без обхода: {d.text} <span class="faint">({hide(d.detail)})</span></div>{/if}
+                  {#if !res}
+                    <div class="vpn">
+                      {#if d && !d.bypass}
+                        <span class="small">Такую блокировку обходит только VPN.</span>
+                      {:else}
+                        <span class="small">Провайдер блокирует сильнее, чем умеют эти методы.</span>
+                      {/if}
+                      {#if viaVPNNow(t.target)}
+                        <span class="small using">{t.name} уже идёт через VPN.</span>
+                      {:else if view.hasServer}
+                        <button class="primary small-btn" onclick={() => viaVPN(t.target, true)} disabled={dirty}>Пустить {t.name} через VPN</button>
+                      {:else}
+                        <span class="small muted">Добавьте сервер VPN, и HyRoute сможет пустить {t.name} через него.</span>
+                      {/if}
+                    </div>
+                  {/if}
                 </li>
               {/each}
             </ul>
@@ -233,8 +276,8 @@
 
     <section class="card info">
       <p class="small">
-        HyRoute держит правила «Обход DPI: …» наверху профиля правил: этот трафик идёт напрямую, через обход, а не через VPN. Чтобы снова пустить сервис
-        через VPN, снимите его здесь.
+        HyRoute держит правила «Обход DPI: …» наверху профиля правил: этот трафик идёт напрямую, через обход, а не через VPN. Если обход сервису не
+        помогает, подбор предложит пустить его через VPN; снимите сервис здесь, и он пойдёт по вашим обычным правилам.
         {#if ui.expert}<button class="link" onclick={() => go('rules')}>Правила</button>{/if}
       </p>
       <p class="small muted">
@@ -272,7 +315,9 @@
   .dot.ok { background: var(--direct); }
   .progress { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
   .bar { height: 100%; background: var(--accent); transition: width 0.3s; }
-  .results { margin: 8px 0 0; padding-left: 18px; }
+  .results { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+  .vpn { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+  .small-btn { padding: 4px 10px; font-size: 13px; }
   pre { white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; }
   h2 { margin: 0 0 6px; }
 </style>

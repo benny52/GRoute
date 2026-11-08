@@ -55,6 +55,9 @@ const (
 	Auto = ""
 	// None: the target is not blocked here: no profile for it.
 	None = "none"
+	// VPN: the target goes through HyRoute's main server instead (a
+	// bypass cannot open what is blocked by address); the user's choice only.
+	VPN = "vpn"
 )
 
 // Method is a desync recipe for TLS (and HTTP) over TCP: the --lua-desync
@@ -111,6 +114,8 @@ func MethodName(id string) string {
 		return "Автоматически"
 	case None:
 		return "Не нужен: не блокируется"
+	case VPN:
+		return "Через VPN"
 	}
 	if m, ok := FindMethod(id); ok {
 		return m.Name
@@ -167,7 +172,7 @@ func (s *Settings) Normalize() {
 	s.Sites = sites
 	known := func(m string) bool { _, ok := FindMethod(m); return ok }
 	for t, m := range s.Methods {
-		if !known(m) && m != None || !slices.Contains(Targets, t) {
+		if !known(m) && m != None && m != VPN || !slices.Contains(Targets, t) {
 			delete(s.Methods, t)
 		}
 	}
@@ -246,7 +251,7 @@ type Plan struct {
 // target needs no bypass here (auto-pick found it unblocked).
 func (s Settings) PlanFor(t Target, netKey string) (p Plan, ok bool) {
 	if m := s.Methods[t]; m != Auto {
-		if m == None {
+		if m == None || m == VPN {
 			return Plan{}, false
 		}
 		return Plan{Methods: []string{m}}, true

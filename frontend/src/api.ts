@@ -1865,7 +1865,7 @@ export interface ZapretSettings {
   enabled: boolean;
   targets: ZapretTarget[];
   sites?: string[];
-  methods?: Partial<Record<ZapretTarget, string>>; // '' / absent = automatic
+  methods?: Partial<Record<ZapretTarget, string>>; // '' / absent = automatic, 'none', 'vpn' or a method
 }
 
 export interface ZapretStatus {
@@ -1892,12 +1892,20 @@ export interface ZapretPick {
   total: number;
   results: Partial<Record<ZapretTarget, string>>;
   working?: Partial<Record<ZapretTarget, string[]>>; // every method that opened it, fastest first
-  notes?: Partial<Record<ZapretTarget, string>>;
+  diagnosis?: Partial<Record<ZapretTarget, ZapretDiag>>; // how it is blocked without a bypass
   error?: string;
+}
+
+export interface ZapretDiag {
+  kind: string;
+  text: string; // the kind, for the user
+  detail: string; // the address and what happened
+  bypass: boolean; // a method can open it; otherwise only the VPN
 }
 
 export interface ZapretView {
   available: boolean;
+  hasServer: boolean;
   settings: ZapretSettings;
   status: ZapretStatus;
   prepareError?: string;

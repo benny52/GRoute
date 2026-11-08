@@ -55,8 +55,10 @@ const ZapretRulePrefix = "Обход DPI: "
 // Test hooks.
 var (
 	zapretSettle    = 1500 * time.Millisecond // winws2 opens WinDivert and reads its lists
-	zapretCheckFunc = func(ctx context.Context, urls []string) zapret.Result { return zapret.Check(ctx, urls, nil) }
-	zapretSpawn     func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) // nil = winws2
+	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+		return (&zapret.Prober{Slot: slot}).Check(ctx, urls)
+	}
+	zapretSpawn func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) // nil = winws2
 )
 
 // ZapretView is the «Обход DPI» page.
@@ -76,6 +78,21 @@ type ZapretView struct {
 	CommandLine string             `json:"commandLine,omitempty"`
 	// Busy: what takes time now («Скачиваю zapret2…»).
 	Busy string `json:"busy,omitempty"`
+	// HasServer: there is a main server to send a target through.
+	HasServer bool `json:"hasServer"`
+}
+
+// ZapretDiag is how a target is blocked.
+type ZapretDiag struct {
+	Kind   zapret.Kind `json:"kind"`
+	Text   string      `json:"text"`   // the kind, for the user
+	Detail string      `json:"detail"` // the address and what happened
+	// Bypass: a method can open it; otherwise only the VPN can.
+	Bypass bool `json:"bypass"`
+}
+
+func methodIndex(id string) int {
+	return slices.IndexFunc(zapret.Methods, func(m zapret.Method) bool { return m.ID == id })
 }
 
 // ZapretTargetView is one service of the page.
@@ -107,8 +124,9 @@ type ZapretPickView struct {
 	Results map[zapret.Target]string `json:"results"` // a method ID, "none", or "" (none worked)
 	// Working: every method that opened the target, fastest first.
 	Working map[zapret.Target][]string `json:"working,omitempty"`
-	Notes   map[zapret.Target]string   `json:"notes,omitempty"`
-	Error   string                     `json:"error,omitempty"`
+	// Diagnosis: how a target is blocked without a bypass.
+	Diagnosis map[zapret.Target]ZapretDiag `json:"diagnosis,omitempty"`
+	Error     string                       `json:"error,omitempty"`
 }
 
 // ZapretInput is what the page saves.
@@ -276,7 +294,7 @@ func (c *Controller) zapretApplyLocked() {
 		run.Stop()
 		return
 	}
-	args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans})
+	args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Filter: zapret.ProbeExclude()})
 	if err != nil {
 		c.Log.Error("zapret: command line not built", "err", err)
 		run.Stop()
@@ -372,15 +390,21 @@ func zapretRules(cfg zapret.Settings) []rules.Rule {
 		if !cfg.On(t) {
 			continue
 		}
+		// Direct, through winws2; through the main server where the user
+		// chose the VPN for it (blocked by address: no bypass opens that).
+		act := rules.Direct
+		if cfg.Methods[t] == zapret.VPN {
+			act = rules.Tunnel
+		}
 		doms := zapret.Domains(t, cfg.Sites)
 		if len(doms) > 0 {
-			out = append(out, rules.Rule{Name: ZapretRulePrefix + zapret.TargetName(t), Domains: slices.Clone(doms), Action: rules.Direct})
+			out = append(out, rules.Rule{Name: ZapretRulePrefix + zapret.TargetName(t), Domains: slices.Clone(doms), Action: act})
 		}
 		if t == zapret.Discord {
 			// Voice goes to addresses without names, from the program.
 			out = append(out, rules.Rule{Name: ZapretRulePrefix + "Discord (голос)",
 				Apps:     []rules.AppMatch{{Pattern: "Discord.exe", InheritChildren: true}},
-				Protocol: "udp", Ports: rules.PortList{"19294-19344", "50000-50100"}, Action: rules.Direct})
+				Protocol: "udp", Ports: rules.PortList{"19294-19344", "50000-50100"}, Action: act})
 		}
 	}
 	return out
@@ -444,7 +468,7 @@ func (c *Controller) pickState() (pick *ZapretPickView, busy string, shown *Zapr
 	if c.zapretPick != nil {
 		cp := *c.zapretPick
 		cp.Results = cloneMap(c.zapretPick.Results)
-		cp.Notes = cloneMap(c.zapretPick.Notes)
+		cp.Diagnosis = cloneMap(c.zapretPick.Diagnosis)
 		cp.Working = cloneMap(c.zapretPick.Working)
 		pick = &cp
 	}
@@ -471,6 +495,9 @@ func (c *Controller) ZapretInfo() ZapretView {
 // zapretInfoLocked builds the view (zapretMu held).
 func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretView {
 	v := ZapretView{Available: c.ZapretPrepare != nil, Pick: pick, Busy: busy}
+	c.mu.Lock()
+	v.HasServer = c.mainTargetLocked() != ""
+	c.mu.Unlock()
 	for _, m := range zapret.Methods {
 		v.Methods = append(v.Methods, ZapretMethodView{ID: m.ID, Name: m.Name})
 	}
@@ -497,6 +524,11 @@ func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretV
 		}
 		switch p, ok := cfg.PlanFor(t, key); {
 		case !tv.On:
+		case cfg.Methods[t] == zapret.VPN:
+			tv.Using = "через VPN, без обхода"
+			if !v.HasServer {
+				tv.Using = "через VPN — но сервер не выбран: добавьте сервер"
+			}
 		case !ok:
 			tv.Using = "не нужен: здесь не блокируется"
 		case p.Circular:
@@ -578,7 +610,7 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pick := &ZapretPickView{Running: true, Step: "Готовлю zapret2…", Total: len(zapret.Methods) + 1,
-		Results: map[zapret.Target]string{}, Notes: map[zapret.Target]string{}}
+		Results: map[zapret.Target]string{}, Diagnosis: map[zapret.Target]ZapretDiag{}}
 	c.pickMu.Lock()
 	c.zapretPick, c.pickCancel = pick, cancel
 	c.pickMu.Unlock()
@@ -606,13 +638,12 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 	if err != nil {
 		return finish(err)
 	}
-	c.zapretRunner().Stop() // the checks see one winws2 at a time
-	c.zapretArgs = nil
+	// The user's bypass keeps running: it skips the probes' ports.
 	key, _ := c.zapretNetKey()
 	if err := zapret.WriteLists(c.ZapretLists, cfg.Sites, c.zapretServers()); err != nil {
 		return finish(err)
 	}
-	checkAll := func(ts []zapret.Target) map[zapret.Target]zapret.Result {
+	checkAll := func(slot int, ts []zapret.Target) map[zapret.Target]zapret.Result {
 		out := map[zapret.Target]zapret.Result{}
 		var mu sync.Mutex
 		var wg sync.WaitGroup
@@ -620,7 +651,7 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				r := zapretCheckFunc(ctx, zapret.Checks(t, cfg.Sites))
+				r := zapretCheckFunc(ctx, slot, zapret.Checks(t, cfg.Sites))
 				mu.Lock()
 				out[t] = r
 				mu.Unlock()
@@ -629,59 +660,101 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 		wg.Wait()
 		return out
 	}
-	left := slices.Clone(cfg.Targets)
+
+	// Without a bypass: what is blocked, and how. A service the user sent
+	// through the VPN is not checked: its traffic may take the tunnel.
+	left := slices.DeleteFunc(slices.Clone(cfg.Targets), func(t zapret.Target) bool { return cfg.Methods[t] == zapret.VPN })
+	if len(left) == 0 {
+		return finish(errors.New("все выбранные сервисы идут через VPN: подбирать нечего"))
+	}
 	update(func(p *ZapretPickView) {
-		p.Step = "Проверяю без обхода: может, ничего не блокируется"
+		p.Step = "Проверяю без обхода: что блокируется и как"
 	})
-	for t, r := range checkAll(left) {
+	for t, r := range checkAll(0, left) {
 		if r.OK {
 			update(func(p *ZapretPickView) { p.Results[t] = zapret.None })
 			left = slices.DeleteFunc(left, func(x zapret.Target) bool { return x == t })
-		} else if len(r.Failed) > 0 {
-			update(func(p *ZapretPickView) { p.Notes[t] = "без обхода: " + r.Failed[0] })
+			continue
 		}
+		d := r.Diagnosis()
+		update(func(p *ZapretPickView) {
+			p.Diagnosis[t] = ZapretDiag{Kind: d.Kind, Text: d.Kind.Explain(), Detail: d.String(), Bypass: r.Bypassable()}
+		})
 	}
 	update(func(p *ZapretPickView) { p.Done = 1 })
-	// Every method on everything still blocked: the fastest that opens a
-	// target goes first, the others that open it are its spares.
-	tester := &zapret.Runner{Exe: filepath.Join(dir, "winws2.exe"), Log: c.Log, Spawn: zapretSpawn}
-	defer tester.Stop()
+	if ctx.Err() != nil {
+		return finish(errors.New("подбор остановлен"))
+	}
+
+	// Every method at once, each in its own winws2 that sees only the
+	// probes of its slot: the fastest that opens a target goes first, the
+	// others that open it are its spares.
 	type timed struct {
 		id string
 		d  time.Duration
 	}
 	works := map[zapret.Target][]timed{}
-	for i, m := range zapret.Methods {
-		if len(left) == 0 || ctx.Err() != nil {
-			break
-		}
+	if len(left) > 0 {
 		update(func(p *ZapretPickView) {
-			p.Step = fmt.Sprintf("Метод %d из %d: %s", i+1, len(zapret.Methods), m.Name)
+			p.Step = fmt.Sprintf("Пробую %d методов обхода сразу", len(zapret.Methods))
 		})
-		plans := map[zapret.Target]zapret.Plan{}
-		for _, t := range left {
-			plans[t] = zapret.Plan{Methods: []string{m.ID}}
+		testers := make([]*zapret.Runner, len(zapret.Methods))
+		defer func() {
+			for _, r := range testers {
+				if r != nil {
+					r.Stop()
+				}
+			}
+		}()
+		for i, m := range zapret.Methods {
+			plans := map[zapret.Target]zapret.Plan{}
+			for _, t := range left {
+				plans[t] = zapret.Plan{Methods: []string{m.ID}}
+			}
+			args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Filter: zapret.ProbeOnly(i + 1)})
+			if err != nil {
+				return finish(err)
+			}
+			testers[i] = &zapret.Runner{Exe: filepath.Join(dir, "winws2.exe"), Log: c.Log, Spawn: zapretSpawn}
+			testers[i].Start(args)
 		}
-		args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans})
-		if err != nil {
-			return finish(err)
-		}
-		tester.Start(args)
 		select {
 		case <-ctx.Done():
+			return finish(errors.New("подбор остановлен"))
 		case <-time.After(zapretSettle):
 		}
-		if st := tester.Status(); st.State != zapret.Running {
-			tester.Stop()
-			return finish(fmt.Errorf("winws2 не работает: %s", st.Error))
-		}
-		for t, r := range checkAll(left) {
-			if r.OK && ctx.Err() == nil {
-				works[t] = append(works[t], timed{m.ID, r.Elapsed})
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		var started int
+		var firstErr string
+		for i, m := range zapret.Methods {
+			if st := testers[i].Status(); st.State != zapret.Running {
+				c.Log.Warn("zapret: tester not running", "method", m.ID, "err", st.Error)
+				if firstErr == "" {
+					firstErr = st.Error
+				}
+				update(func(p *ZapretPickView) { p.Done++ })
+				continue
 			}
+			started++
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for t, r := range checkAll(i+1, left) {
+					if r.OK && ctx.Err() == nil {
+						mu.Lock()
+						works[t] = append(works[t], timed{m.ID, r.Elapsed})
+						mu.Unlock()
+					}
+				}
+				testers[i].Stop()
+				update(func(p *ZapretPickView) { p.Done++ })
+			}()
 		}
-		tester.Stop()
-		update(func(p *ZapretPickView) { p.Done = i + 2 })
+		wg.Wait()
+		if started == 0 {
+			return finish(fmt.Errorf("winws2 не работает: %s", firstErr))
+		}
 	}
 	if ctx.Err() != nil {
 		return finish(errors.New("подбор остановлен"))
@@ -690,7 +763,13 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 	results := map[zapret.Target]string{}
 	for _, t := range left {
 		ws := works[t]
-		slices.SortStableFunc(ws, func(a, b timed) int { return cmp.Compare(a.d, b.d) })
+		// The fastest first; equal times keep the library's order.
+		slices.SortStableFunc(ws, func(a, b timed) int {
+			if d := cmp.Compare(a.d, b.d); d != 0 {
+				return d
+			}
+			return cmp.Compare(methodIndex(a.id), methodIndex(b.id))
+		})
 		for _, w := range ws {
 			working[t] = append(working[t], w.id)
 		}

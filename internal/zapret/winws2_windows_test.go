@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -56,19 +57,31 @@ func TestWinws2Runs(t *testing.T) {
 		}
 		return m
 	}
-	cases := map[string]map[zapret.Target]zapret.Plan{}
-	var ids []string
-	for _, m := range zapret.Methods {
-		ids = append(ids, m.ID)
-		cases[m.ID] = all(zapret.Plan{Methods: []string{m.ID}})
+	// As HyRoute runs them: the user's bypass skips the probes' ports, a
+	// pick's tester takes only its slot's.
+	type run struct {
+		plans  map[zapret.Target]zapret.Plan
+		filter string
+		slot   int // a tester's: a probe from its ports goes through it
 	}
-	cases["circular"] = all(zapret.Plan{Methods: ids, Circular: true})
-	cases["youtube only"] = map[zapret.Target]zapret.Plan{zapret.YouTube: {Methods: ids, Circular: true}}
-	for name, plans := range cases {
+	cases := map[string]run{}
+	var ids []string
+	for i, m := range zapret.Methods {
+		ids = append(ids, m.ID)
+		cases[m.ID] = run{all(zapret.Plan{Methods: []string{m.ID}}), zapret.ProbeOnly(i + 1), i + 1}
+	}
+	cases["circular"] = run{all(zapret.Plan{Methods: ids, Circular: true}), zapret.ProbeExclude(), 0}
+	cases["youtube only"] = run{map[zapret.Target]zapret.Plan{zapret.YouTube: {Methods: ids, Circular: true}}, zapret.ProbeExclude(), 0}
+	var mu sync.Mutex
+	opened := 0
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: lists, Plans: plans})
+			args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: lists, Plans: c.plans, Filter: c.filter})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if c.slot > 0 {
+				args = append([]string{"--debug=1"}, args...) // shows the packets it took
 			}
 			var out syncBuffer
 			cmd := exec.Command(filepath.Join(dir, "winws2.exe"), args...)
@@ -83,11 +96,32 @@ func TestWinws2Runs(t *testing.T) {
 				t.Fatalf("winws2 exited (%v):\n%s\n%s", err, zapret.CommandLine(args), out.String())
 			case <-time.After(4 * time.Second):
 			}
+			if c.slot > 0 {
+				// example.com (in the own-sites list) through this method,
+				// from the tester's ports: the whole chain works. A method
+				// may break an unblocked site; all of them would mean a
+				// broken chain (checked below).
+				r := (&zapret.Prober{Slot: c.slot}).Check(context.Background(), []string{"https://example.com/"})
+				t.Logf("example.com through %s: ok %v %v", name, r.OK, r.Failed)
+				// Only the probes' ports reach a tester: it took the probe.
+				if !strings.Contains(out.String(), "dpi desync src=") {
+					t.Errorf("the tester saw no packet of the probe from its ports")
+				}
+				if r.OK {
+					mu.Lock()
+					opened++
+					mu.Unlock()
+				}
+			}
 			cmd.Process.Kill()
 			<-exited
 			t.Logf("%s", out.String())
 		})
 	}
+	if opened == 0 {
+		t.Fatal("example.com opened through no method: the checks or the testers are broken")
+	}
+	t.Logf("example.com opened through %d of %d methods", opened, len(zapret.Methods))
 }
 
 type syncBuffer struct {

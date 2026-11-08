@@ -24,7 +24,10 @@ Wails v2 (https://github.com/wailsapp/wails), compiled into HyRoute.exe
 Go modules compiled into HyRoute.exe (see go.mod for the full list),
 including golang.org/x/net, golang.org/x/sys and golang.org/x/crypto (BSD-3-Clause),
 gopkg.in/yaml.v3 (MIT and Apache-2.0), github.com/labstack/echo (MIT),
-github.com/google/uuid (BSD-3-Clause), github.com/gorilla/websocket
+github.com/google/uuid (BSD-3-Clause), github.com/refraction-networking/utls
+(BSD-3-Clause, the browser-like TLS handshake of the DPI bypass checks) with
+github.com/andybalholm/brotli (MIT) and github.com/klauspost/compress
+(BSD-3-Clause), github.com/gorilla/websocket
 (BSD-2-Clause), github.com/tailscale/wf (BSD-3-Clause, Windows Filtering Platform
 bindings for the kill switch; patched copy in third_party/wf) and
 go4.org/netipx (BSD-3-Clause) and others under
@@ -48,7 +51,11 @@ internal/zapret are adapted from the presets of Zapret 2 GUI
 (https://github.com/TheFirstNoob/Zapret-2-GUI), MIT, Copyright (c) 2026
 TheFirstNoob; the YouTube and Discord domain lists follow the lists of
 zapret-discord-youtube (https://github.com/Flowseal/zapret-discord-youtube),
-MIT, Copyright (c) 2024-2026 Flowseal. The MIT license text is the same as Wails' below, with those names.
+MIT, Copyright (c) 2024-2026 Flowseal. The way the checks run all methods at
+once from separate local port ranges follows nfqws2-keenetic-strategy-selector
+(https://github.com/Omn1z/nfqws2-keenetic-strategy-selector) and blockcheckw
+(https://github.com/rcd27/blockcheckw, MIT); no code of theirs is included.
+The MIT license text is the same as Wails' below, with those names.
 
 Rule databases (geosite.dat, geoip.dat) are not part of HyRoute. They are
 downloaded on use from the sources chosen in the settings and keep the

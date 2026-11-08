@@ -39,6 +39,9 @@ type BuildConfig struct {
 	Lists string
 	// Plans: the targets processed (a target absent is not).
 	Plans map[Target]Plan
+	// Filter narrows the packets winws2 takes (--wf-raw-filter, ANDed with
+	// its own): ProbeExclude for the user's bypass, ProbeOnly for a tester.
+	Filter string
 }
 
 // decoy is the host a hostfakesplit puts in place of the target's.
@@ -98,6 +101,9 @@ func Build(c BuildConfig) ([]string, error) {
 	}
 	for _, name := range []string{"google_tls", "quic_google"} {
 		args = append(args, "--blob="+name+":@"+filepath.Join(c.Dir, "blobs", BlobFiles[name]))
+	}
+	if c.Filter != "" {
+		args = append(args, "--wf-raw-filter="+c.Filter)
 	}
 	args = append(args, "--lua-gc=60")
 

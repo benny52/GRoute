@@ -32,31 +32,50 @@ func (z *zapChild) Kill() error {
 	return nil
 }
 
-// zapFixture: winws2 never really runs; the checks see which method the
-// last started winws2 had.
-func zapFixture(t *testing.T) (*Controller, *[]string) {
+// zapFixture: winws2 never really runs; a check sees the arguments of the
+// winws2 that serves its slot (none for slot 0, the check without a
+// bypass: the user's own winws2 skips the probes).
+func zapFixture(t *testing.T) (*Controller, func(slot int) string) {
 	t.Helper()
 	c, _ := newCtl(t)
 	lists := t.TempDir()
 	c.ZapretLists = lists
 	c.ZapretPrepare = func(context.Context) (string, error) { return t.TempDir(), nil }
 	var mu sync.Mutex
-	var lastArgs []string
+	bySlot := map[int]string{}
 	spawn, settle, check := zapretSpawn, zapretSettle, zapretCheckFunc
 	t.Cleanup(func() { zapretSpawn, zapretSettle, zapretCheckFunc = spawn, settle, check })
 	zapretSettle = time.Millisecond
 	zapretSpawn = func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) {
+		slot := -1 // the user's bypass
+		for i := 1; i < zapret.ProbeSlots; i++ {
+			if slices.Contains(args, "--wf-raw-filter="+zapret.ProbeOnly(i)) {
+				slot = i
+			}
+		}
+		if slot < 0 && !slices.Contains(args, "--wf-raw-filter="+zapret.ProbeExclude()) {
+			t.Errorf("the user's winws2 does not skip the probes: %v", args)
+		}
+		line := strings.Join(args, " ")
 		mu.Lock()
-		lastArgs = slices.Clone(args)
+		bySlot[slot] = line
 		mu.Unlock()
 		// Stopped, it no longer helps the checks.
-		return &zapChild{done: make(chan struct{}), killed: func() { mu.Lock(); lastArgs = nil; mu.Unlock() }}, nil
+		return &zapChild{done: make(chan struct{}), killed: func() {
+			mu.Lock()
+			if bySlot[slot] == line {
+				delete(bySlot, slot)
+			}
+			mu.Unlock()
+		}}, nil
 	}
-	var started []string
-	zapretCheckFunc = func(ctx context.Context, urls []string) zapret.Result {
+	argsFor := func(slot int) string {
 		mu.Lock()
-		line := strings.Join(lastArgs, " ")
-		mu.Unlock()
+		defer mu.Unlock()
+		return bySlot[slot]
+	}
+	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+		line := argsFor(slot)
 		youtube := strings.Contains(urls[0], "youtube")
 		switch {
 		case youtube && strings.Contains(line, "--hostlist="+filepath.Join(lists, zapret.ListYouTube)) && strings.Contains(line, "multidisorder"):
@@ -64,9 +83,13 @@ func zapFixture(t *testing.T) (*Controller, *[]string) {
 		case !youtube && strings.Contains(line, "--hostlist="+filepath.Join(lists, zapret.ListDiscord)) && strings.Contains(line, "tcp_md5"):
 			return zapret.Result{OK: true}
 		}
-		return zapret.Result{Failed: []string{urls[0] + ": нет ответа"}}
+		return failed(zapret.KindTLS)
 	}
-	return c, &started
+	return c, argsFor
+}
+
+func failed(k zapret.Kind) zapret.Result {
+	return zapret.Result{Failed: []zapret.Failure{{Host: "www.youtube.com", Kind: k, Text: "нет ответа"}}}
 }
 
 func waitZapret(t *testing.T, c *Controller, state string) ZapretView {
@@ -137,7 +160,7 @@ func TestZapretSaveRulesAndPick(t *testing.T) {
 
 func TestZapretNotBlocked(t *testing.T) {
 	c, _ := zapFixture(t)
-	zapretCheckFunc = func(context.Context, []string) zapret.Result { return zapret.Result{OK: true} }
+	zapretCheckFunc = func(context.Context, int, []string) zapret.Result { return zapret.Result{OK: true} }
 	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +204,7 @@ func TestZapretFollowsNetwork(t *testing.T) {
 	w := &fakeNet{events: make(chan struct{}, 1)}
 	w.set(home())
 	c.NetWatcher = w
-	zapretCheckFunc = func(context.Context, []string) zapret.Result { return zapret.Result{OK: true} }
+	zapretCheckFunc = func(context.Context, int, []string) zapret.Result { return zapret.Result{OK: true} }
 	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
 		t.Fatal(err)
 	}
@@ -223,31 +246,15 @@ func TestTrimPicked(t *testing.T) {
 // The pick tries every method: the fastest that opens a service goes
 // first, the others that open it come next in winws2's rotation.
 func TestZapretPickFastestFirst(t *testing.T) {
-	c, _ := zapFixture(t)
-	var mu sync.Mutex
-	var last []string
-	spawn := zapretSpawn
-	zapretSpawn = func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) {
-		mu.Lock()
-		last = slices.Clone(args)
-		mu.Unlock()
-		ch, err := spawn(exe, args, env, out)
-		// Stopped, it no longer opens anything.
-		return &forget{Child: ch, kill: func() { mu.Lock(); last = nil; mu.Unlock() }}, err
-	}
-	zapretCheckFunc = func(ctx context.Context, urls []string) zapret.Result {
-		mu.Lock()
-		line := strings.Join(last, " ")
-		mu.Unlock()
-		switch {
-		case !strings.Contains(line, "--lua-desync="):
-			return zapret.Result{Failed: []string{"www.youtube.com: нет ответа"}} // no bypass
+	c, argsFor := zapFixture(t)
+	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+		switch line := argsFor(slot); {
 		case strings.Contains(line, "multidisorder"):
 			return zapret.Result{OK: true, Elapsed: 900 * time.Millisecond}
 		case strings.Contains(line, "fakedsplit"):
 			return zapret.Result{OK: true, Elapsed: 200 * time.Millisecond}
 		}
-		return zapret.Result{Failed: []string{"www.youtube.com: нет ответа"}}
+		return failed(zapret.KindFreeze)
 	}
 	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
 		t.Fatal(err)
@@ -269,9 +276,95 @@ func TestZapretPickFastestFirst(t *testing.T) {
 	}
 }
 
-type forget struct {
-	hysteria.Child
-	kill func()
+// The pick runs next to the user's bypass: it is not stopped, and the
+// diagnosis says how each service is blocked. Blocked by address, a
+// service can go through the VPN instead.
+func TestZapretPickDiagnosisAndVPN(t *testing.T) {
+	c, argsFor := zapFixture(t)
+	var mu sync.Mutex
+	stopped := false
+	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+		if argsFor(-1) == "" {
+			mu.Lock()
+			stopped = true // the user's bypass is not running mid-pick
+			mu.Unlock()
+		}
+		if strings.Contains(urls[0], "youtube") {
+			if strings.Contains(argsFor(slot), "multidisorder") {
+				return zapret.Result{OK: true}
+			}
+			return failed(zapret.KindFreeze)
+		}
+		return failed(zapret.KindIP) // Discord: by address, nothing opens it
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube, zapret.Discord}}); err != nil {
+		t.Fatal(err)
+	}
+	waitZapret(t, c, zapret.Running)
+	before := argsFor(-1)
+	v, err := c.ZapretPick()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if stopped {
+		t.Fatal("the pick stopped the user's bypass")
+	}
+	mu.Unlock()
+	yd, dd := v.Pick.Diagnosis[zapret.YouTube], v.Pick.Diagnosis[zapret.Discord]
+	if yd.Kind != zapret.KindFreeze || !yd.Bypass || dd.Kind != zapret.KindIP || dd.Bypass || dd.Text == "" {
+		t.Fatalf("%+v", v.Pick.Diagnosis)
+	}
+	if v.Pick.Results[zapret.YouTube] != "fake-disorder" || v.Pick.Results[zapret.Discord] != "" {
+		t.Fatalf("%+v", v.Pick.Results)
+	}
+	if argsFor(-1) == before {
+		t.Fatal("the bypass did not take the picked method")
+	}
+	// Discord through the VPN: its rules tunnel, its profiles leave winws2.
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube, zapret.Discord},
+		Methods: map[zapret.Target]string{zapret.Discord: zapret.VPN}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range c.Settings().Rules {
+		if strings.HasPrefix(r.Name, ZapretRulePrefix+"Discord") != (r.Action == rules.Tunnel) && isZapretRule(r) {
+			t.Fatalf("%+v", r)
+		}
+	}
+	v = waitZapret(t, c, zapret.Running)
+	if strings.Contains(v.CommandLine, "discord") || !strings.Contains(v.Targets[1].Using, "VPN") {
+		t.Fatalf("%s\n%+v", v.CommandLine, v.Targets[1])
+	}
 }
 
-func (f *forget) Kill() error { f.kill(); return f.Child.Kill() }
+// A service sent through the VPN is not picked for.
+func TestZapretPickSkipsVPN(t *testing.T) {
+	c, _ := zapFixture(t)
+	var mu sync.Mutex
+	var checked []string
+	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+		mu.Lock()
+		checked = append(checked, urls[0])
+		mu.Unlock()
+		return zapret.Result{OK: true}
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube, zapret.Discord},
+		Methods: map[zapret.Target]string{zapret.Discord: zapret.VPN}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ZapretPick(); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range checked {
+		if strings.Contains(u, "discord") {
+			t.Fatalf("checked %s", u)
+		}
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.Discord},
+		Methods: map[zapret.Target]string{zapret.Discord: zapret.VPN}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ZapretPick(); err == nil {
+		t.Fatal("a pick with everything through the VPN")
+	}
+}
