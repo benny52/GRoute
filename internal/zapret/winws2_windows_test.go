@@ -31,7 +31,14 @@ func TestWinws2Runs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	staged := t.TempDir()
+	// Not t.TempDir: the WinDivert driver loaded from this folder keeps
+	// WinDivert64.sys locked until Windows unloads it, so the folder is
+	// removed best-effort.
+	staged, err := os.MkdirTemp("", "hyroute-zapret-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(staged) })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	if _, err := runtimefiles.Stage(t.TempDir(), staged, files, runtimefiles.HTTPGetter(ctx, http.DefaultClient, "HyRoute-test")); err != nil {
