@@ -60,6 +60,8 @@ const (
 	// VPN: the target goes through HyRoute's main server instead (a
 	// bypass cannot open what is blocked by address); the user's choice only.
 	VPN = "vpn"
+	// ViaRules: a target through the VPN follows the user's rules.
+	ViaRules = "rules"
 )
 
 // Method is a desync recipe for TLS (and HTTP) over TCP: the --lua-desync
@@ -155,6 +157,10 @@ type Settings struct {
 	Sites []string `json:"sites,omitempty"`
 	// Methods: a method fixed by the user per target (absent = Auto).
 	Methods map[Target]string `json:"methods,omitempty"`
+	// Via: where a target set to VPN goes. Absent: the main server (as
+	// before 1.3.23); ViaRules: by the user's own rules (the bypass keeps
+	// no rule for it); else a server or group ID.
+	Via map[Target]string `json:"via,omitempty"`
 	// Picked: what auto-pick found, per network (NetKey).
 	Picked map[string]Picked `json:"picked,omitempty"`
 }
@@ -199,6 +205,14 @@ func (s *Settings) Normalize() {
 		if !known(m) && m != None && m != VPN || !slices.Contains(Targets, t) {
 			delete(s.Methods, t)
 		}
+	}
+	for t, v := range s.Via {
+		if s.Methods[t] != VPN || v == "" || len(v) > 128 {
+			delete(s.Via, t)
+		}
+	}
+	if len(s.Via) == 0 {
+		s.Via = nil
 	}
 	// Methods a newer or older HyRoute picked that this one does not know.
 	for k, pk := range s.Picked {

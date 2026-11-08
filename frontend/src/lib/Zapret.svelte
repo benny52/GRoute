@@ -6,12 +6,14 @@
   import { api, errText, onEvent, type ZapretTarget, type ZapretView } from '../api';
   import { ui, hide } from '../state.svelte';
   import Icon from './Icon.svelte';
+  import ZapretVPN from './ZapretVPN.svelte';
 
   let { go }: { go: (page: string) => void } = $props();
 
   let view = $state<ZapretView | null>(null);
   let error = $state('');
   let saved = $state('');
+  let vpnFor = $state<ZapretTarget | null>(null); // «Пустить … через VPN»: the choice is open
   let saving = $state(false);
   let picking = $state(false);
   // The form (what is saved).
@@ -176,6 +178,7 @@
               {#if t.on && enabled}<span class="small using">Сейчас: {t.using}</span>{/if}
               {#if t.on && enabled && viaVPNNow(t.target) && !dirty}
                 <button class="link small" onclick={(e) => { e.preventDefault(); viaVPN(t.target, false); }}>Вернуть обход</button>
+                <button class="link small" onclick={(e) => { e.preventDefault(); vpnFor = t.target; }}>Сервер…</button>
               {/if}
             </span>
           </label>
@@ -273,7 +276,7 @@
                       {#if viaVPNNow(t.target)}
                         <span class="small using">{t.name} уже идёт через VPN.</span>
                       {:else if view.hasServer}
-                        <button class="primary small-btn" onclick={() => viaVPN(t.target, true)} disabled={dirty}>Пустить {t.name} через VPN</button>
+                        <button class="primary small-btn" onclick={() => (vpnFor = t.target)} disabled={dirty}>Пустить {t.name} через VPN</button>
                       {:else}
                         <span class="small muted">Добавьте сервер VPN, и HyRoute сможет пустить {t.name} через него.</span>
                       {/if}
@@ -308,6 +311,20 @@
     {/if}
   {/if}
 </div>
+
+{#if vpnFor}
+  <ZapretVPN
+    target={vpnFor}
+    onclose={() => (vpnFor = null)}
+    ondone={async (msg) => {
+      vpnFor = null;
+      error = '';
+      loaded = false;
+      await refresh();
+      saved = msg;
+    }}
+  />
+{/if}
 
 <style>
   .page { display: grid; gap: 14px; }

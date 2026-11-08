@@ -19,6 +19,7 @@ import (
 	"github.com/lardan099/hyroute/internal/settings"
 	"github.com/lardan099/hyroute/internal/store"
 	"github.com/lardan099/hyroute/internal/uirpc"
+	"github.com/lardan099/hyroute/internal/zapret"
 )
 
 // The page's calls that are the same on Windows and macOS: thin wrappers
@@ -148,6 +149,12 @@ func (g *GUI) ZapretInfo() app.ZapretView { return g.ctl.ZapretInfo() }
 
 // SaveZapret saves the page and applies it (winws2 and the rules).
 func (g *GUI) SaveZapret(in app.ZapretInput) error { return g.ctl.SaveZapret(in) }
+
+// ZapretRoute: where the user's rules send a service (before «через VPN»).
+func (g *GUI) ZapretRoute(t zapret.Target) (app.ZapretRoute, error) { return g.ctl.ZapretRoute(t) }
+
+// ZapretViaVPN sends a service through the VPN as chosen.
+func (g *GUI) ZapretViaVPN(in app.ZapretViaInput) error { return g.ctl.ZapretViaVPN(in) }
 
 // ZapretPick finds working methods on this network (takes up to a few
 // minutes; the page reads the progress with ZapretInfo).

@@ -1882,6 +1882,7 @@ export interface ZapretSettings {
   targets: ZapretTarget[];
   sites?: string[];
   methods?: Partial<Record<ZapretTarget, string>>; // '' / absent = automatic, 'none', 'vpn' or a method
+  via?: Partial<Record<ZapretTarget, string>>; // with 'vpn': 'rules', a server/group ID; absent = the main server
 }
 
 export interface ZapretStatus {
@@ -1947,4 +1948,34 @@ interface GUI {
   SaveZapret(i: ZapretInput): Promise<void>;
   ZapretPick(): Promise<ZapretView>;
   ZapretPickCancel(): Promise<void>;
+  ZapretRoute(t: ZapretTarget): Promise<ZapretRoute>;
+  ZapretViaVPN(i: ZapretViaInput): Promise<void>;
+}
+
+// A rule of the user's that decides some of a service's sites ('' id:
+// «Всё остальное»); own: about this service alone.
+export interface ZapretRouteRule {
+  id: string;
+  name: string;
+  route: string;
+  tunnel: boolean;
+  profile: string;
+  sites: string[];
+  own: boolean;
+}
+
+export interface ZapretRoute {
+  target: ZapretTarget;
+  name: string;
+  by: ZapretRouteRule[];
+  tunnel: boolean; // every site goes through the VPN by these rules
+  via: string;
+}
+
+// via: 'rules' (the user's rules), '' (the main server) or a server/group
+// ID; editRule: the user's own rule to route through it instead.
+export interface ZapretViaInput {
+  target: ZapretTarget;
+  via: string;
+  editRule: string;
 }

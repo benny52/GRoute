@@ -447,3 +447,92 @@ func TestZapretSiteAddresses(t *testing.T) {
 		t.Fatal("a pick with addresses only")
 	}
 }
+
+// «Пустить через VPN»: what the user's rules do with the service decides
+// the choice; the user's own rule for it is changed, not doubled.
+func TestZapretViaVPN(t *testing.T) {
+	c, _ := zapFixture(t)
+	if _, err := c.ImportURIs("hysteria2://p1@a.example:443#NL\nhysteria2://p2@b.example:443#DE"); err != nil {
+		t.Fatal(err)
+	}
+	var nl, de string
+	for _, p := range c.Profiles() {
+		if p.Name == "NL" {
+			nl = p.ID
+		} else {
+			de = p.ID
+		}
+	}
+	st := c.Settings()
+	st.Rules = []rules.Rule{
+		{ID: "yt", Name: "YouTube", Domains: []string{"geosite:youtube", ".youtube.com", ".googlevideo.com"}, Action: rules.Tunnel, Profile: nl},
+		{ID: "mix", Name: "Разное", Domains: []string{".discord.com", ".example.org"}, Action: rules.Tunnel, Profile: de},
+	}
+	st.DefaultAction = rules.Direct
+	if _, err := c.SaveSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube, zapret.Discord}}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := c.ZapretRoute(zapret.YouTube)
+	if err != nil || len(r.By) == 0 || r.By[0].ID != "yt" || !r.By[0].Own || r.By[0].Route != "через «NL»" {
+		t.Fatalf("%+v %v", r, err)
+	}
+	// youtube.com goes by «YouTube», the rest of the list by default.
+	if r.Tunnel || r.By[len(r.By)-1].ID != "" || r.By[len(r.By)-1].Name != "Всё остальное" {
+		t.Fatalf("%+v", r)
+	}
+	d, _ := c.ZapretRoute(zapret.Discord)
+	if d.By[0].ID != "mix" || d.By[0].Own {
+		t.Fatalf("not its own: %+v", d.By)
+	}
+
+	// Through DE, changing the user's «YouTube»: no rule of the bypass's.
+	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.YouTube, Via: de, EditRule: "yt"}); err != nil {
+		t.Fatal(err)
+	}
+	rs := c.Settings().Rules
+	names := func(rs []rules.Rule) string {
+		var out []string
+		for _, r := range rs {
+			out = append(out, r.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	if names(rs) != "Обход DPI: Discord,Обход DPI: Discord (голос),YouTube,Разное" || rs[2].Profile != de {
+		t.Fatalf("%s %+v", names(rs), rs[2])
+	}
+	if v := c.ZapretInfo(); v.Settings.Via[zapret.YouTube] != zapret.ViaRules || v.Targets[0].Using != "без обхода, по вашим правилам" {
+		t.Fatalf("%+v %q", v.Settings.Via, v.Targets[0].Using)
+	}
+	// A rule that is not only about the service is never changed.
+	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.Discord, Via: nl, EditRule: "mix"}); err == nil {
+		t.Fatal("changed a shared rule")
+	}
+	// Discord through NL by a rule of the bypass's: one rule, with it.
+	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.Discord, Via: nl}); err != nil {
+		t.Fatal(err)
+	}
+	rs = c.Settings().Rules
+	if rs[0].Name != "Обход DPI: Discord" || rs[0].Action != rules.Tunnel || rs[0].Profile != nl || rs[1].Profile != nl || len(rs) != 4 {
+		t.Fatalf("%+v", rs[:2])
+	}
+	if v := c.ZapretInfo(); v.Targets[1].Using != "через «NL», без обхода" {
+		t.Fatalf("%q", v.Targets[1].Using)
+	}
+	// Back to the bypass: direct again, the choice forgotten.
+	in := ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube, zapret.Discord}, Methods: map[zapret.Target]string{zapret.YouTube: zapret.VPN}}
+	if err := c.SaveZapret(in); err != nil {
+		t.Fatal(err)
+	}
+	if v := c.ZapretInfo(); v.Settings.Via[zapret.Discord] != "" || v.Settings.Via[zapret.YouTube] != zapret.ViaRules {
+		t.Fatalf("%+v", v.Settings.Via)
+	}
+	if rs = c.Settings().Rules; rs[0].Action != rules.Direct || rs[0].Profile != "" {
+		t.Fatalf("%+v", rs[0])
+	}
+	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.YouTube, Via: "nope"}); err == nil {
+		t.Fatal("an unknown server")
+	}
+}
