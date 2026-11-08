@@ -134,6 +134,9 @@ type Settings struct {
 type Picked struct {
 	At      time.Time         `json:"at"`
 	Methods map[Target]string `json:"methods"` // a method ID or None
+	// Working: every method that opened the target, fastest first (the
+	// first is Methods[t]). The circular plan tries them before the rest.
+	Working map[Target][]string `json:"working,omitempty"`
 }
 
 // Limits.
@@ -162,10 +165,23 @@ func (s *Settings) Normalize() {
 		}
 	}
 	s.Sites = sites
+	known := func(m string) bool { _, ok := FindMethod(m); return ok }
 	for t, m := range s.Methods {
-		if _, ok := FindMethod(m); !ok && m != None || !slices.Contains(Targets, t) {
+		if !known(m) && m != None || !slices.Contains(Targets, t) {
 			delete(s.Methods, t)
 		}
+	}
+	// Methods a newer or older HyRoute picked that this one does not know.
+	for k, pk := range s.Picked {
+		for t, m := range pk.Methods {
+			if !known(m) && m != None {
+				delete(pk.Methods, t)
+			}
+		}
+		for t, ms := range pk.Working {
+			pk.Working[t] = slices.DeleteFunc(ms, func(m string) bool { return !known(m) })
+		}
+		s.Picked[k] = pk
 	}
 }
 
@@ -235,19 +251,23 @@ func (s Settings) PlanFor(t Target, netKey string) (p Plan, ok bool) {
 		}
 		return Plan{Methods: []string{m}}, true
 	}
-	first := ""
-	if pk, ok := s.Picked[netKey]; ok {
-		first = pk.Methods[t]
-	}
+	pk := s.Picked[netKey]
+	first := pk.Methods[t]
 	if first == None {
 		return Plan{}, false
 	}
+	// What opened the target here first (fastest first), then the rest.
 	p.Circular = true
-	if first != "" {
+	if first != "" && !slices.Contains(pk.Working[t], first) {
 		p.Methods = append(p.Methods, first)
 	}
+	for _, m := range pk.Working[t] {
+		if !slices.Contains(p.Methods, m) {
+			p.Methods = append(p.Methods, m)
+		}
+	}
 	for _, m := range Methods {
-		if m.ID != first {
+		if !slices.Contains(p.Methods, m.ID) {
 			p.Methods = append(p.Methods, m.ID)
 		}
 	}

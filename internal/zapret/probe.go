@@ -13,16 +13,19 @@ import (
 	"time"
 )
 
-// Checks are the addresses a target is checked with: any HTTP answer
-// means the TLS handshake and the request went through (DPI blocks by
-// stalling or resetting them, before any answer). googlevideo.com is where
-// YouTube's video comes from, and what DPI slows down or cuts.
+// Checks are the addresses a target is checked with. DPI blocks in two
+// ways: it stalls or resets the TLS handshake, or (TSPU) lets it and the
+// first ~16 KB through and then freezes the connection. So each target has
+// a page well over that (the main pages) and the check reads up to
+// maxBody of every answer; googlevideo.com, where the video comes from,
+// only serves small answers without a signed link but shows a blocked
+// handshake.
 func Checks(t Target, sites []string) []string {
 	switch t {
 	case YouTube:
-		return []string{"https://www.youtube.com/generate_204", "https://redirector.googlevideo.com/report_mapping", "https://i.ytimg.com/generate_204"}
+		return []string{"https://www.youtube.com/", "https://redirector.googlevideo.com/report_mapping", "https://i.ytimg.com/generate_204"}
 	case Discord:
-		return []string{"https://discord.com/api/v10/gateway", "https://gateway.discord.gg/", "https://cdn.discordapp.com/"}
+		return []string{"https://discord.com/", "https://gateway.discord.gg/", "https://cdn.discordapp.com/embed/avatars/0.png"}
 	}
 	var out []string
 	for _, s := range sites {
@@ -37,10 +40,9 @@ func Checks(t Target, sites []string) []string {
 // CheckTimeout bounds one address's check.
 var CheckTimeout = 7 * time.Second
 
-// minBody: a DPI that lets the handshake through may still cut the
-// connection after the first bytes (TSPU slows googlevideo down to a
-// trickle): the check reads up to this much of the answer.
-const minBody = 16 << 10
+// maxBody: how much of an answer the check reads. Past the ~16 KB after
+// which TSPU freezes a connection; a shorter answer is read to its end.
+const maxBody = 64 << 10
 
 // Result of checking a target.
 type Result struct {
@@ -98,7 +100,7 @@ func checkOne(ctx context.Context, client *http.Client, url string) error {
 		return shortErr(err)
 	}
 	defer resp.Body.Close()
-	if _, err := io.CopyN(io.Discard, resp.Body, minBody); err != nil && !errors.Is(err, io.EOF) {
+	if _, err := io.CopyN(io.Discard, resp.Body, maxBody); err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("ответ оборвался: %w", shortErr(err))
 	}
 	return nil

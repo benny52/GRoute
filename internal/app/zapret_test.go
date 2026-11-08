@@ -219,3 +219,49 @@ func TestTrimPicked(t *testing.T) {
 		t.Fatalf("%d %v", len(m), ok)
 	}
 }
+
+// The pick tries every method: the fastest that opens a service goes
+// first, the others that open it come next in winws2's rotation.
+func TestZapretPickFastestFirst(t *testing.T) {
+	c, _ := zapFixture(t)
+	var mu sync.Mutex
+	var last []string
+	spawn := zapretSpawn
+	zapretSpawn = func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) {
+		mu.Lock()
+		last = slices.Clone(args)
+		mu.Unlock()
+		return spawn(exe, args, env, out)
+	}
+	zapretCheckFunc = func(ctx context.Context, urls []string) zapret.Result {
+		mu.Lock()
+		line := strings.Join(last, " ")
+		mu.Unlock()
+		switch {
+		case !strings.Contains(line, "--lua-desync="):
+			return zapret.Result{Failed: []string{"www.youtube.com: нет ответа"}} // no bypass
+		case strings.Contains(line, "multidisorder"):
+			return zapret.Result{OK: true, Elapsed: 900 * time.Millisecond}
+		case strings.Contains(line, "fakedsplit"):
+			return zapret.Result{OK: true, Elapsed: 200 * time.Millisecond}
+		}
+		return zapret.Result{Failed: []string{"www.youtube.com: нет ответа"}}
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := c.ZapretPick()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Pick.Results[zapret.YouTube] != "fakedsplit" || !slices.Equal(v.Pick.Working[zapret.YouTube], []string{"fakedsplit", "fake-disorder"}) {
+		t.Fatalf("%+v", v.Pick)
+	}
+	if !strings.Contains(v.CommandLine, "fakedsplit:blob=google_tls:pos=2:strategy=1") || !strings.Contains(v.CommandLine, "multidisorder:pos=1,midsld:strategy=2") {
+		t.Fatalf("%s", v.CommandLine)
+	}
+	z, _ := c.Store.LoadZapret()
+	if !slices.Equal(z.Picked[""].Working[zapret.YouTube], []string{"fakedsplit", "fake-disorder"}) {
+		t.Fatalf("%+v", z.Picked)
+	}
+}

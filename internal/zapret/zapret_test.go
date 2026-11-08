@@ -32,6 +32,21 @@ func TestPlanFor(t *testing.T) {
 	if p.Methods[0] != Methods[0].ID {
 		t.Fatalf("no pick: %+v", p)
 	}
+	// Every method that worked here, fastest first, then the rest.
+	pk := s.Picked["home"]
+	pk.Working = map[Target][]string{YouTube: {"seqovl", "fake", "fakedsplit"}}
+	s.Picked["home"] = pk
+	p, _ = s.PlanFor(YouTube, "home")
+	if !slices.Equal(p.Methods[:3], []string{"seqovl", "fake", "fakedsplit"}) || len(p.Methods) != len(Methods) {
+		t.Fatalf("working first: %+v", p)
+	}
+	// An ID this build does not know is dropped on load.
+	pk.Methods[Discord] = "gone"
+	pk.Working[Discord] = []string{"gone", "fake"}
+	s.Normalize()
+	if _, ok := s.Picked["home"].Methods[Discord]; ok || !slices.Equal(s.Picked["home"].Working[Discord], []string{"fake"}) {
+		t.Fatalf("%+v", s.Picked["home"])
+	}
 	s.Picked["home"].Methods[YouTube] = None
 	if _, ok := s.PlanFor(YouTube, "home"); ok {
 		t.Fatal("not blocked here, still a plan")
@@ -70,7 +85,10 @@ func TestBuild(t *testing.T) {
 	line := strings.Join(args, " ")
 	for _, want := range []string{
 		"--wf-tcp-out=80,443," + discordMediaTCP, "--wf-udp-out=443," + discordVoiceUDP, "--wf-tcp-in=80,443",
-		"zapret-auto.lua", "--blob=google_tls:@", "--filter-l7=discord,stun", "--lua-desync=circular:fails=3:retrans=2",
+		"zapret-auto.lua", "--blob=google_tls:@", "--filter-l7=discord,stun",
+		// circular before the payload filter, seeing every packet; the
+		// methods only the ClientHello.
+		"--in-range=-s5556 --lua-desync=circular:fails=3:retrans=2:nld=2 --in-range=x --payload=tls_client_hello --lua-desync=",
 		"hostfakesplit:host=discord.com:strategy=8", "--lua-desync=fake:blob=google_tls:tcp_ts=-1000:repeats=7 ",
 	} {
 		if !strings.Contains(line+" ", want) {
@@ -88,6 +106,12 @@ func TestBuild(t *testing.T) {
 	}
 	if _, err := Build(BuildConfig{Dir: dir, Lists: lists}); err == nil {
 		t.Fatal("no targets built")
+	}
+	// Own sites count failures per host: nld=2 of example.co.uk is co.uk.
+	sp, _ := Settings{Enabled: true, Targets: []Target{Sites}}.PlanFor(Sites, "")
+	sargs, err := Build(BuildConfig{Dir: dir, Lists: lists, Plans: map[Target]Plan{Sites: sp}})
+	if sl := strings.Join(sargs, " "); err != nil || strings.Contains(sl, "nld") || !strings.Contains(sl, "circular:fails=3:retrans=2 --in-range=x") {
+		t.Fatalf("%v %s", err, sl)
 	}
 	cl := CommandLine(args)
 	if strings.Contains(cl, "data") || !strings.Contains(cl, "--blob=google_tls:@tls_clienthello_www_google_com.bin") {

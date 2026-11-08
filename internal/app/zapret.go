@@ -1,10 +1,12 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/netip"
 	"path/filepath"
 	"slices"
@@ -103,8 +105,10 @@ type ZapretPickView struct {
 	Done    int                      `json:"done"`
 	Total   int                      `json:"total"`
 	Results map[zapret.Target]string `json:"results"` // a method ID, "none", or "" (none worked)
-	Notes   map[zapret.Target]string `json:"notes,omitempty"`
-	Error   string                   `json:"error,omitempty"`
+	// Working: every method that opened the target, fastest first.
+	Working map[zapret.Target][]string `json:"working,omitempty"`
+	Notes   map[zapret.Target]string   `json:"notes,omitempty"`
+	Error   string                     `json:"error,omitempty"`
 }
 
 // ZapretInput is what the page saves.
@@ -441,6 +445,7 @@ func (c *Controller) pickState() (pick *ZapretPickView, busy string, shown *Zapr
 		cp := *c.zapretPick
 		cp.Results = cloneMap(c.zapretPick.Results)
 		cp.Notes = cloneMap(c.zapretPick.Notes)
+		cp.Working = cloneMap(c.zapretPick.Working)
 		pick = &cp
 	}
 	return pick, c.zapretBusy, c.zapretShown
@@ -630,15 +635,22 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 	})
 	for t, r := range checkAll(left) {
 		if r.OK {
-			pick.Results[t] = zapret.None
+			update(func(p *ZapretPickView) { p.Results[t] = zapret.None })
 			left = slices.DeleteFunc(left, func(x zapret.Target) bool { return x == t })
 		} else if len(r.Failed) > 0 {
 			update(func(p *ZapretPickView) { p.Notes[t] = "без обхода: " + r.Failed[0] })
 		}
 	}
 	update(func(p *ZapretPickView) { p.Done = 1 })
+	// Every method on everything still blocked: the fastest that opens a
+	// target goes first, the others that open it are its spares.
 	tester := &zapret.Runner{Exe: filepath.Join(dir, "winws2.exe"), Log: c.Log, Spawn: zapretSpawn}
 	defer tester.Stop()
+	type timed struct {
+		id string
+		d  time.Duration
+	}
+	works := map[zapret.Target][]timed{}
 	for i, m := range zapret.Methods {
 		if len(left) == 0 || ctx.Err() != nil {
 			break
@@ -664,9 +676,8 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 			return finish(fmt.Errorf("winws2 не работает: %s", st.Error))
 		}
 		for t, r := range checkAll(left) {
-			if r.OK {
-				pick.Results[t] = m.ID
-				left = slices.DeleteFunc(left, func(x zapret.Target) bool { return x == t })
+			if r.OK && ctx.Err() == nil {
+				works[t] = append(works[t], timed{m.ID, r.Elapsed})
 			}
 		}
 		tester.Stop()
@@ -675,21 +686,40 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 	if ctx.Err() != nil {
 		return finish(errors.New("подбор остановлен"))
 	}
+	working := map[zapret.Target][]string{}
+	results := map[zapret.Target]string{}
 	for _, t := range left {
-		pick.Results[t] = ""
+		ws := works[t]
+		slices.SortStableFunc(ws, func(a, b timed) int { return cmp.Compare(a.d, b.d) })
+		for _, w := range ws {
+			working[t] = append(working[t], w.id)
+		}
+		results[t] = "" // none worked
+		if len(ws) > 0 {
+			results[t] = ws[0].id
+		}
 	}
-	// Kept for this network: what opens, and «not blocked».
+	update(func(p *ZapretPickView) {
+		maps.Copy(p.Results, results)
+		p.Working = working
+	})
+	// Kept for this network: what opens, and «not blocked». A new map: the
+	// page may be reading the old one.
+	c.pickMu.Lock()
 	found := map[zapret.Target]string{}
-	for t, m := range pick.Results {
+	for t, m := range c.zapretPick.Results {
 		if m != "" {
 			found[t] = m
 		}
 	}
-	if c.zapretCfg.Picked == nil {
-		c.zapretCfg.Picked = map[string]zapret.Picked{}
+	c.pickMu.Unlock()
+	picked := maps.Clone(c.zapretCfg.Picked)
+	if picked == nil {
+		picked = map[string]zapret.Picked{}
 	}
-	c.zapretCfg.Picked[key] = zapret.Picked{At: time.Now(), Methods: found}
-	trimPicked(c.zapretCfg.Picked)
+	picked[key] = zapret.Picked{At: time.Now(), Methods: found, Working: working}
+	trimPicked(picked)
+	c.zapretCfg.Picked = picked
 	if err := c.Store.SaveZapret(c.zapretCfg); err != nil {
 		return finish(err)
 	}

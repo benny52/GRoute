@@ -112,8 +112,14 @@
 
   const running = $derived(view?.status.state === 'running');
   const pickNow = $derived(view?.pick?.running ? view.pick : null);
-  const resultText = (m: string | undefined) =>
-    m === 'none' ? 'не блокируется — обход не нужен' : m ? `открывается: «${view?.methods.find((x) => x.id === m)?.name ?? m}»` : 'ни один метод не открыл — работает автоматический перебор';
+  function resultText(t: ZapretTarget): string {
+    const m = view?.pick?.results[t];
+    if (m === 'none') return 'не блокируется — обход не нужен';
+    if (!m) return 'ни один метод не открыл — работает автоматический перебор';
+    const spare = (view?.pick?.working?.[t]?.length ?? 1) - 1;
+    const name = view?.methods.find((x) => x.id === m)?.name ?? m;
+    return `быстрее всех открывает «${name}»` + (spare > 0 ? `; если перестанет, есть ещё ${spare} ${spare === 1 ? 'рабочий метод' : spare < 5 ? 'рабочих метода' : 'рабочих методов'}` : '');
+  }
 </script>
 
 <div class="page">
@@ -196,7 +202,7 @@
         <h2>Подобрать метод</h2>
         <p class="muted small">
           У каждого провайдера работают свои методы. HyRoute сам проверит, открываются ли выбранные сервисы без обхода и с каждым методом, и запомнит
-          подходящие для этой сети{view.network ? ` («${hide(view.network)}»)` : ''}. Займёт до пары минут; на это время обход выключается.
+          подходящие для этой сети{view.network ? ` («${hide(view.network)}»)` : ''}. HyRoute пробует все методы и ставит самый быстрый первым, а остальные рабочие — запасными. Займёт около минуты; на это время обход выключается.
         </p>
         {#if pickNow}
           <div class="progress"><div class="bar" style="width: {Math.round((100 * pickNow.done) / Math.max(1, pickNow.total))}%"></div></div>
@@ -215,7 +221,7 @@
             <ul class="results">
               {#each view.targets.filter((t) => t.target in (view?.pick?.results ?? {})) as t (t.target)}
                 <li>
-                  <b>{t.name}</b>: {resultText(view.pick.results[t.target])}
+                  <b>{t.name}</b>: {resultText(t.target)}
                   {#if !view.pick.results[t.target] && view.pick.notes?.[t.target]}<div class="muted small">{hide(view.pick.notes[t.target])}</div>{/if}
                 </li>
               {/each}

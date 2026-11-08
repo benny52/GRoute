@@ -142,8 +142,17 @@ func tlsProfile(comment string, t Target, ports, l7, hostlist, exclude string, p
 		payload += ",http_req"
 	}
 	if p.Circular && len(p.Methods) > 1 {
-		// The detector needs the first answers too.
-		out = append(out, "--out-range=-s34228", "--in-range=-s5556", payload, "--lua-desync=circular:fails=3:retrans=2")
+		// As in zapret2's manual: circular sees every packet of the first
+		// bytes both ways (a --payload filter before it would hide the
+		// DPI's RST and the answers that reset its failure count), the
+		// methods only the ClientHello. nld=2: one count per domain
+		// (googlevideo.com), not per one of its hundreds of servers; own
+		// sites keep one per host (nld=2 of example.co.uk is co.uk).
+		circular := "--lua-desync=circular:fails=3:retrans=2"
+		if t != Sites {
+			circular += ":nld=2"
+		}
+		out = append(out, "--out-range=-s34228", "--in-range=-s5556", circular, "--in-range=x", payload)
 		for n, id := range p.Methods {
 			m, _ := FindMethod(id)
 			for _, inst := range m.tcp {

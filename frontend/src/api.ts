@@ -1891,6 +1891,7 @@ export interface ZapretPick {
   done: number;
   total: number;
   results: Partial<Record<ZapretTarget, string>>;
+  working?: Partial<Record<ZapretTarget, string[]>>; // every method that opened it, fastest first
   notes?: Partial<Record<ZapretTarget, string>>;
   error?: string;
 }
