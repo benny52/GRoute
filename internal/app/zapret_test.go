@@ -424,3 +424,26 @@ func TestZapretGeneratorBroad(t *testing.T) {
 		t.Fatalf("%+v", v.Targets)
 	}
 }
+
+// Own sites by address: they get the rule, and an address that is local or
+// too wide is refused with its name, not dropped.
+func TestZapretSiteAddresses(t *testing.T) {
+	c, _ := zapFixture(t)
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.Sites}, Sites: []string{"example.org", "192.168.1.0/24"}}); err == nil || !strings.Contains(err.Error(), "192.168.1.0/24") {
+		t.Fatalf("%v", err)
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.Sites}, Sites: []string{"162.159.128.1/17", "1.2.3.4"}}); err != nil {
+		t.Fatal(err)
+	}
+	if rs := c.Settings().Rules; rs[0].Name != "Обход DPI: Свои сайты" || !slices.Equal(rs[0].Domains, []string{"162.159.128.0/17", "1.2.3.4"}) || rs[0].Action != rules.Direct {
+		t.Fatalf("%+v", rs[0])
+	}
+	v := waitZapret(t, c, zapret.Running)
+	if !strings.Contains(v.CommandLine, "--ipset=sites-ip.txt") {
+		t.Fatalf("%s", v.CommandLine)
+	}
+	// Nothing to pick by: addresses only.
+	if _, err := c.ZapretPick(); err == nil {
+		t.Fatal("a pick with addresses only")
+	}
+}

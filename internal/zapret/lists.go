@@ -67,12 +67,13 @@ func WriteLists(dir string, sites []string, servers []netip.Addr) error {
 	files := map[string][]string{
 		ListYouTube:  youTubeDomains,
 		ListDiscord:  append(slices.Clone(discordDomains), discordECH...),
-		ListSites:    sites,
+		ListSites:    SiteNames(sites),
+		ListSitesNet: SiteNets(sites),
 		ListExcluded: ips,
 	}
 	for name, lines := range files {
 		body := []byte("# HyRoute: файл пересоздаётся\n" + strings.Join(lines, "\n") + "\n")
-		if len(lines) == 0 && name != ListExcluded {
+		if len(lines) == 0 && name != ListExcluded && name != ListSitesNet {
 			// An empty hostlist would make its profile match every host.
 			body = []byte("# HyRoute: пусто\nexample.invalid\n")
 		}

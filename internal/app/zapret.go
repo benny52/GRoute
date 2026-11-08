@@ -319,7 +319,7 @@ func (c *Controller) zapretApplyLocked() {
 		run.Stop()
 		return
 	}
-	args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Filter: zapret.ProbeExclude()})
+	args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Sites: cfg.Sites, Filter: zapret.ProbeExclude()})
 	if err != nil {
 		c.Log.Error("zapret: command line not built", "err", err)
 		run.Stop()
@@ -613,6 +613,13 @@ func (c *Controller) SaveZapret(in ZapretInput) error {
 	if c.zapretErr != nil {
 		return fmt.Errorf("zapret.json не загружен, изменения не сохраняются: %v", c.zapretErr)
 	}
+	// An entry that is neither a site nor a public address or network is
+	// named, not dropped without a word.
+	for _, d := range in.Sites {
+		if strings.TrimSpace(d) != "" && zapret.NormalizeSite(d) == "" {
+			return fmt.Errorf("«%s» — не имя сайта и не адрес. Адрес или сеть должны быть внешними (не локальными) и не шире /8 (IPv6 — /16)", strings.TrimSpace(d))
+		}
+	}
 	next := c.zapretCfg
 	next.Enabled, next.Targets, next.Sites, next.Methods = in.Enabled, in.Targets, in.Sites, in.Methods
 	next.Normalize()
@@ -713,9 +720,12 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 
 	// Without a bypass: what is blocked, and how. A service the user sent
 	// through the VPN is not checked: its traffic may take the tunnel.
-	left := slices.DeleteFunc(slices.Clone(cfg.Targets), func(t zapret.Target) bool { return cfg.Methods[t] == zapret.VPN })
+	// Nor are own sites given only by address: nothing to check them by.
+	left := slices.DeleteFunc(slices.Clone(cfg.Targets), func(t zapret.Target) bool {
+		return cfg.Methods[t] == zapret.VPN || len(zapret.Checks(t, cfg.Sites)) == 0
+	})
 	if len(left) == 0 {
-		return finish(errors.New("все выбранные сервисы идут через VPN: подбирать нечего"))
+		return finish(errors.New("подбирать нечего: выбранные сервисы идут через VPN или заданы только адресами (их подбор не проверяет)"))
 	}
 	update(func(p *ZapretPickView) {
 		p.Step = "Проверяю без обхода: что блокируется и как"
@@ -763,7 +773,7 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 				for _, t := range targets {
 					plans[t] = zapret.Plan{Methods: []string{id}}
 				}
-				args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Filter: zapret.ProbeOnly(i + 1)})
+				args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Sites: cfg.Sites, Filter: zapret.ProbeOnly(i + 1)})
 				if err != nil {
 					return nil, err
 				}

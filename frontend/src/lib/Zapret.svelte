@@ -182,8 +182,9 @@
         {/each}
       </div>
       {#if enabled && targets.includes('sites')}
-        <label class="lbl" for="zp-sites">Свои сайты — по одному на строку, поддомены включаются сами</label>
-        <textarea id="zp-sites" rows="4" bind:value={sitesText} placeholder="example.com"></textarea>
+        <label class="lbl" for="zp-sites">Свои сайты — по одному на строку: имя (поддомены включаются сами), IP или подсеть</label>
+        <textarea id="zp-sites" rows="4" bind:value={sitesText} placeholder={'example.com\n203.0.113.7\n198.51.100.0/24'}></textarea>
+        <span class="muted small">Подбор проверяет только имена, адреса получают те же методы.</span>
       {/if}
 
       {#if ui.expert && enabled && targets.length}

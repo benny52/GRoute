@@ -32,6 +32,7 @@ const (
 	ListYouTube  = "youtube.txt"
 	ListDiscord  = "discord.txt"
 	ListSites    = "sites.txt"
+	ListSitesNet = "sites-ip.txt"   // the own sites' addresses and networks
 	ListExcluded = "exclude-ip.txt" // HyRoute's servers: never touched
 )
 
@@ -43,6 +44,9 @@ type BuildConfig struct {
 	Lists string
 	// Plans: the targets processed (a target absent is not).
 	Plans map[Target]Plan
+	// Sites: the own sites (Settings.Sites). Their addresses and networks
+	// get profiles by address (--ipset), the names by name.
+	Sites []string
 	// Filter narrows the packets winws2 takes (--wf-raw-filter, ANDed with
 	// its own): ProbeExclude for the user's bypass, ProbeOnly for a tester.
 	Filter string
@@ -130,10 +134,27 @@ func Build(c BuildConfig) ([]string, error) {
 		if t == Sites {
 			l7 = "tls,http"
 		}
-		profiles = append(profiles,
-			tlsProfile(TargetName(t), t, "80,443", l7, hostlist, exclude, p),
-			[]string{"--comment=" + TargetName(t) + " QUIC", "--filter-udp=443", "--filter-l7=quic", hostlist, exclude,
-				"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+		// The own sites' addresses: by address, whatever name (or none,
+		// or one ECH hides) the connection carries. A name list with
+		// nothing in it is not built when there are addresses.
+		names, nets := true, false
+		if t == Sites {
+			nets = len(SiteNets(c.Sites)) > 0
+			names = len(SiteNames(c.Sites)) > 0 || !nets
+		}
+		if names {
+			profiles = append(profiles,
+				tlsProfile(TargetName(t), t, "80,443", l7, hostlist, exclude, p),
+				[]string{"--comment=" + TargetName(t) + " QUIC", "--filter-udp=443", "--filter-l7=quic", hostlist, exclude,
+					"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+		}
+		if nets {
+			ipset := "--ipset=" + list(ListSitesNet)
+			profiles = append(profiles,
+				tlsProfile("Свои адреса", t, "80,443", l7, ipset, exclude, p),
+				[]string{"--comment=Свои адреса QUIC", "--filter-udp=443", "--filter-l7=quic", ipset, exclude,
+					"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+		}
 	}
 	for i, p := range profiles {
 		if i > 0 {

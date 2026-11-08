@@ -56,7 +56,7 @@ func TestWinws2Runs(t *testing.T) {
 	opened := 0
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: lists, Plans: c.plans, Filter: c.filter})
+			args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: lists, Plans: c.plans, Filter: c.filter, Sites: testSites})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -127,11 +127,15 @@ func stageZapret(t *testing.T) (dir, lists string) {
 		t.Fatal(err)
 	}
 	lists = t.TempDir()
-	if err := zapret.WriteLists(lists, []string{"example.com", "example.org"}, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")}); err != nil {
+	if err := zapret.WriteLists(lists, testSites, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")}); err != nil {
 		t.Fatal(err)
 	}
 	return filepath.Join(staged, runtimefiles.ZapretDir), lists
 }
+
+// testSites are the own sites of the tests: names, and documentation
+// networks that give the profiles by address (--ipset) to winws2.
+var testSites = []string{"example.com", "example.org", "203.0.113.0/24", "2001:db8:1::/48"}
 
 // TestWinws2Generated runs generated strategies (a spread over the whole
 // space and the neighbors of a library method) in the real winws2, twelve

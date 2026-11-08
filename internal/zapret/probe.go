@@ -38,8 +38,10 @@ func Checks(t Target, sites []string) []string {
 		return []string{"https://discord.com/", "https://gateway.discord.gg/",
 			"https://cdn.discordapp.com/stickers/781291131828699156.png", "https://media.discordapp.net/stickers/781291131828699156.png"}
 	}
+	// Names only: a bare address has no certificate of its own to check
+	// against.
 	var out []string
-	for _, s := range sites {
+	for _, s := range SiteNames(sites) {
 		if len(out) == 5 {
 			break // the first few say enough
 		}

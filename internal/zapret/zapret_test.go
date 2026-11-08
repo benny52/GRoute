@@ -294,3 +294,62 @@ type initFails struct{ err error }
 
 func (f initFails) Wait() error { return f.err }
 func (f initFails) Kill() error { return nil }
+
+func TestSiteAddresses(t *testing.T) {
+	for in, want := range map[string]string{
+		"1.2.3.4": "1.2.3.4", "https://1.2.3.4/x": "1.2.3.4", "1.2.3.4:443": "1.2.3.4",
+		"104.16.1.0/13": "104.16.0.0/13", " 162.159.128.0/17 ": "162.159.128.0/17", "5.6.7.8/32": "5.6.7.8",
+		"[2606:4700::1]:443": "2606:4700::1", "2606:4700::/32": "2606:4700::/32", "::ffff:1.2.3.4": "1.2.3.4",
+		"Example.com": "example.com", "https://www.Example.com:8443/x": "www.example.com",
+		// Local, reserved or too wide: never.
+		"10.0.0.1": "", "192.168.1.0/24": "", "127.0.0.1": "", "8.0.0.0/7": "", "172.0.0.0/8": "",
+		"100.64.1.1": "", "::1": "", "fe80::1": "", "2000::/15": "", "0.0.0.0/0": "", "224.0.0.1": "",
+		"1.2.3": "", "1.2.3.400": "", "1.2.3.4/33": "", "fe80::1%eth0": "",
+	} {
+		if got := NormalizeSite(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+	sites := []string{"example.org", "1.2.3.4", "104.16.0.0/13"}
+	if n, a := SiteNames(sites), SiteNets(sites); !slices.Equal(n, []string{"example.org"}) || !slices.Equal(a, []string{"1.2.3.4", "104.16.0.0/13"}) {
+		t.Fatalf("%v %v", n, a)
+	}
+	s := Settings{Enabled: true, Targets: []Target{Sites}, Sites: sites}
+	s.Normalize()
+	if err := s.Validate(); err != nil || len(s.Sites) != 3 {
+		t.Fatalf("%v %v", err, s.Sites)
+	}
+	// Lists: names by name, addresses as an ipset.
+	dir := t.TempDir()
+	if err := WriteLists(dir, sites, nil); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, ListSites))
+	ib, _ := os.ReadFile(filepath.Join(dir, ListSitesNet))
+	if !strings.Contains(string(b), "\nexample.org\n") || strings.Contains(string(b), "1.2.3.4") ||
+		!strings.Contains(string(ib), "\n1.2.3.4\n104.16.0.0/13\n") {
+		t.Fatalf("%q\n%q", b, ib)
+	}
+	// Profiles: by name and by address; only addresses, no name profile.
+	bin, lists := filepath.FromSlash("/z"), filepath.FromSlash("/l")
+	if !filepath.IsAbs(bin) {
+		bin, lists = `C:\z`, `C:\l`
+	}
+	plans := map[Target]Plan{Sites: {Methods: []string{"fake"}}}
+	args, err := Build(BuildConfig{Dir: bin, Lists: lists, Plans: plans, Sites: sites})
+	line := strings.Join(args, " ")
+	if err != nil || !strings.Contains(line, "--hostlist="+filepath.Join(lists, ListSites)) || !strings.Contains(line, "--ipset="+filepath.Join(lists, ListSitesNet)) {
+		t.Fatalf("%v\n%s", err, line)
+	}
+	args, _ = Build(BuildConfig{Dir: bin, Lists: lists, Plans: plans, Sites: []string{"1.2.3.4"}})
+	if line := strings.Join(args, " "); strings.Contains(line, ListSites+" ") || !strings.Contains(line, "--comment=Свои адреса") {
+		t.Fatalf("%s", line)
+	}
+	// The checks: names only.
+	if c := Checks(Sites, sites); !slices.Equal(c, []string{"https://example.org/"}) {
+		t.Fatalf("%v", c)
+	}
+	if c := Checks(Sites, []string{"1.2.3.4"}); len(c) != 0 {
+		t.Fatalf("%v", c)
+	}
+}
