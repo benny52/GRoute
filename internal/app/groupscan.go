@@ -222,7 +222,7 @@ func (c *Controller) scanOne(ctx context.Context, p hysteria.Profile, rawURL str
 	if ep == nil {
 		return false
 	}
-	if _, err := waitConnectedCtx(ctx, ep, probeConnectWait); err != nil {
+	if _, err := waitConnectedCtx(ctx, ep, connectWait(p, probeConnectWait)); err != nil {
 		return false
 	}
 	pctx, cancel := context.WithTimeout(ctx, groups.ProbeTimeout+time.Second)

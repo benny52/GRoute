@@ -1171,7 +1171,7 @@ func (c *Controller) ProbeGroup(id string) (GroupView, error) {
 				note(p.ID, "не проверен: сервер не запустился")
 				return
 			}
-			if _, err := waitConnectedCtx(ctx, ep, probeConnectWait); err != nil {
+			if _, err := waitConnectedCtx(ctx, ep, connectWait(p, probeConnectWait)); err != nil {
 				if ctx.Err() != nil {
 					note(p.ID, "нет результата за 60 с")
 				} else {

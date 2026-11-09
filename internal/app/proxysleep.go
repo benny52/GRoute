@@ -52,6 +52,10 @@ func (c *Controller) proxyWake(ctx context.Context, s Session, id string) (hold 
 	}
 	u.last = time.Now()
 	u.open++
+	wait := proxyWakeWait
+	if p := c.profiles.Find(id); p != nil {
+		wait = connectWait(*p, proxyWakeWait)
+	}
 	if woke && s.Endpoint(id) == nil {
 		c.Log.Info("local proxy: starting its server", "profile", c.profileName(id))
 		c.applyRoutingLocked()
@@ -63,13 +67,24 @@ func (c *Controller) proxyWake(ctx context.Context, s Session, id string) (hold 
 		u.last = time.Now()
 		c.mu.Unlock()
 	})
-	waitServer(ctx, s, id)
+	waitServer(ctx, s, id, wait)
 	return release
 }
 
-// waitServer waits until profile id runs and can carry traffic, or failed.
-func waitServer(ctx context.Context, s Session, id string) {
-	deadline := time.Now().Add(proxyWakeWait)
+// connectWait is how long server p may take to connect, base for
+// Hysteria: Xray (VLESS) gets 45 s to its 20, as «Проверить» gives it
+// (the three tries of its start, hysteria/xray.go).
+func connectWait(p hysteria.Profile, base time.Duration) time.Duration {
+	if p.IsVLESS() {
+		return base * 9 / 4
+	}
+	return base
+}
+
+// waitServer waits until profile id runs and can carry traffic, or failed,
+// at most wait.
+func waitServer(ctx context.Context, s Session, id string, wait time.Duration) {
+	deadline := time.Now().Add(wait)
 	for {
 		if ep := s.Endpoint(id); ep != nil && (ep.Available() || ep.Status().State == hysteria.Failed) {
 			return
