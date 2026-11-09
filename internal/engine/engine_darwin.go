@@ -201,17 +201,31 @@ func (e *Engine) routeAllLocked() error {
 			return fmt.Errorf("маршрут через %s не добавлен: %w", name, err)
 		}
 	}
-	if e.dev.v6 && e.def6.Index != 0 {
-		ok := true
-		for _, n := range []string{"::/1", "8000::/1"} {
-			if err := run("/sbin/route", "-q", "-n", "add", "-inet6", n, "-interface", name); err != nil {
-				e.log.Warn("IPv6 route not added; IPv6 goes direct", "err", err)
-				ok = false
-			}
-		}
-		e.routes6 = ok
-	}
+	e.addRoutes6Locked()
 	return nil
+}
+
+// addRoutes6Locked sends IPv6 into the device when the network has an
+// IPv6 default: at the start, or later, once one appears (a network
+// change, an RA after the connect). Without the routes IPv6 would leave by
+// the physical default, past the rules.
+func (e *Engine) addRoutes6Locked() {
+	if e.routes6 || !e.dev.v6 || e.def6.Index == 0 {
+		return
+	}
+	nets := []string{"::/1", "8000::/1"}
+	for _, n := range nets {
+		// Half of the pair may be there from a try that failed.
+		run("/sbin/route", "-q", "-n", "delete", "-inet6", n, "-interface", e.dev.name)
+	}
+	ok := true
+	for _, n := range nets {
+		if err := run("/sbin/route", "-q", "-n", "add", "-inet6", n, "-interface", e.dev.name); err != nil {
+			e.log.Warn("IPv6 route not added; IPv6 goes direct", "err", err)
+			ok = false
+		}
+	}
+	e.routes6 = ok
 }
 
 // refreshNetLocked reads the physical defaults and binds new direct
@@ -603,6 +617,7 @@ func (e *Engine) watchNetwork() {
 		e.fwd.reset()
 		e.syncScopedLocked()
 		e.syncHostRoutesLocked()
+		e.addRoutes6Locked() // after the servers' routes, as at the start
 		e.SysDNS.Kick()
 	}
 	if e.dnsCapture {
