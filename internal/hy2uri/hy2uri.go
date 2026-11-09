@@ -82,9 +82,26 @@ func Parse(s string) (l Link, warnings []string, err error) {
 	default:
 		return l, nil, fmt.Errorf("unsupported scheme %q", scheme)
 	}
+	userinfo, hasUser := "", false
+	if authority := cutAny(rest, "/?#"); strings.Contains(authority, "@") {
+		i := strings.LastIndex(authority, "@")
+		userinfo, rest, hasUser = authority[:i], rest[i+1:], true
+	} else if !hostWithPort(authority) {
+		// A password with an unencoded '/', '?' or '#' (panels that do
+		// not encode base64 passwords) ends the authority early: its
+		// head would be the host, the rest a path, the query or the
+		// name, and none of it masked. The userinfo runs to the first
+		// '@' that a host with its port follows.
+		for i := 0; i < len(rest); i++ {
+			if rest[i] == '@' && strings.ContainsAny(rest[:i], "/?#") && hostWithPort(cutAny(rest[i+1:], "/?#")) {
+				userinfo, rest, hasUser = rest[:i], rest[i+1:], true
+				break
+			}
+		}
+	}
 	rest, frag, _ := strings.Cut(rest, "#")
 	rest, rawQuery, _ := strings.Cut(rest, "?")
-	authority, _, _ := strings.Cut(rest, "/")
+	hostport, _, _ := strings.Cut(rest, "/")
 
 	if frag != "" {
 		if l.Name, err = url.PathUnescape(frag); err != nil {
@@ -92,10 +109,7 @@ func Parse(s string) (l Link, warnings []string, err error) {
 		}
 	}
 
-	hostport := authority
-	if i := strings.LastIndex(authority, "@"); i >= 0 {
-		userinfo := authority[:i]
-		hostport = authority[i+1:]
+	if hasUser {
 		user, pass, hasPass := strings.Cut(userinfo, ":")
 		// The escape errors quote the bytes around the bad "%": a piece
 		// of the password. They are not passed on.
@@ -297,6 +311,28 @@ func parseFinalMask(s string) (string, string, error) {
 		warn = "unsupported mask " + strings.Join(other, ", ") + ": the profile may not connect"
 	}
 	return pass, warn, nil
+}
+
+// cutAny is s up to the first of chars.
+func cutAny(s, chars string) string {
+	if i := strings.IndexAny(s, chars); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// hostWithPort: hp is a host followed by its ports (an IPv6 host in
+// brackets needs none).
+func hostWithPort(hp string) bool {
+	if strings.ContainsAny(hp, "@/?#") {
+		return false
+	}
+	_, ports, err := splitHostPorts(hp)
+	if err != nil || !strings.Contains(hp, ":") {
+		return false
+	}
+	_, err = ParsePorts(ports)
+	return err == nil
 }
 
 func splitHostPorts(hp string) (host, ports string, err error) {

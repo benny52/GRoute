@@ -240,3 +240,28 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+// A password with an unencoded '/', '?' or '#' (panels that do not encode
+// base64 passwords) is the password whole: not a host «ab» with the rest
+// of the password as a path, the query or the name.
+func TestUnencodedPassword(t *testing.T) {
+	for _, c := range []struct{ in, auth, name string }{
+		{"hysteria2://ab/cd@vpn.example.com:443", "ab/cd", ""},
+		{"hysteria2://ab?cd@vpn.example.com:443?sni=x.example#NL", "ab?cd", "NL"},
+		{"hysteria2://ab#cd@vpn.example.com:443/?insecure=0#NL", "ab#cd", "NL"},
+	} {
+		l, _, err := Parse(c.in)
+		if err != nil || l.Auth != c.auth || l.Host != "vpn.example.com" || l.Name != c.name {
+			t.Errorf("%s: %+v %v", c.in, l, err)
+			continue
+		}
+		if back, _, err := Parse(l.String()); err != nil || back.Auth != c.auth {
+			t.Errorf("%s: round trip %+v %v", c.in, back, err)
+		}
+	}
+	// An '@' in the query of a link without a password is no password.
+	l, _, err := Parse("hysteria2://vpn.example.com:443/?obfs=salamander&obfs-password=a@b.example:1")
+	if err != nil || l.Auth != "" || l.Host != "vpn.example.com" {
+		t.Fatalf("%+v %v", l, err)
+	}
+}
