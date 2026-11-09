@@ -8,7 +8,10 @@ import (
 	"crypto/x509"
 	"encoding/binary"
 	"net"
+	"net/http"
+	"net/netip"
 	"os"
+	"slices"
 	"testing"
 	"time"
 )
@@ -34,6 +37,10 @@ func TestLiveTelegram(t *testing.T) {
 		{"DC4 media WebSocket", -4, "", Config{NoFronting: true, PoolSize: -1}, false},
 		{"DC2 fronted", 2, RouteFronted, Config{PoolSize: -1}, true},
 		{"DC1 direct TCP", 1, RouteTCP, Config{PoolSize: -1}, false},
+		// tg-ws-proxy's Cloudflare domains (the built-in list): a data
+		// center without WebSocket, and media.
+		{"DC1 Cloudflare", 1, RouteCF, Config{PoolSize: -1, Redirect: map[int]netip.Addr{}, Cloudflare: DefaultCloudflare(), CloudflareFirst: true}, false},
+		{"DC4 media Cloudflare", -4, RouteCF, Config{PoolSize: -1, Redirect: map[int]netip.Addr{}, Cloudflare: DefaultCloudflare(), CloudflareFirst: true}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			b := New(c.cfg)
@@ -59,13 +66,13 @@ func TestLiveTelegram(t *testing.T) {
 			tc.send(t, packet(ProtoIntermediate, msg))
 			n := int(binary.LittleEndian.Uint32(tc.recv(t, 4)))
 			if n < 40 || n > 1024 {
-				t.Fatalf("an answer of %d bytes (%+v)", n, b.Stats())
+				t.Fatalf("an answer of %d bytes (%+v)", n, liveStats(b))
 			}
 			ans := tc.recv(t, n)
 			if c := binary.LittleEndian.Uint32(ans[20:]); c != 0x05162463 || !bytes.Equal(ans[24:40], nonce[:]) {
 				t.Fatalf("not resPQ: %x", ans[:min(len(ans), 48)])
 			}
-			st := b.Stats()
+			st := liveStats(b)
 			if c.route != "" && st.Routes[c.route] != 1 {
 				t.Fatalf("%+v", st)
 			}
@@ -119,4 +126,43 @@ func TestLiveCheck(t *testing.T) {
 		t.Fatalf("%+v", h)
 	}
 	t.Logf("self-check: WebSocket via %s in %d ms", h.WSRoute, h.WSMillis)
+}
+
+// liveStats are the bridge's counters without the latest error, which may
+// name a Cloudflare domain (the logs of CI are public; the list is kept
+// encoded so that its names are not read in plain text).
+func liveStats(b *Bridge) Stats {
+	st := b.Stats()
+	if st.LastError != "" {
+		st.LastError = "(скрыто)"
+	}
+	return st
+}
+
+// TestLiveCloudflare takes tg-ws-proxy's current list and checks the
+// self-check through Cloudflare alone; the names are not logged.
+func TestLiveCloudflare(t *testing.T) {
+	if os.Getenv("HYROUTE_TGWS_LIVE") == "" {
+		t.Skip("HYROUTE_TGWS_LIVE=1 runs it against Telegram")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	list, err := FetchCloudflare(ctx, http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := 0
+	for _, d := range DefaultCloudflare() {
+		if slices.Contains(list, d) {
+			same++
+		}
+	}
+	t.Logf("the list: %d domains, %d of them built in", len(list), same)
+	b := New(Config{PoolSize: -1, Redirect: map[int]netip.Addr{}, Cloudflare: list, CloudflareFirst: true})
+	defer b.Close()
+	h := b.Check(ctx)
+	if !h.CF || b.cfDown.Load() {
+		t.Fatalf("Cloudflare did not answer (%d chars of error)", len(h.CFError))
+	}
+	t.Logf("self-check: Cloudflare via %s in %d ms", h.CFRoute, h.CFMillis)
 }

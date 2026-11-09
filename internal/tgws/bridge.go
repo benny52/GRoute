@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,8 @@ import (
 const (
 	RouteWS      = "ws"         // WebSocket, the name sent as it is
 	RouteFronted = "ws-fronted" // WebSocket with another name in TLS
+	RouteWorker  = "worker"     // the user's Cloudflare Worker
+	RouteCF      = "cloudflare" // a Cloudflare domain of tg-ws-proxy's list
 	RouteVPN     = "vpn"        // TCP to the data center through HyRoute's VPN
 	RouteTCP     = "tcp"        // TCP to the data center, direct
 )
@@ -38,6 +41,13 @@ type Config struct {
 	// VPN opens a TCP connection to a data center through HyRoute's VPN
 	// (nil, or an error: that fallback is skipped).
 	VPN func(ctx context.Context, dst netip.AddrPort) (net.Conn, error)
+	// Cloudflare: domains whose kwsN names Cloudflare carries to the data
+	// centers (cloudflare.go; SetCloudflare replaces them); CloudflareFirst:
+	// that route goes before the VPN. Workers: the user's Cloudflare
+	// Workers. Empty: no Cloudflare route.
+	Cloudflare      []string
+	CloudflareFirst bool
+	Workers         []string
 	// Roots verify the WebSocket certificates (nil: the system's).
 	Roots *x509.CertPool
 	Log   *slog.Logger
@@ -58,6 +68,8 @@ type Stats struct {
 	// latest one that failed did ("" when the latest one opened).
 	LastRoute string `json:"lastRoute"`
 	LastError string `json:"lastError,omitempty"`
+	// MediaOff: data centers whose media skip WebSocket now (media.go).
+	MediaOff []int `json:"mediaOff,omitempty"`
 }
 
 // Bridge carries MTProto connections to Telegram.
@@ -67,6 +79,9 @@ type Bridge struct {
 
 	fronted atomic.Bool // the fronted name worked last
 	wsDown  atomic.Bool // self-checks found WebSocket not answering
+	cf      atomic.Pointer[[]string]
+	cfFirst atomic.Bool // Cloudflare before the VPN
+	cfDown  atomic.Bool // self-checks found Cloudflare not answering
 	health  atomic.Pointer[Health]
 	active  atomic.Int64
 	total   atomic.Int64
@@ -81,6 +96,11 @@ type Bridge struct {
 	lastError string
 	tcpAfter  map[netip.AddrPort]time.Time // direct TCP backoff
 	tcpFails  map[netip.AddrPort]int
+	cfPick    map[int]string       // data center → the domain that worked last
+	cfAfter   map[string]time.Time // a domain or Worker skipped until
+	// Media over WebSocket that Telegram never answered (media.go).
+	mediaFails map[int]int
+	mediaOff   map[int]time.Time
 }
 
 // New makes a bridge; Close ends its pool.
@@ -98,7 +118,9 @@ func New(cfg Config) *Bridge {
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
 	}
-	b := &Bridge{cfg: cfg, routes: map[string]int64{}, tcpAfter: map[netip.AddrPort]time.Time{}, tcpFails: map[netip.AddrPort]int{}}
+	b := &Bridge{cfg: cfg, routes: map[string]int64{}, tcpAfter: map[netip.AddrPort]time.Time{}, tcpFails: map[netip.AddrPort]int{},
+		cfPick: map[int]string{}, cfAfter: map[string]time.Time{}, mediaFails: map[int]int{}, mediaOff: map[int]time.Time{}}
+	b.SetCloudflare(cfg.Cloudflare, cfg.CloudflareFirst)
 	b.pool = newPool(b)
 	return b
 }
@@ -124,8 +146,15 @@ func (b *Bridge) Stats() Stats {
 	for k, v := range b.routes {
 		r[k] = v
 	}
+	var off []int
+	for dc, until := range b.mediaOff {
+		if time.Now().Before(until) {
+			off = append(off, dc)
+		}
+	}
+	slices.Sort(off)
 	return Stats{Active: b.active.Load(), Total: b.total.Load(), Bad: b.bad.Load(), Failed: b.failed.Load(),
-		Routes: r, Up: b.up.Load(), Down: b.down.Load(), LastRoute: b.lastRoute, LastError: b.lastError}
+		Routes: r, Up: b.up.Load(), Down: b.down.Load(), LastRoute: b.lastRoute, LastError: b.lastError, MediaOff: off}
 }
 
 func (b *Bridge) note(route string, err error) {
@@ -177,7 +206,7 @@ func (u *tcpUp) recv() ([]byte, error) {
 func (u *tcpUp) close() { u.c.Close() }
 
 // errNoRoute: every route failed.
-var errNoRoute = errors.New("Telegram недоступен ни через WebSocket, ни напрямую")
+var errNoRoute = errors.New("Telegram недоступен ни через WebSocket, ни через запасные пути")
 
 // Serve carries one client connection whose first bytes are an
 // obfuscated MTProto init with secret (nil: Telegram's own connection,
@@ -212,22 +241,70 @@ func (b *Bridge) Serve(ctx context.Context, client net.Conn, secret []byte) {
 	}
 	b.note(route, nil)
 	b.cfg.Log.Debug("tgws: connection", "dc", h.DC, "media", h.Media, "route", route)
-	b.pump(client, up, h, tgEnc, tgDec, route == RouteWS || route == RouteFronted)
+	b.carry(client, up, h, tgEnc, tgDec, route)
 }
 
-// open takes the first route that opens, sending the relay init on it.
+// carry pumps a connection opened over route and learns from how it went.
+func (b *Bridge) carry(client net.Conn, up upstream, h Hello, tgEnc, tgDec cipher.Stream, route string) {
+	// Telegram's /apiws, behind Cloudflare too, takes one message per
+	// packet; a Worker and TCP carry raw bytes.
+	frames := route == RouteWS || route == RouteFronted || route == RouteCF
+	sent, got := b.pump(client, up, h, tgEnc, tgDec, frames)
+	if route == RouteWS || route == RouteFronted {
+		b.mediaResult(h, sent, got)
+	}
+}
+
+// tryWS opens a WebSocket of Telegram's own for h (from the pool) and
+// sends the relay init on it.
+func (b *Bridge) tryWS(ctx context.Context, h Hello, rinit []byte) (upstream, string, error) {
+	w, route, err := b.pool.get(ctx, poolKey{dc: h.DC, media: h.Media, test: h.Test})
+	if err == nil {
+		if err = w.Send(rinit); err == nil {
+			return wsUp{w}, route, nil
+		}
+		w.c.Close()
+	}
+	return nil, "", err
+}
+
+// tryCloudflare opens a Cloudflare route for h and sends the relay init.
+func (b *Bridge) tryCloudflare(ctx context.Context, h Hello, rinit []byte) (upstream, string, error) {
+	w, route, _, err := b.connectCloudflare(ctx, h.DC)
+	if err == nil {
+		if err = w.Send(rinit); err == nil {
+			return wsUp{w}, route, nil
+		}
+		w.c.Close()
+	}
+	return nil, "", err
+}
+
+// open takes the first route that opens, sending the relay init on it:
+// Telegram's WebSocket, Cloudflare (when the DPI bypass covers it), the
+// VPN, Cloudflare (otherwise), direct TCP.
 func (b *Bridge) open(ctx context.Context, h Hello, rinit []byte) (upstream, string, error) {
 	var errs []error
-	if _, ok := b.cfg.Redirect[h.DC]; ok && !b.wsDown.Load() {
-		key := poolKey{dc: h.DC, media: h.Media, test: h.Test}
-		w, route, err := b.pool.get(ctx, key)
+	if b.wsUsable(h) {
+		up, route, err := b.tryWS(ctx, h, rinit)
 		if err == nil {
-			if err = w.Send(rinit); err == nil {
-				return wsUp{w}, route, nil
-			}
-			w.c.Close()
+			return up, route, nil
 		}
 		errs = append(errs, err)
+	}
+	cfTried := false
+	tryCF := func() (upstream, string, error) {
+		cfTried = true
+		up, route, err := b.tryCloudflare(ctx, h, rinit)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		return up, route, err
+	}
+	if b.cfUsable(h) && (b.cfFirst.Load() || b.cfg.VPN == nil) {
+		if up, route, err := tryCF(); err == nil {
+			return up, route, nil
+		}
 	}
 	dst, ok := directAddr(h.DC, h.Test)
 	if !ok {
@@ -245,6 +322,11 @@ func (b *Bridge) open(ctx context.Context, h Hello, rinit []byte) (upstream, str
 			c.Close()
 		}
 		errs = append(errs, fmt.Errorf("через VPN: %w", err))
+	}
+	if !cfTried && b.cfUsable(h) {
+		if up, route, err := tryCF(); err == nil {
+			return up, route, nil
+		}
 	}
 	c, err := b.dialTCP(ctx, dst)
 	if err == nil {
@@ -283,8 +365,9 @@ func (b *Bridge) dialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, err
 	return c, nil
 }
 
-// pump re-keys both ways until one side ends.
-func (b *Bridge) pump(client net.Conn, up upstream, h Hello, tgEnc, tgDec cipher.Stream, frames bool) {
+// pump re-keys both ways until one side ends; it returns the bytes the
+// client sent past its init and those Telegram sent.
+func (b *Bridge) pump(client net.Conn, up upstream, h Hello, tgEnc, tgDec cipher.Stream, frames bool) (sent, got int64) {
 	var once sync.Once
 	stop := func() {
 		once.Do(func() {
@@ -307,6 +390,7 @@ func (b *Bridge) pump(client net.Conn, up upstream, h Hello, tgEnc, tgDec cipher
 					return
 				}
 				b.down.Add(int64(len(p)))
+				got += int64(len(p))
 			}
 			if err != nil {
 				return
@@ -327,6 +411,7 @@ func (b *Bridge) pump(client net.Conn, up upstream, h Hello, tgEnc, tgDec cipher
 			enc := make([]byte, n)
 			tgEnc.XORKeyStream(enc, plain)
 			b.up.Add(int64(n))
+			sent += int64(n)
 			var serr error
 			if sp != nil {
 				if parts := sp.add(enc, plain); len(parts) > 0 {
@@ -350,15 +435,17 @@ func (b *Bridge) pump(client net.Conn, up upstream, h Hello, tgEnc, tgDec cipher
 	}
 	stop()
 	wg.Wait()
+	return sent, got
 }
 
 // ServeTransparent carries a connection the engine intercepted on its way
 // to dst, an address of Telegram's (no proxy set in Telegram): an
-// obfuscated MTProto connection (no secret) to a data center with a
-// WebSocket route goes over it, unless self-checks found WebSocket down;
-// anything else — web.telegram.org's TLS, the HTTP transport, a data
-// center without WebSocket, a WebSocket that does not open — goes on
-// unchanged to dst, through the VPN (when connected) or directly.
+// obfuscated MTProto connection (no secret) goes over Telegram's
+// WebSocket when its data center has one (unless self-checks found it
+// down), else over Cloudflare when that goes before the VPN; anything
+// else — web.telegram.org's TLS, the HTTP transport, a route that does
+// not open — goes on unchanged to dst, through the VPN (when connected),
+// else over Cloudflare, else directly.
 func (b *Bridge) ServeTransparent(ctx context.Context, client net.Conn, dst netip.AddrPort) {
 	defer client.Close()
 	b.active.Add(1)
@@ -369,47 +456,57 @@ func (b *Bridge) ServeTransparent(ctx context.Context, client net.Conn, dst neti
 	n, _ := io.ReadFull(client, head)
 	client.SetReadDeadline(time.Time{})
 	head = head[:n]
-	if n == initLen && !b.wsDown.Load() {
+	var hello *Hello
+	if n == initLen {
 		if h, ok := ReadHello(head, nil); ok {
-			if _, ws := b.cfg.Redirect[h.DC]; ws {
-				rinit, tgEnc, tgDec := relayInit(h.Proto, dcIndex(h.DC, h.Media, h.Test))
-				w, route, err := b.pool.get(ctx, poolKey{dc: h.DC, media: h.Media, test: h.Test})
-				if err == nil {
-					if err = w.Send(rinit); err == nil {
-						b.note(route, nil)
-						b.pump(client, wsUp{w}, h, tgEnc, tgDec, true)
-						return
-					}
-					w.c.Close()
-				}
-				b.cfg.Log.Debug("tgws: WebSocket did not open, passing on", "dc", h.DC, "err", err)
-			}
+			hello = &h
 		}
 	}
-	b.passOn(ctx, client, dst, head)
-}
-
-// passOn sends a connection unchanged to dst: the VPN, else directly.
-func (b *Bridge) passOn(ctx context.Context, client net.Conn, dst netip.AddrPort, head []byte) {
-	var up net.Conn
-	var err error
-	route := RouteVPN
-	if b.cfg.VPN != nil {
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		up, err = b.cfg.VPN(cctx, dst)
-		cancel()
+	try := func(open func(context.Context, Hello, []byte) (upstream, string, error)) bool {
+		h := *hello
+		rinit, tgEnc, tgDec := relayInit(h.Proto, dcIndex(h.DC, h.Media, h.Test))
+		up, route, err := open(ctx, h, rinit)
+		if err != nil {
+			b.cfg.Log.Debug("tgws: route did not open, passing on", "dc", h.DC, "err", err)
+			return false
+		}
+		b.note(route, nil)
+		b.carry(client, up, h, tgEnc, tgDec, route)
+		return true
 	}
-	if up == nil {
-		route = RouteTCP
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		up, err = b.cfg.Dial(cctx, "tcp", dst.String())
-		cancel()
+	if hello != nil && b.wsUsable(*hello) && try(b.tryWS) {
+		return
 	}
+	viaVPN := b.cfg.VPN != nil
+	cf := hello != nil && b.cfUsable(*hello)
+	if cf && (b.cfFirst.Load() || !viaVPN) && try(b.tryCloudflare) {
+		return
+	}
+	if viaVPN {
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		up, err := b.cfg.VPN(cctx, dst)
+		cancel()
+		if err == nil {
+			b.passOn(client, up, RouteVPN, head)
+			return
+		}
+		if cf && !b.cfFirst.Load() && try(b.tryCloudflare) {
+			return
+		}
+	}
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	up, err := b.cfg.Dial(cctx, "tcp", dst.String())
+	cancel()
 	if err != nil {
 		b.failed.Add(1)
 		b.note("", fmt.Errorf("%w: %v", errNoRoute, err))
 		return
 	}
+	b.passOn(client, up, RouteTCP, head)
+}
+
+// passOn sends a connection unchanged over up (head first).
+func (b *Bridge) passOn(client, up net.Conn, route string, head []byte) {
 	defer up.Close()
 	if len(head) > 0 {
 		if _, err := up.Write(head); err != nil {

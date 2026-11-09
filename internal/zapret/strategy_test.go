@@ -88,7 +88,7 @@ func TestStrategyNameAndBuild(t *testing.T) {
 		t.Fatalf("%q", n)
 	}
 	dir, lists := t.TempDir(), t.TempDir()
-	if err := WriteLists(lists, nil, nil); err != nil {
+	if err := WriteLists(lists, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	args, err := Build(BuildConfig{Dir: dir, Lists: lists, Plans: map[Target]Plan{YouTube: {Methods: []string{s.ID(), "fake"}, Circular: true}}})

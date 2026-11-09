@@ -106,7 +106,7 @@ jobs:
         # through every route. Telegram is not HyRoute's: a failure here is
         # read, not a gate.
         continue-on-error: true
-        run: go test -v -count=1 -run "LiveTelegram|LiveFronting|LiveCheck" ./internal/tgws/
+        run: go test -v -count=1 -run "LiveTelegram|LiveFronting|LiveCheck|LiveCloudflare" ./internal/tgws/
         env:
           HYROUTE_TGWS_LIVE: '1'
       - run: go test -race ./...

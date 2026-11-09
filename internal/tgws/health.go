@@ -27,6 +27,12 @@ type Health struct {
 	WSRoute  string `json:"wsRoute,omitempty"`
 	WSMillis int64  `json:"wsMillis,omitempty"`
 	WSError  string `json:"wsError,omitempty"`
+	// CF: Telegram answered through Cloudflare (CFRoute: cloudflare or
+	// worker; checked whenever that route is set up); CFError: why not.
+	CF       bool   `json:"cf,omitempty"`
+	CFRoute  string `json:"cfRoute,omitempty"`
+	CFMillis int64  `json:"cfMillis,omitempty"`
+	CFError  string `json:"cfError,omitempty"`
 	// Fallback: the route that answered when WebSocket did not (vpn,
 	// tcp; "" none or not checked); FallbackError: why none did.
 	Fallback      string `json:"fallback,omitempty"`
@@ -64,14 +70,34 @@ func (b *Bridge) Check(ctx context.Context) Health {
 	if len(dcs) > 0 {
 		b.wsDown.Store(!h.WS)
 	}
+	if !h.WS && len(errs) > 0 {
+		h.WSError = errors.Join(errs...).Error()
+	}
+	if b.cloudflareOn() {
+		h.CF, h.CFRoute, h.CFMillis, h.CFError = b.checkCloudflare(ctx)
+		b.cfDown.Store(!h.CF)
+	}
 	if !h.WS {
-		if len(errs) > 0 {
-			h.WSError = errors.Join(errs...).Error()
-		}
 		h.Fallback, h.FallbackError = b.checkFallback(ctx)
 	}
 	b.health.Store(&h)
 	return h
+}
+
+// checkCloudflare asks DC2 through Cloudflare.
+func (b *Bridge) checkCloudflare(ctx context.Context) (bool, string, int64, string) {
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	w, route, _, err := b.connectCloudflare(cctx, 2)
+	if err == nil {
+		err = askPQ(cctx, wsUp{w}, 2)
+		w.c.Close()
+	}
+	if err != nil {
+		return false, "", 0, err.Error()
+	}
+	return true, route, time.Since(start).Milliseconds(), ""
 }
 
 // checkFallback asks DC2 through the VPN, else directly.

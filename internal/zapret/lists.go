@@ -49,10 +49,11 @@ func Domains(t Target, sites []string) []string {
 }
 
 // WriteLists writes the list files Build names into dir: the targets'
-// domains and HyRoute's server addresses, which every profile skips. A
-// file whose content is unchanged is left alone (winws2 rereads a list
-// when it changes).
-func WriteLists(dir string, sites []string, servers []netip.Addr) error {
+// domains and HyRoute's server addresses, which every profile skips.
+// extra adds hosts to a target's list (HyRoute's own: the Cloudflare
+// domains of «Telegram без VPN»). A file whose content is unchanged is
+// left alone (winws2 rereads a list when it changes).
+func WriteLists(dir string, sites []string, servers []netip.Addr, extra map[Target][]string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -66,8 +67,8 @@ func WriteLists(dir string, sites []string, servers []netip.Addr) error {
 	ips = slices.Compact(ips)
 	files := map[string][]string{
 		ListYouTube:  youTubeDomains,
-		ListDiscord:  append(slices.Clone(discordDomains), discordECH...),
-		ListSites:    SiteNames(sites),
+		ListDiscord:  slices.Concat(discordDomains, discordECH, extra[Discord]),
+		ListSites:    slices.Concat(SiteNames(sites), extra[Sites]),
 		ListSitesNet: SiteNets(sites),
 		ListExcluded: ips,
 	}

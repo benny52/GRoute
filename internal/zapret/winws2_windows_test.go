@@ -140,7 +140,7 @@ func stageZapret(t *testing.T) (dir, lists string) {
 		t.Fatal(err)
 	}
 	lists = t.TempDir()
-	if err := zapret.WriteLists(lists, testSites, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")}); err != nil {
+	if err := zapret.WriteLists(lists, testSites, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("2001:db8::1")}, nil); err != nil {
 		t.Fatal(err)
 	}
 	return filepath.Join(staged, runtimefiles.ZapretDir), lists

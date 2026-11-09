@@ -196,6 +196,19 @@ type TelegramSettings struct {
 	Enabled bool   `json:"enabled"`
 	Port    int    `json:"port,omitempty"`   // 0 = DefaultTelegramPort
 	Secret  string `json:"secret,omitempty"` // 32 hex digits; HyRoute makes one
+	// NoCloudflare: no route through tg-ws-proxy's Cloudflare domains
+	// (on by default). Workers: the user's Cloudflare Workers (hosts).
+	NoCloudflare bool     `json:"noCloudflare,omitempty"`
+	Workers      []string `json:"workers,omitempty"`
+}
+
+// MaxWorkers: Cloudflare Workers kept.
+const MaxWorkers = 5
+
+// Equal reports the same settings.
+func (t TelegramSettings) Equal(o TelegramSettings) bool {
+	return t.Enabled == o.Enabled && t.Port == o.Port && t.Secret == o.Secret &&
+		t.NoCloudflare == o.NoCloudflare && slices.Equal(t.Workers, o.Workers)
 }
 
 // DefaultTelegramPort is tg-ws-proxy's port.
@@ -244,6 +257,7 @@ func (s *Settings) Normalize() {
 	if b, err := hex.DecodeString(s.Telegram.Secret); err != nil || len(b) != 16 {
 		s.Telegram.Secret = "" // made again
 	}
+	s.Telegram.Workers = NormalizeWorkers(s.Telegram.Workers)
 	for t, v := range s.Via {
 		if s.Methods[t] != VPN || v == "" || len(v) > 128 {
 			delete(s.Via, t)
@@ -315,6 +329,26 @@ func NormalizeSite(s string) string {
 		return ""
 	}
 	return s
+}
+
+// NormalizeWorkers: the Cloudflare Workers' hosts as typed (a URL is
+// cut to its host), names only, each once, at most MaxWorkers.
+func NormalizeWorkers(in []string) []string {
+	var out []string
+	for _, w := range in {
+		h := NormalizeSite(w)
+		if h == "" || strings.ContainsRune(h, '/') || !strings.Contains(h, ".") {
+			continue
+		}
+		if _, err := netip.ParseAddr(h); err == nil || slices.Contains(out, h) {
+			continue
+		}
+		out = append(out, h)
+		if len(out) == MaxWorkers {
+			break
+		}
+	}
+	return out
 }
 
 // siteNet reads an address or network entry, canonical: the network

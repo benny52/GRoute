@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/netip"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -36,6 +38,9 @@ type tgState struct {
 	tgErr    string // why the proxy does not listen
 	tgLive   atomic.Pointer[tgws.Bridge]
 	tgStop   context.CancelFunc // ends the self-checks
+	// tgCF: tg-ws-proxy's Cloudflare domains as last fetched (nil: the
+	// built-in list).
+	tgCF atomic.Pointer[[]string]
 }
 
 // TelegramView is the Telegram part of the page.
@@ -51,12 +56,20 @@ type TelegramView struct {
 	// Intercepted: HyRoute is connected, so Telegram's own connections
 	// reach the bridge without a proxy set in Telegram.
 	Intercepted bool `json:"intercepted"`
+	// Cloudflare: the route through tg-ws-proxy's Cloudflare domains is
+	// on; CloudflareFirst: the DPI bypass carries it, so it goes before
+	// the VPN. Workers: the user's Cloudflare Workers.
+	Cloudflare      bool     `json:"cloudflare"`
+	CloudflareFirst bool     `json:"cloudflareFirst"`
+	Workers         []string `json:"workers"`
 }
 
 // TelegramInput is what the page saves.
 type TelegramInput struct {
-	Enabled bool `json:"enabled"`
-	Port    int  `json:"port"` // 0 = the default
+	Enabled    bool     `json:"enabled"`
+	Port       int      `json:"port"` // 0 = the default
+	Cloudflare bool     `json:"cloudflare"`
+	Workers    []string `json:"workers"`
 }
 
 // tgListenAddr is where the proxy listens (a test hook).
@@ -76,10 +89,10 @@ func (c *Controller) tgApplyLocked() {
 	if c.zapretErr != nil {
 		want.Enabled = false
 	}
-	if c.tgBridge != nil && want.Enabled && want == c.tgOn && c.tgProxy != nil {
+	if c.tgBridge != nil && want.Enabled && want.Equal(c.tgOn) && c.tgProxy != nil {
 		return
 	}
-	if c.tgBridge != nil && want.Enabled && want == c.tgOn {
+	if c.tgBridge != nil && want.Enabled && want.Equal(c.tgOn) {
 		c.tgListenLocked(want) // the port may be free now
 		return
 	}
@@ -97,13 +110,107 @@ func (c *Controller) tgApplyLocked() {
 	if !want.Enabled {
 		return
 	}
-	c.tgBridge = tgws.New(tgBridgeConfig(c))
+	bc := tgBridgeConfig(c)
+	bc.Workers = slices.Clone(want.Workers)
+	bc.Cloudflare = c.tgCloudflareDomains(want)
+	c.tgBridge = tgws.New(bc)
 	c.tgBridge.Warm()
 	c.tgLive.Store(c.tgBridge)
 	ctx, cancel := context.WithCancel(context.Background())
 	c.tgStop = cancel
 	go c.tgChecks(ctx, c.tgBridge)
+	if !want.NoCloudflare {
+		go c.tgFetchCloudflare(ctx)
+	}
 	c.tgListenLocked(want)
+}
+
+// tgCloudflareDefault is the built-in list (a test hook).
+var tgCloudflareDefault = tgws.DefaultCloudflare
+
+// tgCloudflareDomains: the Cloudflare domains for t (nil: that route off).
+func (c *Controller) tgCloudflareDomains(t zapret.TelegramSettings) []string {
+	if !t.Enabled || t.NoCloudflare {
+		return nil
+	}
+	if p := c.tgCF.Load(); p != nil {
+		return *p
+	}
+	return tgCloudflareDefault()
+}
+
+// cloudflareListsLocked: the hosts of «Telegram без VPN»'s Cloudflare
+// routes go into the list of a target the bypass runs for — Discord's,
+// whose methods are picked against Cloudflare's addresses (its media live
+// there), else the own sites' — so winws2 carries them past a provider
+// that cuts Cloudflare (as tg-ws-proxy's guide asks of zapret's users).
+// nil: no Cloudflare route, or no such target.
+func (c *Controller) cloudflareListsLocked(plans map[zapret.Target]zapret.Plan) map[zapret.Target][]string {
+	t := c.zapretCfg.Telegram
+	hosts := slices.Concat(c.tgCloudflareDomains(t), t.Workers)
+	if !t.Enabled || len(hosts) == 0 {
+		return nil
+	}
+	for _, target := range []zapret.Target{zapret.Discord, zapret.Sites} {
+		if _, ok := plans[target]; ok {
+			return map[zapret.Target][]string{target: hosts}
+		}
+	}
+	return nil
+}
+
+// tgCloudflareCovered: winws2 runs with the Cloudflare hosts in its lists.
+func (c *Controller) tgCloudflareCovered() bool { return c.zapretArgs != nil && c.zapretExtra != nil }
+
+// tgCloudflareLocked gives the bridge the current domains and whether
+// Cloudflare goes before the VPN.
+func (c *Controller) tgCloudflareLocked() {
+	if c.tgBridge != nil {
+		c.tgBridge.SetCloudflare(c.tgCloudflareDomains(c.tgOn), c.tgCloudflareCovered())
+	}
+}
+
+// Test hooks: tg-ws-proxy's list of Cloudflare domains and when it is
+// fetched again (after a failure: sooner).
+var (
+	tgCloudflareFetch = func(ctx context.Context) ([]string, error) {
+		return tgws.FetchCloudflare(ctx, &http.Client{Timeout: 30 * time.Second, Transport: directTransport})
+	}
+	tgCloudflareFirst = 20 * time.Second
+	tgCloudflareEvery = time.Hour
+	tgCloudflareRetry = 10 * time.Minute
+)
+
+// tgFetchCloudflare keeps the Cloudflare domains current while the bridge
+// runs: tg-ws-proxy's author replaces the domains that get blocked.
+func (c *Controller) tgFetchCloudflare(ctx context.Context) {
+	t := time.NewTimer(tgCloudflareFirst)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		list, err := tgCloudflareFetch(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			c.Log.Info("tgws: Cloudflare domains not fetched, the known ones stay", "err", err)
+			t.Reset(tgCloudflareRetry)
+			continue
+		}
+		t.Reset(tgCloudflareEvery)
+		if cur := c.tgCF.Load(); cur != nil && slices.Equal(*cur, list) {
+			continue
+		}
+		c.tgCF.Store(&list)
+		c.Log.Info("tgws: Cloudflare domains updated", "count", len(list))
+		c.zapretMu.Lock()
+		c.zapretApplyLocked() // the bridge's domains, winws2's lists
+		c.zapretMu.Unlock()
+	}
 }
 
 // tgListenLocked starts the proxy on its port.
@@ -203,7 +310,12 @@ func (c *Controller) groupMemberFor(gid string) string {
 
 func (c *Controller) telegramViewLocked() TelegramView {
 	t := c.zapretCfg.Telegram
-	v := TelegramView{Enabled: t.Enabled, Port: t.TelegramPort(), Error: c.tgErr}
+	v := TelegramView{Enabled: t.Enabled, Port: t.TelegramPort(), Error: c.tgErr,
+		Cloudflare: !t.NoCloudflare, CloudflareFirst: t.Enabled && !t.NoCloudflare && c.tgCloudflareCovered(),
+		Workers: slices.Clone(t.Workers)}
+	if v.Workers == nil {
+		v.Workers = []string{}
+	}
 	if c.tgBridge != nil {
 		v.Stats, v.Health = c.tgBridge.Stats(), c.tgBridge.Health()
 		c.mu.Lock()
@@ -229,8 +341,25 @@ func (c *Controller) SaveTelegram(in TelegramInput) error {
 	if c.zapretErr != nil {
 		return fmt.Errorf("zapret.json не загружен, изменения не сохраняются: %v", c.zapretErr)
 	}
+	var workers []string
+	for _, w := range in.Workers {
+		if strings.TrimSpace(w) == "" {
+			continue
+		}
+		h := zapret.NormalizeWorkers([]string{w})
+		if len(h) == 0 {
+			return fmt.Errorf("«%s» — не адрес Worker'а (нужен вида имя.аккаунт.workers.dev)", strings.TrimSpace(w))
+		}
+		if !slices.Contains(workers, h[0]) {
+			workers = append(workers, h[0])
+		}
+	}
+	if len(workers) > zapret.MaxWorkers {
+		return fmt.Errorf("Worker'ов — не больше %d", zapret.MaxWorkers)
+	}
 	next := cloneZapretSettings(c.zapretCfg)
 	next.Telegram.Enabled, next.Telegram.Port = in.Enabled, in.Port
+	next.Telegram.NoCloudflare, next.Telegram.Workers = !in.Cloudflare, workers
 	if next.Telegram.Port == zapret.DefaultTelegramPort {
 		next.Telegram.Port = 0
 	}

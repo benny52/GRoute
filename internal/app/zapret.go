@@ -38,11 +38,14 @@ type zapretState struct {
 	zapretDir  string // winws2's folder once staged
 	zapretPrep string // why it could not be staged
 	zapretArgs []string
-	zapretKey  string             // the network zapretArgs were built for
-	zapretNet  string             // its name, for the page
-	zapretStop context.CancelFunc // ends zapretWatch
-	zapretPick *ZapretPickView
-	pickCancel context.CancelFunc
+	// zapretExtra: HyRoute's own hosts in the running bypass's lists (the
+	// Cloudflare domains of «Telegram без VPN»; nil: none).
+	zapretExtra map[zapret.Target][]string
+	zapretKey   string             // the network zapretArgs were built for
+	zapretNet   string             // its name, for the page
+	zapretStop  context.CancelFunc // ends zapretWatch
+	zapretPick  *ZapretPickView
+	pickCancel  context.CancelFunc
 	// pickMu guards zapretPick, pickCancel, zapretBusy and zapretShown
 	// (read by ZapretInfo while an apply or a pick holds zapretMu).
 	pickMu      sync.Mutex
@@ -297,7 +300,7 @@ func (c *Controller) zapretServersChanged() {
 	if c.zapretArgs == nil {
 		return
 	}
-	if err := zapret.WriteLists(c.ZapretLists, c.zapretCfg.Sites, c.zapretServers()); err != nil {
+	if err := zapret.WriteLists(c.ZapretLists, c.zapretCfg.Sites, c.zapretServers(), c.zapretExtra); err != nil {
 		c.Log.Warn("zapret: lists not written", "err", err)
 	}
 }
@@ -314,6 +317,8 @@ func (c *Controller) zapretApplyLocked() {
 	run := c.zapretRunner()
 	c.syncZapretRules(cfg)
 	c.tgApplyLocked() // Telegram's proxy: on its own switch
+	// Cloudflare before the VPN once it is known whether winws2 carries it.
+	defer c.tgCloudflareLocked()
 	defer c.zapretWatchLocked(cfg)
 	defer c.zapretHealLocked(cfg)
 	if c.zapretErr != nil || !cfg.Enabled || len(cfg.Targets) == 0 || c.ZapretPrepare == nil || c.ZapretLists == "" {
@@ -346,7 +351,8 @@ func (c *Controller) zapretApplyLocked() {
 		run.Stop()
 		return
 	}
-	if err := zapret.WriteLists(c.ZapretLists, cfg.Sites, c.zapretServers()); err != nil {
+	extra := c.cloudflareListsLocked(plans)
+	if err := zapret.WriteLists(c.ZapretLists, cfg.Sites, c.zapretServers(), extra); err != nil {
 		c.Log.Error("zapret: lists not written", "err", err)
 		run.Stop()
 		return
@@ -358,9 +364,10 @@ func (c *Controller) zapretApplyLocked() {
 		return
 	}
 	if slices.Equal(args, c.zapretArgs) && run.Status().State != zapret.Off {
+		c.zapretExtra = extra
 		return
 	}
-	c.zapretArgs = args
+	c.zapretArgs, c.zapretExtra = args, extra
 	run.Exe = filepath.Join(dir, "winws2.exe")
 	c.Log.Info("zapret: winws2 starting", "targets", len(plans))
 	run.Start(args)
@@ -693,6 +700,7 @@ func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretV
 // without zapretMu while a save normalizes the maps of zapretCfg in place.
 func cloneZapretSettings(s zapret.Settings) zapret.Settings {
 	s.Targets, s.Sites = slices.Clone(s.Targets), slices.Clone(s.Sites)
+	s.Telegram.Workers = slices.Clone(s.Telegram.Workers)
 	s.Methods, s.Via = cloneMap(s.Methods), cloneMap(s.Via)
 	if s.AutoHeal != nil {
 		on := *s.AutoHeal
@@ -842,7 +850,7 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 	}
 	// The user's bypass keeps running: it skips the probes' ports.
 	key, _ := c.zapretNetKey()
-	if err := zapret.WriteLists(c.ZapretLists, cfg.Sites, c.zapretServers()); err != nil {
+	if err := zapret.WriteLists(c.ZapretLists, cfg.Sites, c.zapretServers(), c.zapretExtra); err != nil {
 		return finish(err)
 	}
 	checkAll := func(slot int, ts []zapret.Target) map[zapret.Target]zapret.Result {

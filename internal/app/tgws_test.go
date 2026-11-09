@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -94,9 +96,9 @@ func tgwsTestDC() netip.AddrPort { return netip.MustParseAddrPort("149.154.167.5
 // routes, no pool, no self-checks.
 func noTelegramNet(t *testing.T) {
 	t.Helper()
-	cfg, first := tgBridgeConfig, tgCheckFirst
-	t.Cleanup(func() { tgBridgeConfig, tgCheckFirst = cfg, first })
-	tgCheckFirst = time.Hour
+	cfg, first, cfFirst := tgBridgeConfig, tgCheckFirst, tgCloudflareFirst
+	t.Cleanup(func() { tgBridgeConfig, tgCheckFirst, tgCloudflareFirst = cfg, first, cfFirst })
+	tgCheckFirst, tgCloudflareFirst = time.Hour, time.Hour
 	tgBridgeConfig = func(c *Controller) tgws.Config {
 		return tgws.Config{Log: c.Log, PoolSize: -1, Redirect: map[int]netip.Addr{},
 			Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -197,4 +199,83 @@ func TestTelegramConnect(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	c.Disconnect()
+}
+
+// The Cloudflare routes: on by default in the page, the user's Workers
+// kept as hosts, tg-ws-proxy's list fetched; with the DPI bypass running
+// for Discord its list carries the hosts, and Cloudflare goes before the
+// VPN.
+func TestTelegramCloudflare(t *testing.T) {
+	c, _ := zapFixture(t)
+	noTelegramNet(t)
+	def, fetch := tgCloudflareDefault, tgCloudflareFetch
+	t.Cleanup(func() { tgCloudflareDefault, tgCloudflareFetch = def, fetch })
+	tgCloudflareDefault = func() []string { return []string{"cf-a.test"} }
+	fetched := make(chan struct{}, 1)
+	tgCloudflareFetch = func(context.Context) ([]string, error) {
+		select {
+		case fetched <- struct{}{}:
+		default:
+		}
+		return []string{"cf-b.test", "cf-c.test", "cf-d.test"}, nil
+	}
+	if err := c.SaveTelegram(TelegramInput{Enabled: true, Port: freePort(t), Cloudflare: true, Workers: []string{"https://W.user.workers.dev/apiws", "w.user.workers.dev", " "}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.SaveTelegram(TelegramInput{}) })
+	v := c.ZapretInfo().Telegram
+	if !v.Cloudflare || v.CloudflareFirst || !slices.Equal(v.Workers, []string{"w.user.workers.dev"}) {
+		t.Fatalf("%+v", v)
+	}
+	if z, _ := c.Store.LoadZapret(); z.Telegram.NoCloudflare || !slices.Equal(z.Telegram.Workers, []string{"w.user.workers.dev"}) {
+		t.Fatalf("%+v", z.Telegram)
+	}
+	if err := c.SaveTelegram(TelegramInput{Enabled: true, Cloudflare: true, Workers: []string{"1.2.3.4"}}); err == nil || !strings.Contains(err.Error(), "Worker") {
+		t.Fatalf("%v", err)
+	}
+	// The bypass for Discord: its list takes the domains and the Worker.
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.Discord}}); err != nil {
+		t.Fatal(err)
+	}
+	waitZapret(t, c, zapret.Running)
+	b, _ := os.ReadFile(filepath.Join(c.ZapretLists, zapret.ListDiscord))
+	if !strings.Contains(string(b), "\ncf-a.test\n") || !strings.Contains(string(b), "\nw.user.workers.dev\n") {
+		t.Fatalf("%q", b)
+	}
+	if v := c.ZapretInfo().Telegram; !v.CloudflareFirst {
+		t.Fatalf("%+v", v)
+	}
+	// tg-ws-proxy's list fetched: it replaces the built-in one, there too.
+	c.zapretMu.Lock()
+	c.tgStop()
+	ctx, cancel := context.WithCancel(context.Background())
+	c.tgStop = cancel
+	c.zapretMu.Unlock()
+	old := tgCloudflareFirst
+	tgCloudflareFirst = time.Millisecond
+	go c.tgFetchCloudflare(ctx)
+	<-fetched
+	tgCloudflareFirst = old
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		b, _ = os.ReadFile(filepath.Join(c.ZapretLists, zapret.ListDiscord))
+		if strings.Contains(string(b), "\ncf-d.test\n") && !strings.Contains(string(b), "cf-a.test") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%q", b)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Cloudflare off: out of the lists.
+	if err := c.SaveTelegram(TelegramInput{Enabled: true, Port: freePort(t)}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(filepath.Join(c.ZapretLists, zapret.ListDiscord))
+	if strings.Contains(string(b), "cf-") || strings.Contains(string(b), "workers.dev") {
+		t.Fatalf("%q", b)
+	}
+	if v := c.ZapretInfo().Telegram; v.Cloudflare || v.CloudflareFirst {
+		t.Fatalf("%+v", v)
+	}
 }

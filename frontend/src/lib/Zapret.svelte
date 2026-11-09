@@ -121,15 +121,26 @@
   let tgBusy = $state(false);
   let tgError = $state('');
   let tgPort = $state(1443);
+  let tgCF = $state(true);
+  let tgWorkers = $state('');
+  let tgTyping = false; // the Workers' field has focus: a refresh keeps what is typed
   let tgNote = $state('');
   $effect(() => {
-    if (view && !tgBusy) tgPort = view.telegram.port;
+    if (view && !tgBusy) {
+      tgPort = view.telegram.port;
+      tgCF = view.telegram.cloudflare;
+      if (!tgTyping) tgWorkers = view.telegram.workers.join('\n');
+    }
   });
   async function saveTelegram(on: boolean) {
     tgBusy = true;
     tgError = '';
     try {
-      await api.SaveTelegram({ enabled: on, port: Number(tgPort) || 0 });
+      const workers = tgWorkers
+        .split(/[\s,;]+/)
+        .map((w) => w.trim())
+        .filter((w) => w);
+      await api.SaveTelegram({ enabled: on, port: Number(tgPort) || 0, cloudflare: tgCF, workers });
       loaded = false;
       await refresh();
     } catch (e) {
@@ -222,7 +233,7 @@
       <p class="muted small">
         Telegram ходит к своим серверам через WebSocket веб-версии — их блокируют редко. Когда HyRoute подключён, он перехватывает Telegram сам (и его
         форки, например AyuGram): ничего настраивать не нужно. Без подключения Telegram идёт через прокси HyRoute — его нужно один раз добавить в
-        Telegram. Если WebSocket не отвечает, Telegram идёт через ваш сервер VPN или напрямую. Звонки так не идут.
+        Telegram. Если WebSocket не отвечает, Telegram идёт через Cloudflare, ваш сервер VPN или напрямую. Звонки так не идут.
       </p>
       <label class="switch">
         <input type="checkbox" checked={tg.enabled} disabled={tgBusy} onchange={(e) => saveTelegram(e.currentTarget.checked)} />
@@ -235,16 +246,29 @@
             ✓ Telegram отвечает через WebSocket{h.wsRoute === 'ws-fronted' ? ' (под другим именем: прямое заблокировано)' : ''}, {h.wsMillis} мс · проверено
             {clock(Date.parse(h.at))}
           </div>
-        {:else if h.fallback}
+        {:else if h.fallback || h.cf}
+          {@const viaCF = h.cf && (tg.cloudflareFirst || !tg.intercepted || !h.fallback)}
           <div class="note info small">
-            WebSocket сейчас не отвечает — Telegram идёт {h.fallback === 'vpn' ? 'через ваш сервер VPN' : 'напрямую к серверам Telegram'}. HyRoute
-            проверяет снова каждые 5 минут и вернётся к WebSocket, когда он заработает. <span class="faint">({hide(h.wsError)})</span>
+            WebSocket сейчас не отвечает — Telegram идёт
+            {viaCF ? 'через Cloudflare' : h.fallback === 'vpn' ? 'через ваш сервер VPN' : 'напрямую к серверам Telegram'}. HyRoute проверяет снова
+            каждые 5 минут и вернётся к WebSocket, когда он заработает. <span class="faint">({hide(h.wsError)})</span>
           </div>
         {:else}
           <div class="note error small">
-            Telegram не отвечает ни через WebSocket, ни {tg.intercepted ? 'через VPN, ни ' : ''}напрямую.
+            Telegram не отвечает ни через WebSocket, ни {tg.cloudflare ? 'через Cloudflare, ни ' : ''}{tg.intercepted ? 'через VPN, ни ' : ''}напрямую.
             {tg.intercepted ? 'Проверьте интернет и сервер VPN.' : 'Подключите HyRoute к серверу VPN: тогда Telegram пойдёт через него.'}
             <span class="faint">({hide(h.wsError ?? '')}{h.fallbackError ? '; ' + hide(h.fallbackError) : ''})</span>
+          </div>
+        {/if}
+        {#if tg.cloudflare || tg.workers.length > 0}
+          <div class="small {h.cf ? 'using' : 'muted'}">
+            {#if h.cf}
+              ✓ Запасной путь через {h.cfRoute === 'worker' ? 'ваш Worker' : 'Cloudflare'} отвечает, {h.cfMillis} мс{tg.cloudflareFirst
+                ? ' — обход DPI его пропускает, он идёт раньше VPN'
+                : ''}.
+            {:else}
+              Запасной путь через Cloudflare сейчас не отвечает{tg.cloudflareFirst ? '' : ' (возможно, провайдер режет Cloudflare: поможет обход DPI для Discord или своих сайтов)'}.
+            {/if}
           </div>
         {/if}
       {/if}
@@ -269,16 +293,41 @@
         </p>
         {#if tg.stats.total > 0}
           <div class="small">
-            Соединений сейчас: {tg.stats.active}. Всего: через WebSocket {(r['ws'] ?? 0) + (r['ws-fronted'] ?? 0)}, через VPN {r['vpn'] ?? 0}, напрямую
-            {r['tcp'] ?? 0}{tg.stats.failed ? `, не открылось ${tg.stats.failed}` : ''}.
+            Соединений сейчас: {tg.stats.active}. Всего: через WebSocket {(r['ws'] ?? 0) + (r['ws-fronted'] ?? 0)}{tg.cloudflare || tg.workers.length
+              ? `, через Cloudflare ${(r['cloudflare'] ?? 0) + (r['worker'] ?? 0)}`
+              : ''}, через VPN {r['vpn'] ?? 0}, напрямую {r['tcp'] ?? 0}{tg.stats.failed ? `, не открылось ${tg.stats.failed}` : ''}.
+          </div>
+        {/if}
+        {#if tg.stats.mediaOff?.length}
+          <div class="muted small">
+            Фото и видео с {tg.stats.mediaOff.map((d) => 'DC' + d).join(', ')} не приходили через WebSocket — час они идут другим путём (так бывает на
+            аккаунтах без Premium).
           </div>
         {/if}
         {#if tg.stats.bad > 0}<div class="note error small">Telegram подключается с неверным секретом: удалите старый прокси в Telegram и нажмите «Подключить Telegram».</div>{/if}
         {#if tg.stats.lastError}<div class="muted small">Последняя ошибка: {hide(tg.stats.lastError)}</div>{/if}
       {/if}
+      {#if tg.enabled}
+        <label class="switch">
+          <input type="checkbox" bind:checked={tgCF} disabled={tgBusy} onchange={() => saveTelegram(tg.enabled)} />
+          <span>Запасной путь через Cloudflare</span>
+        </label>
+        <p class="muted small">
+          Когда WebSocket Telegram заблокирован, соединения идут через домены на Cloudflare, которые держит автор tg-ws-proxy: так открываются все
+          дата-центры Telegram без VPN. Переписку ни Cloudflare, ни владелец домена не прочитают — она зашифрована, — но видят, что вы пользуетесь
+          Telegram. Если включён обход DPI для Discord или своих сайтов, HyRoute пропускает через него и эти домены, и Cloudflare идёт раньше VPN; без
+          этого — после VPN.
+        </p>
+      {/if}
       {#if ui.expert}
         <label class="lbl" for="tg-port">Порт прокси (127.0.0.1)</label>
         <input id="tg-port" type="number" min="1024" max="65535" bind:value={tgPort} onchange={() => saveTelegram(tg.enabled)} />
+        <label class="lbl" for="tg-workers">Свои Cloudflare Worker'ы (необязательно, по одному в строке)</label>
+        <textarea id="tg-workers" rows="2" placeholder="имя.аккаунт.workers.dev" bind:value={tgWorkers}
+          onfocus={() => (tgTyping = true)}
+          onblur={() => (tgTyping = false)}
+          onchange={() => saveTelegram(tg.enabled)}></textarea>
+        <p class="muted small">Worker — свой бесплатный посредник на Cloudflare, без чужих доменов. Как его создать — в справке (Обход DPI → Telegram без VPN).</p>
       {/if}
       {#if tgError}<div class="note error small">{hide(tgError)}</div>{/if}
       {#if tgNote && !tgError}<div class="note ok small">{tgNote}</div>{/if}

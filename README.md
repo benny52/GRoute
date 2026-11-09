@@ -147,7 +147,7 @@ game.exe -> Нидерланды | udp 27000-27200
 
 zapret2 скачивается с GitHub при первом включении и сверяется с контрольными суммами; командная строка winws2 собирается только из проверенных частей. [Подробнее](docs/GUIDE.md#обход-dpi), [как устроено](docs/architecture/zapret.md).
 
-**Telegram без VPN** (Windows и macOS): HyRoute поднимает прокси для Telegram Desktop и ведёт его через WebSocket веб-версии Telegram. Если WebSocket не открывается — через ваш сервер VPN, а не через чужие серверы. Подключается одной кнопкой. [Подробнее](docs/GUIDE.md#telegram-без-vpn), [как устроено](docs/architecture/tgws.md).
+**Telegram без VPN** (Windows и macOS): HyRoute поднимает прокси для Telegram Desktop и ведёт его через WebSocket веб-версии Telegram. Если WebSocket не открывается — через Cloudflare (домены tg-ws-proxy или свой Worker; можно выключить) или ваш сервер VPN. Подключается одной кнопкой. [Подробнее](docs/GUIDE.md#telegram-без-vpn), [как устроено](docs/architecture/tgws.md).
 
 ### Серверы и подписки
 

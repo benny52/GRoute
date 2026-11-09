@@ -124,7 +124,8 @@ type fakeTG struct {
 	inits     []initSeen      // relay inits seen
 	unaligned atomic.Int32    // WebSocket messages that were not one packet
 	tcpConns  atomic.Int32
-	raw       net.Listener // a plain echo: web.telegram.org and the like
+	raw       net.Listener    // a plain echo: web.telegram.org and the like
+	silent    map[string]bool // Hosts whose WebSocket never answers
 }
 
 type initSeen struct {
@@ -132,6 +133,7 @@ type initSeen struct {
 	proto uint32
 	via   string // "ws" or "tcp"
 	host  string
+	query string // the WebSocket URL's query (a Worker's dst)
 }
 
 func newFakeTG(t *testing.T, certFor ...string) *fakeTG {
@@ -146,7 +148,7 @@ func newFakeTG(t *testing.T, certFor ...string) *fakeTG {
 		t.Fatal(err)
 	}
 	cert, _ := x509.ParseCertificate(der)
-	f := &fakeTG{t: t, roots: x509.NewCertPool(), refuse: map[string]int{}, blockSNI: map[string]bool{}}
+	f := &fakeTG{t: t, roots: x509.NewCertPool(), refuse: map[string]int{}, blockSNI: map[string]bool{}, silent: map[string]bool{}}
 	f.roots.AddCert(cert)
 	f.cfg = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
 		GetConfigForClient: func(h *tls.ClientHelloInfo) (*tls.Config, error) {
@@ -175,11 +177,13 @@ func newFakeTG(t *testing.T, certFor ...string) *fakeTG {
 	return f
 }
 
-// dial routes the bridge's dials: the WebSocket address to the TLS
-// listener, a data center's address to the TCP one.
+// dial routes the bridge's dials: the WebSocket address and any name
+// (Cloudflare's) to the TLS listener, a data center's address to the TCP
+// one.
 func (f *fakeTG) dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	var d net.Dialer
-	if strings.HasPrefix(addr, "127.0.0.1:") || strings.HasPrefix(addr, "127.0.0.2:") {
+	host, _, _ := net.SplitHostPort(addr)
+	if _, err := netip.ParseAddr(host); err != nil || strings.HasPrefix(addr, "127.0.0.1:") || strings.HasPrefix(addr, "127.0.0.2:") {
 		return d.DialContext(ctx, network, f.ln.Addr().String())
 	}
 	if addr == webAddr {
@@ -273,8 +277,13 @@ func (f *fakeTG) handleWS(c *tls.Conn) {
 	}
 	dec, enc, proto, dc := serverSide(init)
 	f.mu.Lock()
-	f.inits = append(f.inits, initSeen{dc: dc, proto: proto, via: "ws", host: req.Host})
+	f.inits = append(f.inits, initSeen{dc: dc, proto: proto, via: "ws", host: req.Host, query: req.URL.RawQuery})
+	silent := f.silent[req.Host]
 	f.mu.Unlock()
+	if silent {
+		io.Copy(io.Discard, br)
+		return
+	}
 	for {
 		m, err := readFrame(br)
 		if err != nil {

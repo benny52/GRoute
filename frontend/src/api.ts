@@ -1955,11 +1955,12 @@ export interface TelegramView {
     total: number;
     bad: number;
     failed: number;
-    routes: Record<string, number> | null; // ws, ws-fronted, vpn, tcp
+    routes: Record<string, number> | null; // ws, ws-fronted, cloudflare, worker, vpn, tcp
     up: number;
     down: number;
     lastRoute: string;
     lastError?: string;
+    mediaOff?: number[]; // data centers whose media skip WebSocket for now
   };
   // The latest self-check (req_pq to Telegram through each route).
   health?: {
@@ -1968,10 +1969,24 @@ export interface TelegramView {
     wsRoute?: string; // ws | ws-fronted
     wsMillis?: number;
     wsError?: string;
+    cf?: boolean; // Cloudflare answered (checked whenever it is on)
+    cfRoute?: string; // cloudflare | worker
+    cfMillis?: number;
+    cfError?: string;
     fallback?: string; // vpn | tcp: what answered when WebSocket did not
     fallbackError?: string;
   };
   intercepted: boolean; // connected: Telegram reaches the bridge with no proxy set
+  cloudflare: boolean; // the route through tg-ws-proxy's Cloudflare domains is on
+  cloudflareFirst: boolean; // the DPI bypass carries it: before the VPN
+  workers: string[]; // the user's Cloudflare Workers
+}
+
+export interface TelegramInput {
+  enabled: boolean;
+  port: number;
+  cloudflare: boolean;
+  workers: string[];
 }
 
 export interface ZapretInput {
@@ -1988,7 +2003,7 @@ interface GUI {
   ZapretPick(): Promise<ZapretView>;
   ZapretPickCancel(): Promise<void>;
   ZapretRoute(t: ZapretTarget): Promise<ZapretRoute>;
-  SaveTelegram(i: { enabled: boolean; port: number }): Promise<void>;
+  SaveTelegram(i: TelegramInput): Promise<void>;
   OpenTelegramProxy(): Promise<void>;
   ZapretViaVPN(i: ZapretViaInput): Promise<void>;
 }

@@ -130,7 +130,7 @@ func TestBuild(t *testing.T) {
 
 func TestWriteLists(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteLists(dir, nil, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")}); err != nil {
+	if err := WriteLists(dir, nil, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if l, err := os.ReadFile(filepath.Join(dir, LuaFile)); err != nil || !strings.Contains(string(l), "function hyroute_success(") {
@@ -153,6 +153,22 @@ func TestWriteLists(t *testing.T) {
 	// Cloudflare site with ECH direct.
 	if slices.Contains(Domains(Discord, nil), "cloudflare-ech.com") {
 		t.Fatal("cloudflare-ech.com in Discord's rule")
+	}
+	// HyRoute's own hosts in a target's list: the sites list stops being
+	// the placeholder.
+	if err := WriteLists(dir, nil, nil, map[Target][]string{Sites: {"cf.example"}}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, ListSites)); string(b) != "# HyRoute: файл пересоздаётся\ncf.example\n" {
+		t.Fatalf("%q", b)
+	}
+}
+
+func TestNormalizeWorkers(t *testing.T) {
+	got := NormalizeWorkers([]string{"https://My-Worker.User.workers.dev/apiws", "my-worker.user.workers.dev", "1.2.3.4", "10.0.0.0/8", "nodot", "",
+		"a.dev", "b.dev", "c.dev", "d.dev", "e.dev"})
+	if !slices.Equal(got, []string{"my-worker.user.workers.dev", "a.dev", "b.dev", "c.dev", "d.dev"}) {
+		t.Fatalf("%q", got)
 	}
 }
 
@@ -333,7 +349,7 @@ func TestSiteAddresses(t *testing.T) {
 	}
 	// Lists: names by name, addresses as an ipset.
 	dir := t.TempDir()
-	if err := WriteLists(dir, sites, nil); err != nil {
+	if err := WriteLists(dir, sites, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if l, err := os.ReadFile(filepath.Join(dir, LuaFile)); err != nil || !strings.Contains(string(l), "function hyroute_success(") {
