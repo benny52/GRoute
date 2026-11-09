@@ -97,6 +97,12 @@ func Parse(raw string) (l Link, warnings []string, err error) {
 	s.Authority = get("authority")
 	s.Mode = get("mode")
 	s.Extra = get("extra")
+	if clean, dropped, err := CleanExtra(s.Extra); err == nil { // else Validate says so
+		s.Extra = clean
+		for _, d := range dropped {
+			warnings = append(warnings, "xhttp extra: «"+d+"» из ссылки не принимается")
+		}
+	}
 	s.Seed = get("seed")
 	if s.Network == "grpc" && s.Mode == "" && s.ServiceName == "" {
 		// Some panels put the service name in path.

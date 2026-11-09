@@ -392,6 +392,14 @@ func (r *Result) xray(protocol, name string, raw json.RawMessage) {
 			r.fail(name, err)
 			return
 		}
+		var dropped []string
+		if s.Extra, dropped, err = vless.CleanExtra(s.Extra); err != nil {
+			r.fail(name, err)
+			return
+		}
+		for _, d := range dropped {
+			r.warn(name, "xhttp: «"+d+"» не переносится")
+		}
 	case "kcp":
 		if k := ss.KCP; k != nil {
 			s.Seed, s.HeaderType = k.Seed, k.Header.Type

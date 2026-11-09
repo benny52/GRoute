@@ -134,8 +134,10 @@ func stream(s Settings, name string) map[string]any {
 		if s.Mode != "" {
 			x["mode"] = s.Mode
 		}
-		if s.Extra != "" {
-			x["extra"] = json.RawMessage(s.Extra)
+		// Again here: settings saved before CleanExtra or restored from a
+		// backup.
+		if extra, _, err := CleanExtra(s.Extra); err == nil && extra != "" {
+			x["extra"] = json.RawMessage(extra)
 		}
 		st["xhttpSettings"] = x
 	case "kcp":
