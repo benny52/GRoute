@@ -906,6 +906,9 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 				}
 				args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Sites: cfg.Sites, Filter: zapret.ProbeOnly(i + 1)})
 				if err != nil {
+					for _, r := range testers[:i] {
+						r.Stop() // started: none left on its probe ports
+					}
 					return nil, err
 				}
 				testers[i] = &zapret.Runner{Exe: filepath.Join(dir, "winws2.exe"), Log: c.Log, Spawn: zapretSpawn}

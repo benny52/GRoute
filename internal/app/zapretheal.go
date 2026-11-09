@@ -140,6 +140,22 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 		return
 	}
 	if _, ok := cfg.Picked[key]; !ok {
+		// Not offline: a pick there finds nothing and is kept for the
+		// network all the same. A service that opens without a bypass, or
+		// is blocked so that one can help, says the network is up.
+		up := false
+		for _, t := range targets {
+			if r := zapretCheckFunc(ctx, 0, zapret.Checks(t, cfg.Sites)); r.OK || r.Bypassable() {
+				up = true
+				break
+			}
+		}
+		if !up {
+			if ctx.Err() == nil {
+				c.setHeal("Сервисы не открываются и без обхода (нет интернета?): подберу методы, когда сеть заработает")
+			}
+			return
+		}
 		c.healPick(ctx, key, started, "на этой сети ещё не подбирали методы", targets)
 		return
 	}
