@@ -12,7 +12,9 @@ import (
 
 func TestRulesText(t *testing.T) {
 	r := Rules(321)
-	for _, want := range []string{"pass out quick group 321", "block drop quick all", "user _mdnsresponder", "<hyroute_tun>"} {
+	for _, want := range []string{"pass out quick group 321 flags any keep state", "block drop quick all", "user _mdnsresponder", "<hyroute_tun>",
+		// Connections open before the switch: no SYN-only state.
+		"pass quick on lo0 all no state", "pass out quick from <hyroute_tun> no state"} {
 		if !strings.Contains(r, want) {
 			t.Fatalf("%q missing:\n%s", want, r)
 		}

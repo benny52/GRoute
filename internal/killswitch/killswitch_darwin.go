@@ -69,12 +69,16 @@ func Rules(gid int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "table <hyroute_lan> const { %s }\n", list(LAN))
 	fmt.Fprintf(&b, "table <hyroute_tun> const { %s }\n", list(TUNAddrs))
-	b.WriteString("pass quick on lo0 all\n")
-	b.WriteString("pass out quick from <hyroute_tun>\n")
-	b.WriteString("pass in quick to <hyroute_tun>\n")
-	fmt.Fprintf(&b, "pass out quick group %d\n", gid)
-	b.WriteString("pass out quick to <hyroute_lan>\n")
-	b.WriteString("pass in quick from <hyroute_lan>\n")
+	// pf's pass keeps state and takes TCP only from its SYN (flags S/SA):
+	// connections open before the switch was armed (it can be turned on
+	// while connected) would hang. Loopback and the device's addresses
+	// pass without state; the rest keep state from any packet.
+	b.WriteString("pass quick on lo0 all no state\n")
+	b.WriteString("pass out quick from <hyroute_tun> no state\n")
+	b.WriteString("pass in quick to <hyroute_tun> no state\n")
+	fmt.Fprintf(&b, "pass out quick group %d flags any keep state\n", gid)
+	b.WriteString("pass out quick to <hyroute_lan> flags any keep state\n")
+	b.WriteString("pass in quick from <hyroute_lan> flags any keep state\n")
 	b.WriteString("pass out quick inet proto udp from any port 68 to any port 67\n")
 	b.WriteString("pass in quick inet proto udp from any port 67 to any port 68\n")
 	b.WriteString("pass out quick inet6 proto udp from any port 546 to any port 547\n")
