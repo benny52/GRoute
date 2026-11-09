@@ -172,6 +172,25 @@ func TestSuccessfulJob(t *testing.T) {
 	}
 }
 
+// A step that panics fails its job; the controller goes on.
+func TestPanickingStepFailsTheJob(t *testing.T) {
+	k := simpleKind("boom", Step{Name: "parse", Phase: model.JobConnecting, Run: func(context.Context, *Env) error {
+		var out []string
+		_ = out[3] // a reply shorter than expected
+		return nil
+	}})
+	h := newHarness(t, nil, k)
+	h.start()
+	j, err := h.eng.Submit(context.Background(), "boom", 0, nil, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j = h.wait(j.ID, model.JobFailed)
+	if !strings.Contains(j.ErrorDetails+j.ErrorMessage, "внутренняя ошибка") {
+		t.Fatalf("%+v", j)
+	}
+}
+
 func TestFailureRetryFromSafeStep(t *testing.T) {
 	var c counters
 	var broken atomic.Bool

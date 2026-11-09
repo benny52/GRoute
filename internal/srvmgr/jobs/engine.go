@@ -372,6 +372,23 @@ func (e *Engine) finished(ctx context.Context, j *model.Job, env *Env) {
 }
 
 func (e *Engine) runJob(ctx context.Context, id int64) {
+	// A panic in a step (output a parser did not expect) fails the job, not
+	// the controller: the recovery would run the same step again after
+	// every restart.
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		bg := context.WithoutCancel(ctx)
+		j, err := e.Store.JobByID(bg, id)
+		if err != nil {
+			return
+		}
+		env := e.bareEnv(j)
+		defer env.close()
+		e.fail(bg, &j, env, fmt.Errorf("внутренняя ошибка: %v", r))
+	}()
 	j, _, steps, rows, env, err := e.prepare(ctx, id)
 	if err != nil {
 		// A stopping controller leaves the job to the recovery.
