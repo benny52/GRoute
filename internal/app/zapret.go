@@ -73,6 +73,10 @@ var (
 	// zapretStartWait: how long a pick waits for its testers to start (a
 	// busy or just woken computer, an antivirus scanning each winws2).
 	zapretStartWait = 15 * time.Second
+	// zapretStagger spaces the testers' starts: twelve cygwin processes
+	// started at once start slowly and some fail to initialize
+	// (0xC0000142).
+	zapretStagger = 100 * time.Millisecond
 	// The generator: candidates tried around what worked, over the whole
 	// space when nothing did, the strategies kept per target, the time.
 	zapretRefine     = 24
@@ -854,6 +858,12 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 					return nil, err
 				}
 				testers[i] = &zapret.Runner{Exe: filepath.Join(dir, "winws2.exe"), Log: c.Log, Spawn: zapretSpawn}
+				if i > 0 {
+					select {
+					case <-ctx.Done():
+					case <-time.After(zapretStagger):
+					}
+				}
 				testers[i].Start(args)
 			}
 			// Until each has started (or failed), then a moment to settle.

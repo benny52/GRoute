@@ -153,7 +153,7 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 	}
 	// Own sites found dead here by the pick are not checked.
 	urls := func(t zapret.Target) []string { return zapret.ChecksSkip(t, cfg.Sites, cfg.Picked[key].SkippedSites) }
-	failing := c.healCheck(ctx, zapret.Live, check, urls)
+	failing, _ := c.healCheck(ctx, zapret.Live, check, urls)
 	if ctx.Err() != nil {
 		return
 	}
@@ -167,7 +167,7 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 		return
 	case <-time.After(zapretHealAgain):
 	}
-	failing = c.healCheck(ctx, zapret.Live, failing, urls)
+	failing, how := c.healCheck(ctx, zapret.Live, failing, urls)
 	if len(failing) == 0 || ctx.Err() != nil {
 		return
 	}
@@ -192,7 +192,20 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 		return
 	}
 	if len(need) > 0 {
-		c.healPick(ctx, key, targetNames(need)+" перестал открываться", need)
+		// What failed through the bypass, for the note (not the log: own
+		// sites are the user's).
+		var what []string
+		for _, t := range need {
+			if r, ok := how[t]; ok && len(r.Failed) > 0 {
+				what = append(what, r.Diagnosis().String())
+			}
+		}
+		why := targetNames(need) + " перестал открываться через обход"
+		if len(what) > 0 {
+			why += " (" + strings.Join(what, "; ") + ")"
+		}
+		c.Log.Info("zapret: self-healing: stopped opening", "targets", targetNames(need))
+		c.healPick(ctx, key, why, need)
 		return
 	}
 	if len(notes) > 0 {
@@ -202,19 +215,21 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 }
 
 // healCheck returns the targets that did not open from slot.
-func (c *Controller) healCheck(ctx context.Context, slot int, ts []zapret.Target, urls func(zapret.Target) []string) []zapret.Target {
+func (c *Controller) healCheck(ctx context.Context, slot int, ts []zapret.Target, urls func(zapret.Target) []string) ([]zapret.Target, map[zapret.Target]zapret.Result) {
 	type res struct {
-		t  zapret.Target
-		ok bool
+		t zapret.Target
+		r zapret.Result
 	}
 	ch := make(chan res, len(ts))
 	for _, t := range ts {
-		go func() { ch <- res{t, zapretCheckFunc(ctx, slot, urls(t)).OK} }()
+		go func() { ch <- res{t, zapretCheckFunc(ctx, slot, urls(t))} }()
 	}
 	var bad []zapret.Target
+	how := map[zapret.Target]zapret.Result{}
 	for range ts {
-		if r := <-ch; !r.ok {
+		if r := <-ch; !r.r.OK {
 			bad = append(bad, r.t)
+			how[r.t] = r.r
 		}
 	}
 	// In the settings' order.
@@ -226,7 +241,7 @@ func (c *Controller) healCheck(ctx context.Context, slot int, ts []zapret.Target
 			}
 		}
 	}
-	return out
+	return out, how
 }
 
 // healPick picks again for the network unless one did not long ago.
@@ -242,7 +257,7 @@ func (c *Controller) healPick(ctx context.Context, key, why string, ts []zapret.
 		c.setHeal(fmt.Sprintf("%s: подбирал недавно, попробую снова после %s", why, last.at.Add(gap).Format("15:04")))
 		return
 	}
-	c.Log.Info("zapret: self-healing: picking again", "why", why)
+	c.Log.Info("zapret: self-healing: picking again", "targets", targetNames(ts))
 	c.zapretMu.Lock()
 	if ctx.Err() != nil {
 		c.zapretMu.Unlock()

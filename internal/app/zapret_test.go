@@ -44,12 +44,12 @@ func zapFixture(t *testing.T) (*Controller, func(slot int) string) {
 	c.ZapretPrepare = func(context.Context) (string, error) { return t.TempDir(), nil }
 	var mu sync.Mutex
 	bySlot := map[int]string{}
-	spawn, settle, check := zapretSpawn, zapretSettle, zapretCheckFunc
+	spawn, settle, check, stagger := zapretSpawn, zapretSettle, zapretCheckFunc, zapretStagger
 	t.Cleanup(func() {
 		c.stopHeal()
-		zapretSpawn, zapretSettle, zapretCheckFunc = spawn, settle, check
+		zapretSpawn, zapretSettle, zapretCheckFunc, zapretStagger = spawn, settle, check, stagger
 	})
-	zapretSettle = time.Millisecond
+	zapretSettle, zapretStagger = time.Millisecond, 0
 	zapretSpawn = func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) {
 		slot := -1 // the user's bypass
 		for i := 1; i < zapret.ProbeSlots; i++ {
@@ -612,7 +612,7 @@ func TestZapretHeal(t *testing.T) {
 	mode.Store(1)
 	wait("the new pick", func() bool { return strings.Contains(picked(), "hostfakesplit") })
 	wait("the note", func() bool { return strings.Contains(c.ZapretInfo().HealNote, "подобрал заново") })
-	if v := c.ZapretInfo(); !strings.Contains(v.Pick.Why, "YouTube перестал открываться") {
+	if v := c.ZapretInfo(); !strings.Contains(v.Pick.Why, "YouTube перестал открываться через обход (www.youtube.com: нет ответа)") {
 		t.Fatalf("%+v", v.Pick)
 	}
 
