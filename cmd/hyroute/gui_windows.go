@@ -221,16 +221,9 @@ func (g *GUI) systemLines() []string {
 // and then installs the update, so exiting is all it takes.
 var errUpdaterWaits = errors.New("обновление уже запущено и ждёт, пока HyRoute закроется. Выйдите из HyRoute (значок в трее → «Выход»): обновление установится само")
 
-// updaterRunning reports whether a hyroute-updater holds its mutex.
-func updaterRunning() bool {
-	name, _ := windows.UTF16PtrFromString(update.UpdaterMutex)
-	h, err := windows.OpenMutex(windows.SYNCHRONIZE, false, name)
-	if err != nil {
-		return false
-	}
-	windows.CloseHandle(h)
-	return true
-}
+// updaterRunning reports whether a hyroute-updater holds its mutex (one
+// an elevated process made: update.UpdaterRunning).
+func updaterRunning() bool { return update.UpdaterRunning() }
 
 // ApplyAppUpdate hands the verified package to hyroute-updater and exits:
 // filters are removed and every Hysteria stops first. The updater waits

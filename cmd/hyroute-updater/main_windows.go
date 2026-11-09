@@ -47,14 +47,16 @@ func main() {
 	}
 	log("start: pid=%d staging=%s target=%s exe=%s from=%s", *pid, *staging, *target, *exe, *from)
 	// One update at a time: a second one would swap files under the first.
-	mname, _ := windows.UTF16PtrFromString(update.UpdaterMutex)
-	mutex, err := windows.CreateMutex(nil, true, mname)
-	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+	releaseMutex, other, err := update.HoldUpdaterMutex()
+	if err != nil {
+		log("updater mutex: %v", err)
+	}
+	if other {
 		log("another updater is running")
 		fail("Обновление уже устанавливается: программа обновления ждёт, пока закроется HyRoute.")
 	}
-	if mutex != 0 {
-		defer windows.CloseHandle(mutex)
+	if releaseMutex != nil {
+		defer releaseMutex()
 	}
 	mainExe := filepath.Join(*target, *exe)
 	// startMain starts HyRoute.exe in target as it is now: pinned
