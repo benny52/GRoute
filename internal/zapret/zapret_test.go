@@ -88,7 +88,9 @@ func TestBuild(t *testing.T) {
 		"zapret-auto.lua", "--blob=google_tls:@", "--blob=vk_tls:@", "--filter-l7=discord,stun",
 		// circular before the payload filter, seeing every packet; the
 		// methods only the ClientHello.
-		"--in-range=-s5556 --lua-desync=circular:fails=3:retrans=2:nld=2 --in-range=x --payload=tls_client_hello --lua-desync=",
+		"--in-range=-s5556 --lua-desync=circular:fails=3:retrans=2:success_detector=hyroute_success:nld=2 --in-range=x --payload=tls_client_hello --lua-desync=",
+		// HyRoute's success detector, and what winws2 need not see.
+		"--lua-init=@" + filepath.Join(lists, LuaFile), "--wf-raw-filter=" + quicLean + " and " + inboundLean,
 		"hostfakesplit:host=discord.com:tcp_ts=-1000:tcp_md5:strategy=8", "--lua-desync=fake:blob=google_tls:tcp_ts=-1000:tcp_md5:repeats=7 ",
 	} {
 		if !strings.Contains(line+" ", want) {
@@ -110,8 +112,15 @@ func TestBuild(t *testing.T) {
 	// Own sites count failures per host: nld=2 of example.co.uk is co.uk.
 	sp, _ := Settings{Enabled: true, Targets: []Target{Sites}}.PlanFor(Sites, "")
 	sargs, err := Build(BuildConfig{Dir: dir, Lists: lists, Plans: map[Target]Plan{Sites: sp}})
-	if sl := strings.Join(sargs, " "); err != nil || strings.Contains(sl, "nld") || !strings.Contains(sl, "circular:fails=3:retrans=2 --in-range=x") {
+	if sl := strings.Join(sargs, " "); err != nil || strings.Contains(sl, "nld") || !strings.Contains(sl, "circular:fails=3:retrans=2:success_detector=hyroute_success --in-range=x") {
 		t.Fatalf("%v %s", err, sl)
+	}
+	// A single method: no orchestrator, no Lua of HyRoute's; the slots'
+	// filter goes with QUIC's.
+	one, _ := Build(BuildConfig{Dir: dir, Lists: lists, Filter: ProbeOnly(1), Plans: map[Target]Plan{YouTube: {Methods: []string{"fake"}}}})
+	if ol := strings.Join(one, " "); strings.Contains(ol, LuaFile) || strings.Contains(ol, "--wf-tcp-in") ||
+		!strings.Contains(ol, "--wf-raw-filter=("+ProbeOnly(1)+") and "+quicLean+" ") || strings.Contains(ol, inboundLean) {
+		t.Fatalf("%s", ol)
 	}
 	cl := CommandLine(args)
 	if strings.Contains(cl, "data") || !strings.Contains(cl, "--blob=google_tls:@tls_clienthello_www_google_com.bin") {
@@ -123,6 +132,9 @@ func TestWriteLists(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteLists(dir, nil, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")}); err != nil {
 		t.Fatal(err)
+	}
+	if l, err := os.ReadFile(filepath.Join(dir, LuaFile)); err != nil || !strings.Contains(string(l), "function hyroute_success(") {
+		t.Fatalf("%v", err)
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, ListSites))
 	if !strings.Contains(string(b), "example.invalid") {
@@ -323,6 +335,9 @@ func TestSiteAddresses(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteLists(dir, sites, nil); err != nil {
 		t.Fatal(err)
+	}
+	if l, err := os.ReadFile(filepath.Join(dir, LuaFile)); err != nil || !strings.Contains(string(l), "function hyroute_success(") {
+		t.Fatalf("%v", err)
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, ListSites))
 	ib, _ := os.ReadFile(filepath.Join(dir, ListSitesNet))

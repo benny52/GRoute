@@ -79,7 +79,11 @@ var (
 	zapretStagger = 100 * time.Millisecond
 	// The generator: candidates tried around what worked, over the whole
 	// space when nothing did, the strategies kept per target, the time.
-	zapretRefine     = 24
+	zapretRefine = 24
+	// zapretRefineAuto: self-healing's pick tries one batch around what
+	// worked (the fastest still wins, checked twice), the whole space only
+	// when nothing worked.
+	zapretRefineAuto = 12
 	zapretBroad      = 60
 	zapretKeep       = 8
 	zapretPickBudget = 3 * time.Minute
@@ -1085,6 +1089,9 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 			}
 		}
 		budget := zapretRefine
+		if why != "" {
+			budget = zapretRefineAuto
+		}
 		if lost {
 			for _, st := range zapret.Broad(zapretBroad, zapretSeed()) {
 				add(st.ID())

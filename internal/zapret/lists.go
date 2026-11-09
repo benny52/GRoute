@@ -82,6 +82,9 @@ func WriteLists(dir string, sites []string, servers []netip.Addr) error {
 		}
 	}
 	// The generator's fakes live next to the lists.
+	if err := writeIfChanged(filepath.Join(dir, LuaFile), []byte(luaSource)); err != nil {
+		return err
+	}
 	return WriteFakes(dir)
 }
 

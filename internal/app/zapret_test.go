@@ -52,12 +52,15 @@ func zapFixture(t *testing.T) (*Controller, func(slot int) string) {
 	zapretSettle, zapretStagger = time.Millisecond, 0
 	zapretSpawn = func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) {
 		slot := -1 // the user's bypass
+		filter := func(f string) bool {
+			return slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--wf-raw-filter=("+f+") and ") })
+		}
 		for i := 1; i < zapret.ProbeSlots; i++ {
-			if slices.Contains(args, "--wf-raw-filter="+zapret.ProbeOnly(i)) {
+			if filter(zapret.ProbeOnly(i)) {
 				slot = i
 			}
 		}
-		if slot < 0 && !slices.Contains(args, "--wf-raw-filter="+zapret.ProbeExclude()) {
+		if slot < 0 && !filter(zapret.ProbeExclude()) {
 			t.Errorf("the user's winws2 does not skip the probes: %v", args)
 		}
 		line := strings.Join(args, " ")
@@ -781,7 +784,7 @@ func TestZapretPickSlowTesters(t *testing.T) {
 	var delay atomic.Int64
 	delay.Store(int64(50 * time.Millisecond))
 	zapretSpawn = func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) {
-		if !slices.Contains(args, "--wf-raw-filter="+zapret.ProbeExclude()) {
+		if !slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--wf-raw-filter=("+zapret.ProbeExclude()+")") }) {
 			time.Sleep(time.Duration(delay.Load())) // a tester
 		}
 		return spawn(exe, args, env, out)

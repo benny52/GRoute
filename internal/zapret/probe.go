@@ -238,7 +238,13 @@ func (p *Prober) port() int {
 func (p *Prober) Check(ctx context.Context, urls []string) Result {
 	res := Result{OK: len(urls) > 0}
 	var total time.Duration
-	for pass := 0; pass < Passes && res.OK; pass++ {
+	passes := Passes
+	if p.Slot == Live {
+		// Through the running bypass (self-healing): one pass; a miss is
+		// checked again a minute later anyway.
+		passes = 1
+	}
+	for pass := 0; pass < passes && res.OK; pass++ {
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 		var slowest time.Duration
