@@ -127,3 +127,17 @@ type LinkCheck struct {
 	HandshakeMillis int
 	TCPMillis       int
 }
+
+// SendsThrough reports whether server sends its traffic through a deployed
+// link of one of chains, as its entry or a relay: its config's outbound
+// «cascade» belongs to that link.
+func SendsThrough(chains []Chain, server int64) bool {
+	for _, c := range chains {
+		for i, n := range c.Nodes {
+			if n == server && i < len(c.Nodes)-1 && i < len(c.Links) && c.Links[i].State != LinkNew && c.Links[i].State != LinkFailed {
+				return true
+			}
+		}
+	}
+	return false
+}

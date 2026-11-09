@@ -63,6 +63,20 @@ func (s *Submitter) Submit(ctx context.Context, serverID int64, p Params, in Inp
 	if err != nil {
 		return model.Job{}, err
 	}
+	// A deploy builds the config anew, without the outbound a deployed
+	// cascade link put in: the entry's clients would go out from it while
+	// the link's checks say it works. The link is removed first.
+	if cl, ok := s.Store.(interface {
+		ListChains(ctx context.Context) ([]model.Chain, error)
+	}); ok {
+		chains, err := cl.ListChains(ctx)
+		if err != nil {
+			return model.Job{}, err
+		}
+		if model.SendsThrough(chains, serverID) {
+			return model.Job{}, &model.FieldError{Field: "params", Msg: "Сервер отправляет трафик через каскад: развёртывание заново убрало бы связь. Сначала снимите связь на странице каскада."}
+		}
+	}
 	cur, err := s.Store.CurrentConfig(ctx, serverID)
 	if err == nil && cur.Source != model.ConfigDeploy && !p.Overwrite {
 		return model.Job{}, ErrConfigChanged

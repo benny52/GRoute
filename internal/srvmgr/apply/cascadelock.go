@@ -3,7 +3,6 @@ package apply
 import (
 	"context"
 	"reflect"
-	"slices"
 	"strings"
 
 	"github.com/lardan099/hyroute/internal/hyconfig"
@@ -34,7 +33,7 @@ func (x *applier) keepsCascade(ctx context.Context, serverID int64, cur, cand []
 	if err != nil {
 		return err
 	}
-	if !sendsThrough(chains, serverID) {
+	if !model.SendsThrough(chains, serverID) {
 		return nil
 	}
 	a, err1 := hyconfig.ParseServer(cur)
@@ -52,16 +51,4 @@ func (x *applier) keepsCascade(ctx context.Context, serverID int64, cur, cand []
 		return nil
 	}
 	return &model.FieldError{Field: "outbounds", Msg: "Outbound «" + lock.Name + "» ведёт в каскад: он остаётся первым и без изменений. Чтобы убрать его, снимите связь на странице каскада."}
-}
-
-// sendsThrough reports whether server sends through a deployed link of a
-// chain, as its entry or a relay (routing.Sender, not imported here).
-func sendsThrough(chains []model.Chain, server int64) bool {
-	for _, c := range chains {
-		i := slices.Index(c.Nodes, server)
-		if i >= 0 && i < len(c.Nodes)-1 && i < len(c.Links) && c.Links[i].State != model.LinkNew && c.Links[i].State != model.LinkFailed {
-			return true
-		}
-	}
-	return false
 }
