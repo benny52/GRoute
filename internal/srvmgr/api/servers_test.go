@@ -91,7 +91,7 @@ func TestServerBusyWithJob(t *testing.T) {
 	}
 
 	code(t, owner.do("DELETE", "/api/v1/servers/"+id, nil, nil), http.StatusConflict, "server_busy")
-	code(t, owner.do("PATCH", "/api/v1/servers/"+id, map[string]any{"name": "B", "host": "c.example.com", "authType": "password"}, nil), http.StatusConflict, "server_busy")
+	code(t, owner.do("PATCH", "/api/v1/servers/"+id, map[string]any{"name": "B", "host": "c.example.com", "authType": "password", "password": fakeSSHPass}, nil), http.StatusConflict, "server_busy")
 	code(t, owner.do("PATCH", "/api/v1/servers/"+id, map[string]any{"name": "B", "host": "b.example.com", "authType": "password", "password": "fake-new-pass"}, nil), http.StatusConflict, "server_busy")
 	// The name and notes are not the connection.
 	if rec := owner.do("PATCH", "/api/v1/servers/"+id, map[string]any{"name": "B2", "host": "b.example.com", "authType": "password", "notes": "n"}, nil); rec.Code != 200 {
@@ -106,7 +106,14 @@ func TestServerBusyWithJob(t *testing.T) {
 
 	j.State, j.FinishedAt = model.JobFailed, time.Now()
 	e.db.UpdateJob(ctx, j)
-	if rec := owner.do("PATCH", "/api/v1/servers/"+id, map[string]any{"name": "B2", "host": "c.example.com", "authType": "password"}, nil); rec.Code != 200 {
+	// Another address takes the password again: the stored one would go
+	// to whoever answers there.
+	rec = owner.do("PATCH", "/api/v1/servers/"+id, map[string]any{"name": "B2", "host": "c.example.com", "authType": "password"}, nil)
+	code(t, rec, http.StatusBadRequest, "invalid")
+	if decodeError(t, rec).Details != "password" {
+		t.Fatalf("%s", rec.Body)
+	}
+	if rec := owner.do("PATCH", "/api/v1/servers/"+id, map[string]any{"name": "B2", "host": "c.example.com", "authType": "password", "password": fakeSSHPass}, nil); rec.Code != 200 {
 		t.Fatalf("after the job: %d %s", rec.Code, rec.Body)
 	}
 	if _, err := e.db.HostKey(ctx, srv.ID); err == nil {

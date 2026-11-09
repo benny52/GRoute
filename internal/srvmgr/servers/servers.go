@@ -8,8 +8,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -267,6 +269,10 @@ func (s *Service) Update(ctx context.Context, actor, id int64, in Input) (Info, 
 	}
 	creds := map[model.CredKind]string{}
 	var drop []model.CredKind
+	// Another address or port is another machine: the stored password
+	// would go to whoever answers there (the host key is confirmed anew,
+	// whatever it is). A password is typed again for it; a key only signs.
+	moved := in.Host != cur.Host || in.SSHPort != cur.SSHPort
 	switch in.AuthType {
 	case model.AuthPassword:
 		if in.Password != nil {
@@ -276,6 +282,8 @@ func (s *Service) Update(ctx context.Context, actor, id int64, in Input) (Info, 
 			creds[model.CredSSHPassword] = *in.Password
 		} else if !cur.HasPassword {
 			return Info{}, fieldErr("password", "Укажите пароль SSH.")
+		} else if moved {
+			return Info{}, fieldErr("password", "Адрес или порт сервера изменился: введите пароль SSH ещё раз.")
 		}
 		drop = []model.CredKind{model.CredSSHKey, model.CredSSHKeyPassphrase}
 	case model.AuthKey:
@@ -323,7 +331,11 @@ func (s *Service) Update(ctx context.Context, actor, id int64, in Input) (Info, 
 		}
 		return Info{}, err
 	}
-	s.audit(ctx, actor, "server_updated", srv)
+	details := srv.Name
+	if moved {
+		details = fmt.Sprintf("%s: %s → %s", srv.Name, net.JoinHostPort(cur.Host, strconv.Itoa(cur.SSHPort)), net.JoinHostPort(srv.Host, strconv.Itoa(srv.SSHPort)))
+	}
+	s.Store.AddAudit(ctx, model.AuditEntry{Time: s.Now(), UserID: actor, Action: "server_updated", Target: fmt.Sprintf("server/%d", srv.ID), Details: details})
 	return s.Get(ctx, id)
 }
 

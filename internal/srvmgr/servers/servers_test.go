@@ -188,14 +188,30 @@ func TestUpdateCredentials(t *testing.T) {
 
 	// Fields change, the password stays when not sent.
 	in := base()
-	in.Password, in.Notes, in.SSHPort = nil, "reinstalled", 2222
+	in.Password, in.Notes = nil, "reinstalled"
 	got, err := s.Update(ctx, 1, info.ID, in)
-	if err != nil || got.Notes != "reinstalled" || got.SSHPort != 2222 || !got.HasPassword {
+	if err != nil || got.Notes != "reinstalled" || !got.HasPassword {
 		t.Fatalf("%+v %v", got, err)
 	}
 	if c, _ := s.Credentials(ctx, info.ID); c.Password != fakePass {
 		t.Fatal("password lost")
 	}
+	// Another port or address: the stored password would go to whoever
+	// answers there; it is typed again.
+	in.SSHPort = 2222
+	if _, err := s.Update(ctx, 1, info.ID, in); fieldOf(err) != "password" {
+		t.Fatalf("moved with the stored password: %v", err)
+	}
+	moved := in
+	moved.Host = "other.example.com"
+	if _, err := s.Update(ctx, 1, info.ID, moved); fieldOf(err) != "password" {
+		t.Fatalf("moved with the stored password: %v", err)
+	}
+	in.Password = ptr(fakePass)
+	if got, err = s.Update(ctx, 1, info.ID, in); err != nil || got.SSHPort != 2222 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	in.Password = nil
 	// Switching to a key drops the password; a key is required.
 	in.AuthType = model.AuthKey
 	if _, err := s.Update(ctx, 1, info.ID, in); fieldOf(err) != "key" {
@@ -288,10 +304,10 @@ func TestAddressChangeForgetsHostKey(t *testing.T) {
 	if got.HostKey == nil || got.HostKey.Fingerprint != "SHA256:fake" {
 		t.Fatal("host key dropped without an address change")
 	}
-	in.Host = "other.example.com"
-	got, _ = s.Update(ctx, 1, info.ID, in)
-	if got.HostKey != nil {
-		t.Fatal("host key kept for another address")
+	in.Host, in.Password = "other.example.com", ptr(fakePass)
+	got, err := s.Update(ctx, 1, info.ID, in)
+	if err != nil || got.HostKey != nil {
+		t.Fatalf("host key kept for another address: %v", err)
 	}
 }
 
