@@ -185,6 +185,10 @@ type undoRecord struct {
 	// Stats: ExportStats() before a restore of «Статистика», handed to
 	// ReplaceStats by the undo.
 	Stats json.RawMessage `json:"stats,omitempty"`
+	// Partial: the restore stopped half-way and could not undo itself;
+	// this record holds the only copy of the files as they were, so no
+	// restore may replace it before «Вернуть как было».
+	Partial bool `json:"partial,omitempty"`
 }
 
 type undoFile struct {
@@ -678,6 +682,9 @@ func (c *Controller) ApplyBackup(token string, ch BackupChoice, cur BackupAppear
 	if prevErr != nil && !errors.Is(prevErr, os.ErrNotExist) {
 		prev, prevBytes = nil, nil
 	}
+	if prev != nil && prev.Partial {
+		return BackupApplyResult{}, sentenceError("Предыдущее восстановление прервано и сохранило ваши прежние файлы: сначала нажмите «Вернуть как было» в «Настройках», потом восстанавливайте снова")
+	}
 	extra := []string{}
 	d := decodeSections(p)
 	for _, s := range d.subs {
@@ -745,7 +752,12 @@ func (c *Controller) ApplyBackup(token string, ch BackupChoice, cur BackupAppear
 	if err != nil {
 		if rbErr != nil {
 			// Files may have changed: the new record holds the exact bytes of
-			// before, so «Вернуть как было» can still put them back.
+			// before, so «Вернуть как было» can still put them back, and no
+			// other restore may write over it first.
+			rec.Partial = true
+			if err := c.saveUndo(rec); err != nil {
+				c.Log.Warn("restore: the undo record not marked partial", "err", err)
+			}
 			c.setUndoMeta(rec.meta())
 			return BackupApplyResult{}, sentencef("Восстановление прервано: %v. Часть файлов могла измениться — нажмите «Вернуть как было» в «Настройках»", err)
 		}
