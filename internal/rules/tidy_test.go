@@ -197,3 +197,25 @@ func TestTidyMergeInheritChildren(t *testing.T) {
 		}
 	}
 }
+
+// A drop or a site that goes because a geosite list holds it is a change:
+// the list comes and goes with the rule database, so it is not ticked.
+func TestTidyGeoDependsIsChange(t *testing.T) {
+	withGeo(t, fakeGeo{})
+	c := Config{DefaultAction: Direct, Rules: []Rule{
+		{ID: "yt", Domains: []string{"geosite:youtube"}, Action: Tunnel},
+		{ID: "yt2", Domains: []string{".youtube.com"}, Action: Tunnel},
+		{ID: "a", Domains: []string{".a.com"}, Action: Direct},
+		{ID: "a2", Domains: []string{"x.a.com"}, Action: Direct},
+	}}
+	got := map[string]bool{}
+	for _, it := range TidyRules(c, TidyOptions{}).Items {
+		got[it.ID] = it.Changes
+	}
+	if c, ok := got["drop:yt2"]; !ok || !c {
+		t.Fatalf("geosite drop: %v", got)
+	}
+	if c, ok := got["drop:a2"]; !ok || c {
+		t.Fatalf("plain drop: %v", got)
+	}
+}

@@ -145,6 +145,10 @@ func tidyDrops(rows []tidyRow, o TidyOptions) []Tidy {
 			} else {
 				t.Details = []string{"Никогда не срабатывает: все его соединения раньше забирает правило «" + rows[i].cr.name + "» (" + routeText(&rows[i].cr, o) + ")."}
 			}
+			if usesGeo(&rows[i].cr) {
+				t.Changes = true
+				t.Details = append(t.Details, geoDepends)
+			}
 			rows[j].dropped = true
 			out = append(out, t)
 			break
@@ -178,6 +182,7 @@ func tidySites(rows []tidyRow, o TidyOptions) []Tidy {
 			singles[k], okc[k] = single(j, rows[j].r, d)
 		}
 		var gone, why []string
+		geoDep := false // a site goes because a geosite list holds it
 		removed := make([]bool, len(items))
 		for k, d := range items {
 			if !okc[k] {
@@ -187,6 +192,7 @@ func tidySites(rows []tidyRow, o TidyOptions) []Tidy {
 			for i := range j {
 				if rows[i].use && !rows[i].dropped && rows[i].cr.covers(&singles[k]) {
 					reason = "его раньше забирает правило «" + rows[i].cr.name + "» (" + routeText(&rows[i].cr, o) + ")"
+					geoDep = geoDep || usesGeo(&rows[i].cr)
 					break
 				}
 			}
@@ -217,19 +223,41 @@ func tidySites(rows []tidyRow, o TidyOptions) []Tidy {
 		if len(gone) == len(items) && len(rows[j].r.AllApps()) == 0 && len(rows[j].r.Ports) == 0 {
 			// Every site is caught above: the rule never matches.
 			rows[j].dropped = true
-			out = append(out, Tidy{ID: "drop:" + rows[j].id, Kind: TidyDrop, Rules: []string{rows[j].id},
+			t := Tidy{ID: "drop:" + rows[j].id, Kind: TidyDrop, Rules: []string{rows[j].id}, Changes: geoDep,
 				Title:   "Удалить правило «" + rows[j].cr.name + "»",
-				Details: append([]string{"Никогда не срабатывает: все его сайты раньше забирают правила выше."}, why...)})
+				Details: append([]string{"Никогда не срабатывает: все его сайты раньше забирают правила выше."}, why...)}
+			if geoDep {
+				t.Details = append(t.Details, geoDepends)
+			}
+			out = append(out, t)
 			continue
 		}
 		if len(gone) == len(items) {
 			continue // a rule left with no sites would match every site
 		}
-		out = append(out, Tidy{ID: "sites:" + rows[j].id, Kind: TidySites, Rules: []string{rows[j].id}, Sites: gone,
+		if geoDep {
+			why = append(why, geoDepends)
+		}
+		out = append(out, Tidy{ID: "sites:" + rows[j].id, Kind: TidySites, Rules: []string{rows[j].id}, Sites: gone, Changes: geoDep,
 			Title:   fmt.Sprintf("Убрать из «%s» лишние сайты: %d", rows[j].cr.name, len(gone)),
 			Details: why})
 	}
 	return out
+}
+
+// geoDepends says why an item that relies on a geosite list is not ticked
+// for the user.
+const geoDepends = "Держится на списке geosite правила выше: он меняется с обновлением базы правил или её источником, и тогда эти сайты пойдут по правилам ниже."
+
+// usesGeo: the rule names a geosite list, whose content comes and goes
+// with the rule database.
+func usesGeo(cr *compiled) bool {
+	for i := range cr.doms {
+		if cr.doms[i].kind == domGeo {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeKey: rules that can be merged are sites only (any program) or
