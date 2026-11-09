@@ -130,8 +130,9 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 		return // the user's pick: it decides
 	}
 	key, _ := c.zapretNetKey()
+	started := time.Now()
 	c.zapretMu.Lock()
-	cfg := c.zapretCfg
+	cfg := cloneZapretSettings(c.zapretCfg) // read below without zapretMu
 	running := c.zapretArgs != nil && c.zapretRunner().Status().State == zapret.Running
 	c.zapretMu.Unlock()
 	targets := healTargets(cfg)
@@ -139,7 +140,7 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 		return
 	}
 	if _, ok := cfg.Picked[key]; !ok {
-		c.healPick(ctx, key, "на этой сети ещё не подбирали методы", targets)
+		c.healPick(ctx, key, started, "на этой сети ещё не подбирали методы", targets)
 		return
 	}
 	// Through the bypass as it runs: with a plan winws2 must be up (it
@@ -205,7 +206,7 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 			why += " (" + strings.Join(what, "; ") + ")"
 		}
 		c.Log.Info("zapret: self-healing: stopped opening", "targets", targetNames(need))
-		c.healPick(ctx, key, why, need)
+		c.healPick(ctx, key, started, why, need)
 		return
 	}
 	if len(notes) > 0 {
@@ -244,8 +245,10 @@ func (c *Controller) healCheck(ctx context.Context, slot int, ts []zapret.Target
 	return out, how
 }
 
-// healPick picks again for the network unless one did not long ago.
-func (c *Controller) healPick(ctx context.Context, key, why string, ts []zapret.Target) {
+// healPick picks again for the network unless one did not long ago, or
+// one ran since the round began at started (the user's «Подобрать»: it
+// decides, and its result is what the page shows).
+func (c *Controller) healPick(ctx context.Context, key string, started time.Time, why string, ts []zapret.Target) {
 	c.pickMu.Lock()
 	last := c.autoPicks[key]
 	c.pickMu.Unlock()
@@ -261,6 +264,11 @@ func (c *Controller) healPick(ctx context.Context, key, why string, ts []zapret.
 	c.zapretMu.Lock()
 	if ctx.Err() != nil {
 		c.zapretMu.Unlock()
+		return
+	}
+	if pk, ok := c.zapretCfg.Picked[key]; ok && pk.At.After(started) {
+		c.zapretMu.Unlock()
+		c.Log.Info("zapret: self-healing: a pick ran meanwhile, none again")
 		return
 	}
 	v, err := c.zapretPickLocked(capFirst(why))

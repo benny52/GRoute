@@ -709,9 +709,26 @@ func TestZapretHealGap(t *testing.T) {
 	c.pickMu.Lock()
 	c.autoPicks = map[string]autoPick{"": {at: time.Now(), found: false}}
 	c.pickMu.Unlock()
-	c.healPick(context.Background(), "", "YouTube перестал открываться", []zapret.Target{zapret.YouTube})
+	c.healPick(context.Background(), "", time.Now(), "YouTube перестал открываться", []zapret.Target{zapret.YouTube})
 	if v := c.ZapretInfo(); v.Pick != nil || !strings.Contains(v.HealNote, "подбирал недавно") {
 		t.Fatalf("%+v %q", v.Pick, v.HealNote)
+	}
+}
+
+// A pick that ran after the round began (the user's «Подобрать») is not
+// followed by one of self-healing's.
+func TestZapretHealAfterUserPick(t *testing.T) {
+	c, _ := zapFixture(t)
+	started := time.Now().Add(-time.Minute)
+	c.zapretMu.Lock()
+	c.zapretCfg.Picked = map[string]zapret.Picked{"": {At: time.Now(), Methods: map[zapret.Target]string{}}}
+	c.zapretMu.Unlock()
+	c.healPick(context.Background(), "", started, "YouTube перестал открываться", []zapret.Target{zapret.YouTube})
+	c.pickMu.Lock()
+	_, picked := c.autoPicks[""]
+	c.pickMu.Unlock()
+	if v := c.ZapretInfo(); v.Pick != nil || picked {
+		t.Fatalf("picked again: %+v %v", v.Pick, picked)
 	}
 }
 

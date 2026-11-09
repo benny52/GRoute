@@ -606,7 +606,9 @@ func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretV
 		}
 	}
 	cfg := c.zapretCfg
-	v.Settings = cfg
+	// A copy of its own: the page may show this view later without
+	// zapretMu (pickState) while a save changes the maps of zapretCfg.
+	v.Settings = cloneZapretSettings(cfg)
 	if v.Settings.Targets == nil {
 		v.Settings.Targets = []zapret.Target{}
 	}
@@ -652,6 +654,34 @@ func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretV
 	c.zapretShown = &cp
 	c.pickMu.Unlock()
 	return v
+}
+
+// cloneZapretSettings copies s down to its maps and lists: a copy read
+// without zapretMu while a save normalizes the maps of zapretCfg in place.
+func cloneZapretSettings(s zapret.Settings) zapret.Settings {
+	s.Targets, s.Sites = slices.Clone(s.Targets), slices.Clone(s.Sites)
+	s.Methods, s.Via = cloneMap(s.Methods), cloneMap(s.Via)
+	if s.AutoHeal != nil {
+		on := *s.AutoHeal
+		s.AutoHeal = &on
+	}
+	if s.Picked != nil {
+		picked := make(map[string]zapret.Picked, len(s.Picked))
+		for k, p := range s.Picked {
+			p.Methods = cloneMap(p.Methods)
+			if p.Working != nil {
+				w := make(map[zapret.Target][]string, len(p.Working))
+				for t, ms := range p.Working {
+					w[t] = slices.Clone(ms)
+				}
+				p.Working = w
+			}
+			p.SkippedSites = slices.Clone(p.SkippedSites)
+			picked[k] = p
+		}
+		s.Picked = picked
+	}
+	return s
 }
 
 func cloneMap[K comparable, V any](m map[K]V) map[K]V {
