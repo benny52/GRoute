@@ -81,18 +81,25 @@ func dialWS(ctx context.Context, dial func(ctx context.Context, network, addr st
 	}
 	cfg := &tls.Config{ServerName: sni, RootCAs: t.Roots, MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}
 	if sni != t.Host {
-		// Fronting: the server answers with Host's certificate; it is
-		// checked against Host, not the name sent.
+		// Fronting: to a name it does not serve Telegram answers with
+		// its own default certificate (telegram.org, *.telegram.org). The
+		// chain is verified as always, and the certificate must be Host's
+		// or Telegram's: never one of whoever answered.
 		cfg.InsecureSkipVerify = true
 		cfg.VerifyConnection = func(cs tls.ConnectionState) error {
 			if len(cs.PeerCertificates) == 0 {
 				return errors.New("no certificate")
 			}
-			opts := x509.VerifyOptions{DNSName: t.Host, Roots: t.Roots, Intermediates: x509.NewCertPool()}
-			for _, c := range cs.PeerCertificates[1:] {
-				opts.Intermediates.AddCert(c)
+			var err error
+			for _, name := range []string{t.Host, FrontingCertName} {
+				opts := x509.VerifyOptions{DNSName: name, Roots: t.Roots, Intermediates: x509.NewCertPool()}
+				for _, c := range cs.PeerCertificates[1:] {
+					opts.Intermediates.AddCert(c)
+				}
+				if _, err = cs.PeerCertificates[0].Verify(opts); err == nil {
+					return nil
+				}
 			}
-			_, err := cs.PeerCertificates[0].Verify(opts)
 			return err
 		}
 	}

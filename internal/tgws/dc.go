@@ -56,3 +56,7 @@ func directAddr(dc int, test bool) (netip.AddrPort, bool) {
 // FrontingSNI is the name sent instead of kwsN.web.telegram.org when that
 // name itself is blocked: the server answers by Host.
 const FrontingSNI = "sprinthost.ru"
+
+// FrontingCertName: the name Telegram's default certificate is valid for,
+// which it presents to a TLS name it does not serve.
+const FrontingCertName = "telegram.org"

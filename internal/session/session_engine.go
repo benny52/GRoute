@@ -81,6 +81,9 @@ func Start(cfg Config) (_ *Session, err error) {
 			if e := s.mgr.Get(profile); e != nil {
 				return e
 			}
+			if x, ok := cfg.Extra[profile]; ok {
+				return extraTunnel{x}
+			}
 			return nil
 		},
 		Log: log,
@@ -125,6 +128,9 @@ func Start(cfg Config) (_ *Session, err error) {
 		Tunnel: func(profile string) relay.Tunnel {
 			if e := s.mgr.Get(profile); e != nil {
 				return e
+			}
+			if x, ok := cfg.Extra[profile]; ok {
+				return x
 			}
 			// A group with no usable member: refused, counted for it.
 			if eng := engp.Load(); eng != nil {
@@ -356,3 +362,11 @@ func (r *stubRunner) UDPAssociate(ctx context.Context) (*socks5.UDPAssoc, error)
 	return r.c.UDPAssociate(ctx)
 }
 func (r *stubRunner) SOCKS() socks5.Client { return r.c }
+
+// extraTunnel is an in-process route as the engine sees it: TCP only.
+type extraTunnel struct{ ExtraTunnel }
+
+func (extraTunnel) UDPAvailable() bool { return false }
+func (extraTunnel) UDPAssociate(context.Context) (*socks5.UDPAssoc, error) {
+	return nil, errors.New("UDP не идёт через этот маршрут")
+}

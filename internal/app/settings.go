@@ -14,6 +14,7 @@ import (
 	"github.com/lardan099/hyroute/internal/rules"
 	"github.com/lardan099/hyroute/internal/settings"
 	"github.com/lardan099/hyroute/internal/store"
+	"github.com/lardan099/hyroute/internal/tgws"
 )
 
 func (c *Controller) Settings() settings.Settings {
@@ -361,6 +362,9 @@ func (c *Controller) ruleWarningsLocked() []RuleWarning { return c.ruleWarningsF
 func (c *Controller) ruleWarningsFor(cfg *rules.Config) []RuleWarning {
 	out := []RuleWarning{}
 	check := func(i int, name, profile string) {
+		if profile == tgws.ProfileID {
+			return // «Telegram без VPN»: a route of its own, never a server
+		}
 		w := RuleWarning{Index: i, Rule: name, Profile: profile}
 		if kind, text, group := c.groupCheckLocked(profile, false); group {
 			if kind != "" {

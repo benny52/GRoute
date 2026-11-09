@@ -1961,6 +1961,17 @@ export interface TelegramView {
     lastRoute: string;
     lastError?: string;
   };
+  // The latest self-check (req_pq to Telegram through each route).
+  health?: {
+    at: string;
+    ws: boolean;
+    wsRoute?: string; // ws | ws-fronted
+    wsMillis?: number;
+    wsError?: string;
+    fallback?: string; // vpn | tcp: what answered when WebSocket did not
+    fallbackError?: string;
+  };
+  intercepted: boolean; // connected: Telegram reaches the bridge with no proxy set
 }
 
 export interface ZapretInput {

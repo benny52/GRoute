@@ -105,3 +105,18 @@ func TestLiveFronting(t *testing.T) {
 		w.Close()
 	}
 }
+
+// TestLiveCheck runs the self-check against real Telegram: WebSocket
+// answers, nothing is skipped.
+func TestLiveCheck(t *testing.T) {
+	if os.Getenv("HYROUTE_TGWS_LIVE") == "" {
+		t.Skip("HYROUTE_TGWS_LIVE=1 runs it against Telegram")
+	}
+	b := New(Config{PoolSize: -1})
+	defer b.Close()
+	h := b.Check(context.Background())
+	if !h.WS || b.wsDown.Load() {
+		t.Fatalf("%+v", h)
+	}
+	t.Logf("self-check: WebSocket via %s in %d ms", h.WSRoute, h.WSMillis)
+}

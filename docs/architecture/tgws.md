@@ -42,6 +42,31 @@ Telegram Desktop ─MTProto proxy, secret─▶ 127.0.0.1:1443 (tgws.Proxy)
   media kind open ahead (`Warm`), each used once, dropped after 60 s idle;
   a refill that fails backs off up to an hour.
 
+## Without a proxy set (the engine)
+
+With HyRoute connected the rule «Обход DPI: Telegram» (Telegram's
+networks, `tgws.Networks`; TCP 80, 443, 5222; `Tunnel` through
+`tgws.ProfileID`, fallback the main target) sends Telegram's connections
+to the bridge: `session.Config.Extra` serves that profile ID in-process
+(`tgws.Tunnel`: the relay's dial returns one end of a `net.Pipe`, the
+bridge's `ServeTransparent` the other). It reads the first 64 bytes: an
+obfuscated init with no secret for a data center with a WebSocket route
+goes over it (re-keyed as from the proxy); anything else, and everything
+while self-checks find WebSocket down, is passed on unchanged to the
+address it was going to, through the main server's SOCKS5, else directly
+(`passOn`). While the bridge is off the rule's fallback (the main server)
+takes it. The route is TCP only: calls and other UDP go by the other
+rules.
+
+## Self-checks (health.go)
+
+`Bridge.Check` asks for `req_pq_multi` over WebSocket (DC2, then DC4) and
+checks the `resPQ`. A failure sets `wsDown`: connections skip WebSocket
+(no wait for a dead route each time) until a check finds it answering;
+the check then also says which fallback answers (VPN, direct). The app
+runs it 5 s after the bridge starts and every 5 minutes (`tgChecks`); the
+page shows the result.
+
 ## In the app
 
 `zapret.Settings.Telegram` (zapret.json): on, the port (0 = 1443), the

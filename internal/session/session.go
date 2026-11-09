@@ -4,7 +4,9 @@
 package session
 
 import (
+	"context"
 	"log/slog"
+	"net"
 	"path/filepath"
 
 	"github.com/lardan099/hyroute/internal/dnspolicy"
@@ -14,6 +16,7 @@ import (
 	"github.com/lardan099/hyroute/internal/logx"
 	"github.com/lardan099/hyroute/internal/rules"
 	"github.com/lardan099/hyroute/internal/settings"
+	"github.com/lardan099/hyroute/internal/socks5"
 	"github.com/lardan099/hyroute/internal/tunnels"
 )
 
@@ -95,7 +98,10 @@ type Config struct {
 	// groups
 	// Groups resolves server group targets. OnDial and OnHealth report the
 	// dials and the status of routing endpoints only (tunnels.Manager).
-	Groups   *groups.Runtime
+	Groups *groups.Runtime
+	// Extra: routes served in-process (TCP only) by a profile ID of their
+	// own, as a server would be: «Telegram без VPN» (tgws.ProfileID).
+	Extra    map[string]ExtraTunnel
 	OnDial   func(profile, dst string, err error)
 	OnHealth func(profile string, st hysteria.Status)
 	// dns
@@ -161,4 +167,11 @@ type Stats struct {
 	DNSTruncated    int64 `json:"dnsTruncated"`
 	DNSPortalPassed int64 `json:"dnsPortalPassed"`
 	SystemDoH       int64 `json:"systemDoH"`
+}
+
+// ExtraTunnel is an in-process route (Config.Extra): TCP through the
+// relay, no UDP.
+type ExtraTunnel interface {
+	Available() bool
+	Dial(ctx context.Context, dst socks5.Addr) (net.Conn, error)
 }

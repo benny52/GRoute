@@ -220,13 +220,43 @@
     <section class="card">
       <h2>Telegram без VPN</h2>
       <p class="muted small">
-        Telegram Desktop ходит к серверам Telegram через WebSocket его веб-версии — их блокируют редко. HyRoute поднимает на этом компьютере прокси для
-        Telegram. Если WebSocket не открывается, Telegram идёт через ваш сервер VPN (когда HyRoute подключён) или напрямую. Звонки так не идут.
+        Telegram ходит к своим серверам через WebSocket веб-версии — их блокируют редко. Когда HyRoute подключён, он перехватывает Telegram сам (и его
+        форки, например AyuGram): ничего настраивать не нужно. Без подключения Telegram идёт через прокси HyRoute — его нужно один раз добавить в
+        Telegram. Если WebSocket не отвечает, Telegram идёт через ваш сервер VPN или напрямую. Звонки так не идут.
       </p>
       <label class="switch">
         <input type="checkbox" checked={tg.enabled} disabled={tgBusy} onchange={(e) => saveTelegram(e.currentTarget.checked)} />
         <b>Включить</b>
       </label>
+      {#if tg.enabled && tg.health}
+        {@const h = tg.health}
+        {#if h.ws}
+          <div class="small using">
+            ✓ Telegram отвечает через WebSocket{h.wsRoute === 'ws-fronted' ? ' (под другим именем: прямое заблокировано)' : ''}, {h.wsMillis} мс · проверено
+            {clock(Date.parse(h.at))}
+          </div>
+        {:else if h.fallback}
+          <div class="note info small">
+            WebSocket сейчас не отвечает — Telegram идёт {h.fallback === 'vpn' ? 'через ваш сервер VPN' : 'напрямую к серверам Telegram'}. HyRoute
+            проверяет снова каждые 5 минут и вернётся к WebSocket, когда он заработает. <span class="faint">({hide(h.wsError)})</span>
+          </div>
+        {:else}
+          <div class="note error small">
+            Telegram не отвечает ни через WebSocket, ни {tg.intercepted ? 'через VPN, ни ' : ''}напрямую.
+            {tg.intercepted ? 'Проверьте интернет и сервер VPN.' : 'Подключите HyRoute к серверу VPN: тогда Telegram пойдёт через него.'}
+            <span class="faint">({hide(h.wsError ?? '')}{h.fallbackError ? '; ' + hide(h.fallbackError) : ''})</span>
+          </div>
+        {/if}
+      {/if}
+      {#if tg.enabled}
+        <div class="small">
+          {#if tg.intercepted}
+            HyRoute подключён: Telegram идёт сюда сам, прокси в Telegram не нужен.
+          {:else}
+            HyRoute не подключён: Telegram идёт сюда, только если в нём добавлен прокси HyRoute.
+          {/if}
+        </div>
+      {/if}
       {#if tg.error}<div class="note error small">{tg.error}</div>{/if}
       {#if tg.running}
         <div class="row">

@@ -66,6 +66,8 @@ type Bridge struct {
 	pool *wsPool
 
 	fronted atomic.Bool // the fronted name worked last
+	wsDown  atomic.Bool // self-checks found WebSocket not answering
+	health  atomic.Pointer[Health]
 	active  atomic.Int64
 	total   atomic.Int64
 	bad     atomic.Int64
@@ -216,7 +218,7 @@ func (b *Bridge) Serve(ctx context.Context, client net.Conn, secret []byte) {
 // open takes the first route that opens, sending the relay init on it.
 func (b *Bridge) open(ctx context.Context, h Hello, rinit []byte) (upstream, string, error) {
 	var errs []error
-	if _, ok := b.cfg.Redirect[h.DC]; ok {
+	if _, ok := b.cfg.Redirect[h.DC]; ok && !b.wsDown.Load() {
 		key := poolKey{dc: h.DC, media: h.Media, test: h.Test}
 		w, route, err := b.pool.get(ctx, key)
 		if err == nil {
@@ -348,4 +350,82 @@ func (b *Bridge) pump(client net.Conn, up upstream, h Hello, tgEnc, tgDec cipher
 	}
 	stop()
 	wg.Wait()
+}
+
+// ServeTransparent carries a connection the engine intercepted on its way
+// to dst, an address of Telegram's (no proxy set in Telegram): an
+// obfuscated MTProto connection (no secret) to a data center with a
+// WebSocket route goes over it, unless self-checks found WebSocket down;
+// anything else — web.telegram.org's TLS, the HTTP transport, a data
+// center without WebSocket, a WebSocket that does not open — goes on
+// unchanged to dst, through the VPN (when connected) or directly.
+func (b *Bridge) ServeTransparent(ctx context.Context, client net.Conn, dst netip.AddrPort) {
+	defer client.Close()
+	b.active.Add(1)
+	defer b.active.Add(-1)
+	b.total.Add(1)
+	head := make([]byte, initLen)
+	client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	n, _ := io.ReadFull(client, head)
+	client.SetReadDeadline(time.Time{})
+	head = head[:n]
+	if n == initLen && !b.wsDown.Load() {
+		if h, ok := ReadHello(head, nil); ok {
+			if _, ws := b.cfg.Redirect[h.DC]; ws {
+				rinit, tgEnc, tgDec := relayInit(h.Proto, dcIndex(h.DC, h.Media, h.Test))
+				w, route, err := b.pool.get(ctx, poolKey{dc: h.DC, media: h.Media, test: h.Test})
+				if err == nil {
+					if err = w.Send(rinit); err == nil {
+						b.note(route, nil)
+						b.pump(client, wsUp{w}, h, tgEnc, tgDec, true)
+						return
+					}
+					w.c.Close()
+				}
+				b.cfg.Log.Debug("tgws: WebSocket did not open, passing on", "dc", h.DC, "err", err)
+			}
+		}
+	}
+	b.passOn(ctx, client, dst, head)
+}
+
+// passOn sends a connection unchanged to dst: the VPN, else directly.
+func (b *Bridge) passOn(ctx context.Context, client net.Conn, dst netip.AddrPort, head []byte) {
+	var up net.Conn
+	var err error
+	route := RouteVPN
+	if b.cfg.VPN != nil {
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		up, err = b.cfg.VPN(cctx, dst)
+		cancel()
+	}
+	if up == nil {
+		route = RouteTCP
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		up, err = b.cfg.Dial(cctx, "tcp", dst.String())
+		cancel()
+	}
+	if err != nil {
+		b.failed.Add(1)
+		b.note("", fmt.Errorf("%w: %v", errNoRoute, err))
+		return
+	}
+	defer up.Close()
+	if len(head) > 0 {
+		if _, err := up.Write(head); err != nil {
+			return
+		}
+	}
+	b.note(route, nil)
+	done := make(chan struct{})
+	go func() {
+		n, _ := io.Copy(client, up)
+		b.down.Add(n)
+		client.Close()
+		close(done)
+	}()
+	n, _ := io.Copy(up, client)
+	b.up.Add(n + int64(len(head)))
+	up.Close()
+	<-done
 }

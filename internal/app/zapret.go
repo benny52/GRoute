@@ -435,6 +435,14 @@ func (c *Controller) zapretWatch(ctx context.Context) {
 
 // zapretRules are the rules the bypass keeps for cfg, top first.
 func zapretRules(cfg zapret.Settings) []rules.Rule {
+	out := zapretTargetRules(cfg)
+	if cfg.Telegram.Enabled {
+		out = append(out, telegramRule())
+	}
+	return out
+}
+
+func zapretTargetRules(cfg zapret.Settings) []rules.Rule {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -492,7 +500,7 @@ const zapretProbe = "hyroute-probe."
 
 // sameZapretRule: r is the kept rule w (its ID and switch aside).
 func sameZapretRule(r, w rules.Rule) bool {
-	return r.Name == w.Name && slices.Equal(r.Domains, w.Domains) && r.Action == w.Action && r.Profile == w.Profile && r.Protocol == w.Protocol &&
+	return r.Name == w.Name && slices.Equal(r.Domains, w.Domains) && r.Action == w.Action && r.Profile == w.Profile && slices.Equal(r.Fallback, w.Fallback) && r.Protocol == w.Protocol &&
 		slices.Equal(r.Ports, w.Ports) && len(r.Apps) == len(w.Apps)
 }
 

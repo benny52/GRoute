@@ -90,6 +90,7 @@ func (c *Controller) startLocked(recovering bool) error {
 		c.changed()
 	}
 	c.groupsSession(&cfg)
+	c.tgSession(&cfg) // «Telegram без VPN»: Telegram's connections to the bridge
 	names := make([]string, len(want))
 	for i, p := range want {
 		names[i] = p.Name

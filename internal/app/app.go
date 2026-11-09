@@ -24,6 +24,7 @@ import (
 	"github.com/lardan099/hyroute/internal/session"
 	"github.com/lardan099/hyroute/internal/settings"
 	"github.com/lardan099/hyroute/internal/store"
+	"github.com/lardan099/hyroute/internal/tgws"
 	"github.com/lardan099/hyroute/internal/tunnels"
 )
 
@@ -299,6 +300,7 @@ func (c *Controller) updateNamesLocked() {
 		}
 	}
 	c.groupNamesLocked(m)
+	m[tgws.ProfileID] = "Telegram через WebSocket"
 	c.names.Store(&m)
 	c.dropLogsOf(m)
 }
