@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -53,7 +54,10 @@ func TestWinws2Runs(t *testing.T) {
 	cases["circular"] = run{all(zapret.Plan{Methods: ids, Circular: true}), zapret.ProbeExclude(), 0}
 	// The orchestrator on a real connection: HyRoute's filter lets the
 	// answer's start through and hyroute_success (its Lua) reads it.
-	cases["circular probed"] = run{all(zapret.Plan{Methods: ids, Circular: true}), zapret.ProbeOnly(zapret.ProbeSlots - 1), zapret.ProbeSlots - 1}
+	// It starts from a method that opens example.com (fake-md5-seqovl), so
+	// hyroute_success must see the server's first record.
+	first := append([]string{"fake-md5-seqovl"}, slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return id == "fake-md5-seqovl" })...)
+	cases["circular probed"] = run{all(zapret.Plan{Methods: first, Circular: true}), zapret.ProbeOnly(zapret.ProbeSlots - 1), zapret.ProbeSlots - 1}
 	cases["youtube only"] = run{map[zapret.Target]zapret.Plan{zapret.YouTube: {Methods: ids, Circular: true}}, zapret.ProbeExclude(), 0}
 	var mu sync.Mutex
 	opened := 0
@@ -99,8 +103,8 @@ func TestWinws2Runs(t *testing.T) {
 			if o := out.String(); strings.Contains(o, "LUA ERROR") || strings.Contains(o, "invalid success detector") {
 				t.Errorf("Lua failed:\n%s", o)
 			}
-			if name == "circular probed" && !strings.Contains(out.String(), "circular") {
-				t.Errorf("the orchestrator saw nothing")
+			if name == "circular probed" && !strings.Contains(out.String(), "automate: success detected") {
+				t.Errorf("hyroute_success saw no answer of the server")
 			}
 			t.Logf("%s", out.String())
 		})
