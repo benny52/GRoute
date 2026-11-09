@@ -78,9 +78,7 @@ func TestSubscriptionProxies(t *testing.T) {
 // every proxy the subscription made, not only on the ones made later.
 func TestSubscriptionProxiesAccessChanges(t *testing.T) {
 	c, _ := newCtl(t)
-	body := "hy2://a@one.example:443#ONE
-hy2://a@two.example:443#TWO
-"
+	body := "hy2://a@one.example:443#ONE\nhy2://a@two.example:443#TWO\n"
 	v := addSub(t, c, &body)
 	if err := c.SetSubscriptionProxies(v.ID, &SubProxiesInput{Port: 20000, LAN: true, Username: "u", Password: "old-pass"}); err != nil {
 		t.Fatal(err)
