@@ -391,6 +391,15 @@ func (x *planCtx) selection() string {
 			}
 		}
 	}
+	// As for servers: a group a file that did not load names would go,
+	// and its rules or proxies would refuse their connections.
+	if x.replace("groups") {
+		for _, f := range []string{"settings.json", "proxies.json", "rulesets.json"} {
+			if broken(f) && !covered[f] {
+				return fmt.Sprintf("%s не загружен: заменить группы нельзя — неизвестно, какие из них нужны правилам и прокси", f)
+			}
+		}
+	}
 	return ""
 }
 

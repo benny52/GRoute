@@ -453,6 +453,28 @@ func TestBackupUndo(t *testing.T) {
 	}
 }
 
+// «Группы: Заменить» with a file that names groups not loaded: refused,
+// as for servers (a group only that file names would go). Restoring the
+// file too is fine.
+func TestBackupGroupsBrokenRefs(t *testing.T) {
+	a, _ := richCtl(t)
+	b := exportAll(t, a, bkPass, "groups", "rules", "settings")
+	dir := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"defaultAction":"direct","rules":[],"future":1}`), 0o600))
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := newCtlAt2(t, st)
+	pv := openBk(t, c, b, bkPass)
+	if p, _ := c.PlanBackup(pv.Token, BackupChoice{Sections: map[string]string{"groups": "replace"}}); !strings.Contains(p.Error, "заменить группы нельзя") {
+		t.Fatalf("%+v", p)
+	}
+	if p, _ := c.PlanBackup(pv.Token, BackupChoice{Sections: map[string]string{"groups": "replace", "rules": "replace", "settings": "replace"}}); p.Error != "" {
+		t.Fatalf("%+v", p)
+	}
+}
+
 func TestBackupBrokenSettings(t *testing.T) {
 	a, _ := richCtl(t)
 	b := exportAll(t, a, bkPass, "rules", "settings")
