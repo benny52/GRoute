@@ -162,7 +162,7 @@ func ApplyJournaled(staging, target, exe, journalPath, from, to string, reconnec
 	if err := writeJournal(journalPath, j); err != nil {
 		return nil, fmt.Errorf("журнал обновления: %w", err)
 	}
-	sw := &Swap{Target: target, To: to, journal: journalPath}
+	sw := &Swap{Target: target, To: to, ExeSHA256: m.Files[MainExe], journal: journalPath}
 	for _, s := range todo {
 		if err := sw.put(filepath.Join(staging, s.src), filepath.Join(target, s.dst), s.dst); err != nil {
 			sw.Undo()

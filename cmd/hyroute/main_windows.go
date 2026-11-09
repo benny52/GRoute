@@ -108,6 +108,16 @@ func main() {
 	if *updEvent == "" {
 		recoverInterruptedUpdate(exe, *atLogon)
 	}
+	// From a folder programs without administrator rights may write, the
+	// file is pinned before anything else runs: this process starts it
+	// again (its window, «Перенести в Program Files»), and it must stay the
+	// file the user started. Held until exit. In Program Files nothing is
+	// pinned: an updater of another Windows session renames a running
+	// HyRoute.exe there.
+	var pinErr error
+	if !protectedLocation(dir) {
+		_, pinErr = update.PinFile(exe)
+	}
 	dataDir, err := store.DefaultDir()
 	if err != nil {
 		fatalBox(err)
@@ -186,6 +196,9 @@ func main() {
 	loadErr := ctl.Load()
 	ctl.SetLogDir(filepath.Join(dataDir, "logs"))
 	ctl.Log.Info("HyRoute starting", "build", build, "dir", dir, "runtime", runtimeDir, "data", dataDir, "stub", *stub)
+	if pinErr != nil {
+		ctl.Log.Warn("HyRoute.exe not pinned in a folder users may write", "err", pinErr)
+	}
 	if len(staged.Downloaded) > 0 {
 		ctl.Log.Info("files missing next to HyRoute.exe were downloaded and verified", "files", strings.Join(staged.Downloaded, ", "))
 	}

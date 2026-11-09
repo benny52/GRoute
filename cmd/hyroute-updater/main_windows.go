@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -56,6 +57,25 @@ func main() {
 		defer windows.CloseHandle(mutex)
 	}
 	mainExe := filepath.Join(*target, *exe)
+	// startMain starts HyRoute.exe in target as it is now: pinned
+	// (update.PinFile) until it runs, so no program can swap it in a
+	// folder users may write, and with sum checked against it first. The
+	// started HyRoute runs with the administrator's rights.
+	startMain := func(args []string, sum string) (*exec.Cmd, error) {
+		release, err := update.PinFile(mainExe)
+		if err != nil {
+			log("pin %s: %v", mainExe, err)
+		} else {
+			defer release()
+		}
+		if sum != "" {
+			if got, err := update.FileSHA256(mainExe); err != nil || !strings.EqualFold(got, sum) {
+				return nil, errors.New("файл новой версии изменился после замены")
+			}
+		}
+		cmd := exec.Command(mainExe, args...)
+		return cmd, cmd.Start()
+	}
 	// to is the version that failed to install, for --update-failed: the
 	// staging directory is updates\<version>\files (update.Stage) until
 	// the verified manifest names it.
@@ -68,7 +88,7 @@ func main() {
 		if *reconnect {
 			args = append(args, "--reconnect")
 		}
-		if err := exec.Command(mainExe, args...).Start(); err != nil {
+		if _, err := startMain(args, ""); err != nil {
 			log("start old: %v", err)
 			fail("Обновление не установлено (" + reason + "), и прежняя версия HyRoute не запустилась: " + err.Error() +
 				". Запустите HyRoute вручную: если был включён kill switch, интернет закрыт, пока HyRoute не подключится.")
@@ -104,8 +124,8 @@ func main() {
 	if *reconnect {
 		args = append(args, "--reconnect")
 	}
-	cmd := exec.Command(mainExe, args...)
-	if err := cmd.Start(); err != nil {
+	cmd, err := startMain(args, sw.ExeSHA256)
+	if err != nil {
 		log("start new: %v", err)
 		sw.Undo()
 		restartOld("новая версия не запускается: " + err.Error())
