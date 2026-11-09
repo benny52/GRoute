@@ -2,6 +2,10 @@ package tgws
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"net"
 	"crypto/rand"
 	"encoding/binary"
 	"os"
@@ -67,5 +71,37 @@ func TestLiveTelegram(t *testing.T) {
 			}
 			t.Logf("%s: resPQ via %s", c.name, st.LastRoute)
 		})
+	}
+}
+
+// TestLiveFronting says what Telegram's WebSocket server answers to a
+// TLS name other than its own: the certificate it presents (names,
+// issuer) and whether it verifies for kws2.web.telegram.org. Information
+// only: whether fronting works depends on the network.
+func TestLiveFronting(t *testing.T) {
+	if os.Getenv("HYROUTE_TGWS_LIVE") == "" {
+		t.Skip("HYROUTE_TGWS_LIVE=1 runs it against Telegram")
+	}
+	for _, sni := range []string{FrontingSNI, "kws2.web.telegram.org", ""} {
+		c, err := tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", "149.154.167.220:443",
+			&tls.Config{ServerName: sni, InsecureSkipVerify: true})
+		if err != nil {
+			t.Logf("SNI %q: %v", sni, err)
+			continue
+		}
+		cs := c.ConnectionState()
+		leaf := cs.PeerCertificates[0]
+		opts := x509.VerifyOptions{DNSName: "kws2.web.telegram.org", Intermediates: x509.NewCertPool()}
+		for _, ic := range cs.PeerCertificates[1:] {
+			opts.Intermediates.AddCert(ic)
+		}
+		_, verr := leaf.Verify(opts)
+		t.Logf("SNI %q: names %v, issuer %q, verifies for kws2: %v", sni, leaf.DNSNames, leaf.Issuer.CommonName, verr)
+		c.Close()
+	}
+	w, err := dialWS(context.Background(), (&net.Dialer{}).DialContext, wsTarget{Addr: "149.154.167.220:443", Host: "kws2.web.telegram.org", SNI: FrontingSNI, Path: "/apiws"})
+	t.Logf("fronted WebSocket: %v", err)
+	if w != nil {
+		w.Close()
 	}
 }
