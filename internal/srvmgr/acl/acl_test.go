@@ -473,3 +473,26 @@ func TestLintLargeACL(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// Thousands of rules for one address (or for every one): each is checked
+// against the earliest few, not a copy of all before it.
+func TestLintRepeatedAddress(t *testing.T) {
+	var b strings.Builder
+	for range 30000 {
+		b.WriteString("reject(same.example.com)\ndirect(all)\n")
+	}
+	start := time.Now()
+	ps := Check(Parse(b.String()), Env{})
+	if took := time.Since(start); took > 20*time.Second {
+		t.Fatalf("checked in %s", took)
+	}
+	dups := 0
+	for _, p := range ps {
+		if p.Code == "duplicate" || p.Code == "shadowed" {
+			dups++
+		}
+	}
+	if dups < 59000 {
+		t.Fatalf("%d repeats found", dups)
+	}
+}

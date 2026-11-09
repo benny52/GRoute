@@ -27,6 +27,12 @@ var private = []struct{ cidr, sample string }{
 // maxCovers bounds the rule pairs lint compares for shadowed rules.
 const maxCovers = 1 << 17
 
+// maxCands bounds the indexed candidates taken from each list for one
+// rule: the earliest, where a cover is looked for. A list as long as the
+// ACL (one address in thousands of rules) would otherwise be copied and
+// sorted for every rule, whatever maxCovers allows.
+const maxCands = 64
+
 // lint finds what Hysteria accepts but is probably not meant: rules that
 // never fire, domains it never matches, the server's own networks open
 // to clients, plain DNS on a cascade entry.
@@ -69,7 +75,8 @@ func lint(d Document, env Env, valid []bool, at []int) []Problem {
 			continue
 		}
 		nb, kb := norm(b.Address), KindOf(b.Address)
-		indexed := slices.Concat(every, same[nb])
+		head := func(l []int) []int { return l[:min(len(l), maxCands)] }
+		indexed := slices.Concat(head(every), head(same[nb]))
 		var lists [][]int
 		switch kb {
 		case KindDomain, KindSuffix, KindWildcard:
@@ -78,7 +85,7 @@ func lint(d Document, env Env, valid []bool, at []int) []Problem {
 				name = nb[strings.LastIndex(nb, "*")+1:]
 			}
 			for t, ok := name, true; ok && t != ""; _, t, ok = strings.Cut(t, ".") {
-				indexed = append(indexed, suffixes[t]...)
+				indexed = append(indexed, head(suffixes[t])...)
 			}
 			lists = [][]int{wild}
 			if kb == KindDomain {
