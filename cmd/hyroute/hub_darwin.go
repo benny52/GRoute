@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -44,6 +45,12 @@ type winHost struct {
 	// an update replaces it.
 	app string
 	ln  net.Listener
+	// users: each window's account; dialogs: the account of the window
+	// that picked each path in a dialog, until the path is used
+	// (dialogUser). Files the user picks are written and read with that
+	// account's rights (userfile_darwin.go).
+	users   map[*uirpc.Peer]fileUser
+	dialogs map[string]fileUser
 }
 
 var errNoWindow = errors.New("окно HyRoute закрыто")
@@ -75,38 +82,57 @@ func (h *winHost) listen() error {
 	return nil
 }
 
-// peerAllowed: root or a member of group admin.
-func peerAllowed(c *net.UnixConn) (uint32, error) {
+// peerAllowed: root or a member of group admin. The account is the
+// peer's, with its groups (the first the primary one).
+func peerAllowed(c *net.UnixConn) (fileUser, error) {
 	raw, err := c.SyscallConn()
 	if err != nil {
-		return 0, err
+		return fileUser{}, err
 	}
 	var cred *unix.Xucred
 	var cerr error
 	if err := raw.Control(func(fd uintptr) {
 		cred, cerr = unix.GetsockoptXucred(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
 	}); err != nil {
-		return 0, err
+		return fileUser{}, err
 	}
 	if cerr != nil {
-		return 0, cerr
+		return fileUser{}, cerr
 	}
+	u := fileUser{ok: true, uid: cred.Uid, groups: append([]uint32(nil), cred.Groups[:min(int(cred.Ngroups), len(cred.Groups))]...)}
 	if cred.Uid == 0 {
-		return 0, nil
+		return u, nil
 	}
-	for _, g := range cred.Groups[:min(int(cred.Ngroups), len(cred.Groups))] {
+	for _, g := range u.groups {
 		if g == adminGID {
-			return cred.Uid, nil
+			return u, nil
 		}
 	}
-	return cred.Uid, fmt.Errorf("пользователь %d не администратор этого Mac", cred.Uid)
+	return u, fmt.Errorf("пользователь %d не администратор этого Mac", cred.Uid)
+}
+
+// ownApp reports whether p is a HyRoute.app u may have the service
+// replace: no symbolic link on the way, and the bundle u's or root's.
+func ownApp(p string, u fileUser) bool {
+	if !filepath.IsAbs(p) || filepath.Base(p) != "HyRoute.app" {
+		return false
+	}
+	if real, err := filepath.EvalSymlinks(p); err != nil || real != filepath.Clean(p) {
+		return false
+	}
+	fi, err := os.Lstat(p)
+	if err != nil || !fi.IsDir() {
+		return false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && (st.Uid == 0 || st.Uid == u.uid)
 }
 
 func (h *winHost) serve(c *net.UnixConn) {
 	defer c.Close()
-	uid, err := peerAllowed(c)
+	user, err := peerAllowed(c)
 	if err != nil {
-		h.g.ctl.Log.Warn("window connection refused", "uid", uid, "err", err)
+		h.g.ctl.Log.Warn("window connection refused", "uid", user.uid, "err", err)
 		// The window shows why.
 		p := uirpc.New(c, c)
 		go p.Run()
@@ -119,7 +145,7 @@ func (h *winHost) serve(c *net.UnixConn) {
 	p.OnEvent = func(name string, args []json.RawMessage) {
 		if name == "client.app" && len(args) == 1 {
 			var p string
-			if json.Unmarshal(args[0], &p) == nil && filepath.IsAbs(p) && filepath.Base(p) == "HyRoute.app" {
+			if json.Unmarshal(args[0], &p) == nil && ownApp(p, user) {
 				h.mu.Lock()
 				h.app = p
 				h.mu.Unlock()
@@ -137,6 +163,10 @@ func (h *winHost) serve(c *net.UnixConn) {
 	}
 	h.mu.Lock()
 	h.peers = append(h.peers, p)
+	if h.users == nil {
+		h.users = map[*uirpc.Peer]fileUser{}
+	}
+	h.users[p] = user
 	h.mu.Unlock()
 	p.Run()
 	h.mu.Lock()
@@ -147,6 +177,7 @@ func (h *winHost) serve(c *net.UnixConn) {
 		}
 	}
 	delete(h.menubar, p)
+	delete(h.users, p)
 	h.mu.Unlock()
 }
 
@@ -244,21 +275,48 @@ func (h *winHost) clipboardSet(text string) error {
 }
 
 func (h *winHost) openFile(o runtime.OpenDialogOptions) (string, error) {
-	r, err := h.call("dialog.open", o)
-	if err != nil {
-		return "", err
-	}
-	var s string
-	return s, json.Unmarshal(r, &s)
+	return h.dialog("dialog.open", o)
 }
 
 func (h *winHost) saveFile(o runtime.SaveDialogOptions) (string, error) {
-	r, err := h.call("dialog.save", o)
+	return h.dialog("dialog.save", o)
+}
+
+// dialog asks the newest window for a path and notes whose it is.
+func (h *winHost) dialog(method string, o any) (string, error) {
+	p := h.current()
+	if p == nil {
+		return "", errNoWindow
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	r, err := p.Call(ctx, method, o)
 	if err != nil {
 		return "", err
 	}
 	var s string
-	return s, json.Unmarshal(r, &s)
+	if err := json.Unmarshal(r, &s); err != nil || s == "" {
+		return "", err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if u, ok := h.users[p]; ok {
+		if h.dialogs == nil || len(h.dialogs) > 16 {
+			h.dialogs = map[string]fileUser{} // paths never used
+		}
+		h.dialogs[s] = u
+	}
+	return s, nil
+}
+
+// dialogUser is the account of the window whose dialog returned path
+// (once: the path is forgotten); not ok when none did.
+func (h *winHost) dialogUser(path string) fileUser {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	u := h.dialogs[path]
+	delete(h.dialogs, path)
+	return u
 }
 
 // openPath has the window open a folder or a link as its user (Finder,

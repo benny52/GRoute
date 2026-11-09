@@ -52,6 +52,7 @@ func (g *GUI) ExportBackup(o app.BackupExportOptions) (BackupSaved, error) {
 	if err != nil || path == "" {
 		return BackupSaved{}, err
 	}
+	user := g.win.dialogUser(path)
 	if !strings.EqualFold(filepath.Ext(path), backup.Ext) {
 		// The dialog asked about overwriting the name it returned, not
 		// this one: never replace a file it did not ask about.
@@ -60,7 +61,7 @@ func (g *GUI) ExportBackup(o app.BackupExportOptions) (BackupSaved, error) {
 			return BackupSaved{}, fmt.Errorf("файл «%s» уже есть: выберите другое имя или сам этот файл", path)
 		}
 	}
-	if err := store.WriteUserFile(path, b); err != nil {
+	if err := g.writeUserFile(user, path, b); err != nil {
 		return BackupSaved{}, err
 	}
 	return BackupSaved{Path: path, Warnings: warnings}, nil
@@ -79,7 +80,7 @@ func (g *GUI) OpenBackup() (app.BackupOpened, error) {
 	if err != nil || path == "" {
 		return app.BackupOpened{}, err
 	}
-	b, err := store.ReadUserFile(path, backup.MaxFile)
+	b, err := g.readUserFile(g.win.dialogUser(path), path, backup.MaxFile)
 	if errors.Is(err, store.ErrUserFileTooLarge) {
 		err = backup.ErrTooLarge
 	}

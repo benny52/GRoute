@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 )
 
-// Not elevated elsewhere: the user's own rights apply. The writes still
-// never follow a link at the target (the temp file is renamed over it).
+// These apply the caller's own rights. macOS's service runs as root: it
+// writes and reads a window user's files as that user (cmd/hyroute,
+// userfile_darwin.go) and calls these only for root. The writes never
+// follow a link at the target (the temp file is renamed over it).
 
 // WriteUserFile writes b to path, a file the user picked.
 func WriteUserFile(path string, b []byte) error {
