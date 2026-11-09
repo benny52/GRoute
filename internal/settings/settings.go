@@ -76,8 +76,13 @@ func (s *Settings) ExactWeb() bool          { return boolOr(s.ExactWebDomains, t
 func (s *Settings) KillSwitchOn() bool      { return boolOr(s.KillSwitch, false) }
 
 func (s *Settings) SniffTimeout() time.Duration {
-	if s.SniffTimeoutMs <= 0 {
+	switch {
+	case s.SniffTimeoutMs <= 0:
 		return 300 * time.Millisecond // relay.DefaultSniffTimeout
+	case s.SniffTimeoutMs > 5000:
+		// No UI sets it; a restored copy or a hand edit with more would
+		// hold every connection whose server speaks first (SSH, mail).
+		return 5 * time.Second
 	}
 	return time.Duration(s.SniffTimeoutMs) * time.Millisecond
 }
