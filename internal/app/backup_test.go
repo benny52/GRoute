@@ -581,7 +581,11 @@ func TestBackupUndoBrokenSettingsConnected(t *testing.T) {
 	if connected || c.SettingsError() == nil {
 		t.Fatalf("connected %v, settings error %v", connected, c.SettingsError())
 	}
-	if !slices.ContainsFunc(res.Warnings, func(m BackupMsg) bool { return strings.Contains(m.Text, "подключение остановлено") }) {
+	stopped := false
+	for _, m := range res.Warnings {
+		stopped = stopped || strings.Contains(m.Text, "подключение остановлено")
+	}
+	if !stopped {
 		t.Fatalf("%+v", res.Warnings)
 	}
 }
