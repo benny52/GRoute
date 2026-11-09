@@ -41,7 +41,19 @@ with `Options.ReflectDirect`:
   (endpoint-independent mapping). Other protocols (ICMP) are dropped.
 - Tunnel UDP takes the core's SOCKS5 UDP ASSOCIATE path unchanged.
 - DNS answers written into the device and queries read from it feed the
-  DNS cache (`HandleDNS`), as the DNS sniff handle does on Windows.
+  DNS cache (`HandleDNS`). Only DNS that passes the device is seen: with
+  «DNS по правилам» off the system resolver asks the network's server
+  (a router at a private address) past the device, unlike Windows, whose
+  DNS sniff handle sees every answer. Then a UDP flow, or TCP without
+  SNI, to an address no cached name explains is decided as «domain
+  unknown»: rules by site do not reach it, «Всё остальное» does.
+- `watchNetwork` also adds the IPv6 routes `::/1` and `8000::/1` when the
+  network gets an IPv6 default after the start.
+- HyRoute's own direct sockets leave by a default route scoped to the
+  physical interface (`IP_BOUND_IF`). A program that binds its socket to
+  that interface the same way (some WebRTC and Network.framework uses)
+  leaves past the device and the rules; with the kill switch on, pf
+  blocks it.
 
 `watchNetwork` follows the physical default route every 3 seconds: new
 direct sockets bind to the new interface, the forwarder's sockets are
