@@ -70,6 +70,18 @@ var (
 func (c *Controller) initGroups() {
 	c.groupsRT = groups.NewRuntime(c.Log)
 	c.groupsRT.Name = c.profileName
+	// A server that stopped being healthy: its connections are reset, so
+	// the applications reconnect through the fallback at once (an
+	// application such as Telegram would otherwise wait on a dead
+	// connection for minutes). Set once: probes read it unlocked.
+	c.groupsRT.OnUnhealthy = func(id string) {
+		c.mu.Lock()
+		sess := c.sess
+		c.mu.Unlock()
+		if sess != nil {
+			sess.ResetServer(id)
+		}
+	}
 	c.groupsFile = &groups.File{Version: groups.FormatVersion, Groups: []groups.Group{}}
 	c.probing = map[string]*probeRun{}
 }
@@ -989,18 +1001,6 @@ func (c *Controller) explainGroup(ex *Explanation, sess Session) {
 // penalise a member starts over.
 func (c *Controller) groupsSession(cfg *session.Config) {
 	c.groupsRT.ResetSession()
-	// A server that stopped being healthy: its connections are reset, so
-	// the applications reconnect through the fallback at once (an
-	// application such as Telegram would otherwise wait on a dead
-	// connection for minutes).
-	c.groupsRT.OnUnhealthy = func(id string) {
-		c.mu.Lock()
-		sess := c.sess
-		c.mu.Unlock()
-		if sess != nil {
-			sess.ResetServer(id)
-		}
-	}
 	cfg.Groups = c.groupsRT
 	cfg.OnDial = c.groupsRT.NoteDial
 	cfg.OnHealth = func(id string, s hysteria.Status) { c.groupsRT.NoteState(id, s.State == hysteria.Connected) }
