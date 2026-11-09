@@ -15,6 +15,7 @@
 package zapret
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -161,6 +162,9 @@ type Settings struct {
 	// before 1.3.23); ViaRules: by the user's own rules (the bypass keeps
 	// no rule for it); else a server or group ID.
 	Via map[Target]string `json:"via,omitempty"`
+	// Telegram: «Telegram без VPN», a local MTProto proxy that carries
+	// Telegram over WebSocket (internal/tgws). Apart from winws2.
+	Telegram TelegramSettings `json:"telegram,omitzero"`
 	// AutoHeal: HyRoute checks the services through the running bypass
 	// and picks again by itself when one stops opening, or on a network
 	// with no pick yet. nil = on.
@@ -186,6 +190,24 @@ const (
 	MaxSites   = 500
 	MaxNetKeys = 32
 )
+
+// TelegramSettings: the local proxy for Telegram.
+type TelegramSettings struct {
+	Enabled bool   `json:"enabled"`
+	Port    int    `json:"port,omitempty"`   // 0 = DefaultTelegramPort
+	Secret  string `json:"secret,omitempty"` // 32 hex digits; HyRoute makes one
+}
+
+// DefaultTelegramPort is tg-ws-proxy's port.
+const DefaultTelegramPort = 1443
+
+// TelegramPort is the port in use.
+func (t TelegramSettings) TelegramPort() int {
+	if t.Port == 0 {
+		return DefaultTelegramPort
+	}
+	return t.Port
+}
 
 // Heals reports that HyRoute looks after the bypass by itself (AutoHeal).
 func (s Settings) Heals() bool { return s.AutoHeal == nil || *s.AutoHeal }
@@ -215,6 +237,12 @@ func (s *Settings) Normalize() {
 		if !known(m) && m != None && m != VPN || !slices.Contains(Targets, t) {
 			delete(s.Methods, t)
 		}
+	}
+	if s.Telegram.Port != 0 && (s.Telegram.Port < 1024 || s.Telegram.Port > 65535) {
+		s.Telegram.Port = 0
+	}
+	if b, err := hex.DecodeString(s.Telegram.Secret); err != nil || len(b) != 16 {
+		s.Telegram.Secret = "" // made again
 	}
 	for t, v := range s.Via {
 		if s.Methods[t] != VPN || v == "" || len(v) > 128 {

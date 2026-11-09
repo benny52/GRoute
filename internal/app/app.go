@@ -200,6 +200,7 @@ type Controller struct {
 	// Feature state (one line per feature, landing order).
 	groupsState
 	zapretState // «Обход DPI» (zapret.go)
+	tgState     // «Telegram без VPN» (tgws.go)
 	portsState
 	rulesetsState // rulesets: guarded by mu (rulesets.go)
 	dnsState      // dns: DNS policies (dns.go)

@@ -27,12 +27,12 @@
   import Zapret from './lib/Zapret.svelte'; // zapret
 
   // expert: the page is shown only in the full interface; windows: not on macOS.
-  const pages = [
+  const pages: { id: string; label: string; icon: string; expert?: boolean; windows?: boolean }[] = [
     { id: 'home', label: 'Главная', icon: 'home' },
     { id: 'rules', label: 'Правила', icon: 'rules' },
     { id: 'servers', label: 'Серверы', icon: 'server' },
     { id: 'subs', label: 'Подписки', icon: 'rss' },
-    { id: 'dpi', label: 'Обход DPI', icon: 'shield', windows: true }, // zapret: winws2 is Windows-only
+    { id: 'dpi', label: 'Обход DPI', icon: 'shield' }, // zapret (Windows) and «Telegram без VPN» (both)
     { id: 'proxies', label: 'Прокси', icon: 'zap', expert: true },
     { id: 'networks', label: 'Сети', icon: 'wifi', expert: true }, // netmodes
     { id: 'lists', label: 'Списки', icon: 'database', expert: true },

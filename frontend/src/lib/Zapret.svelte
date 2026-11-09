@@ -117,6 +117,46 @@
     }
   }
 
+  // «Telegram без VPN»: saved at once, apart from the form above.
+  let tgBusy = $state(false);
+  let tgError = $state('');
+  let tgPort = $state(1443);
+  let tgNote = $state('');
+  $effect(() => {
+    if (view && !tgBusy) tgPort = view.telegram.port;
+  });
+  async function saveTelegram(on: boolean) {
+    tgBusy = true;
+    tgError = '';
+    try {
+      await api.SaveTelegram({ enabled: on, port: Number(tgPort) || 0 });
+      loaded = false;
+      await refresh();
+    } catch (e) {
+      tgError = errText(e);
+      await refresh();
+    }
+    tgBusy = false;
+  }
+  async function openTelegram() {
+    tgError = '';
+    try {
+      await api.OpenTelegramProxy();
+    } catch (e) {
+      tgError = errText(e);
+    }
+  }
+  async function copyTelegram() {
+    const l = view?.telegram.link;
+    if (!l) return;
+    try {
+      await api.CopyText(l);
+      tgNote = 'Ссылка скопирована: отправьте её себе в Telegram и нажмите на неё';
+    } catch (e) {
+      tgError = errText(e);
+    }
+  }
+
   // setHeal turns self-healing on or off at once (the rest as saved).
   async function setHeal(on: boolean) {
     if (!view) return;
@@ -174,8 +214,50 @@
     </p>
   </header>
 
+  {#snippet telegramCard(v: ZapretView)}
+    {@const tg = v.telegram}
+    {@const r = tg.stats.routes ?? {}}
+    <section class="card">
+      <h2>Telegram без VPN</h2>
+      <p class="muted small">
+        Telegram Desktop ходит к серверам Telegram через WebSocket его веб-версии — их блокируют редко. HyRoute поднимает на этом компьютере прокси для
+        Telegram. Если WebSocket не открывается, Telegram идёт через ваш сервер VPN (когда HyRoute подключён) или напрямую. Звонки так не идут.
+      </p>
+      <label class="switch">
+        <input type="checkbox" checked={tg.enabled} disabled={tgBusy} onchange={(e) => saveTelegram(e.currentTarget.checked)} />
+        <b>Включить</b>
+      </label>
+      {#if tg.error}<div class="note error small">{tg.error}</div>{/if}
+      {#if tg.running}
+        <div class="row">
+          <button class="primary" onclick={openTelegram}><Icon name="arrow" size={15} />Подключить Telegram</button>
+          <button onclick={copyTelegram}><Icon name="copy" size={15} />Скопировать ссылку</button>
+        </div>
+        <p class="muted small">
+          Один раз: Telegram спросит, подключить ли прокси, — согласитесь. Дальше он работает сам, пока HyRoute запущен. Если Telegram не открылся,
+          скопируйте ссылку, отправьте её себе в «Избранное» и нажмите на неё.
+        </p>
+        {#if tg.stats.total > 0}
+          <div class="small">
+            Соединений сейчас: {tg.stats.active}. Всего: через WebSocket {(r['ws'] ?? 0) + (r['ws-fronted'] ?? 0)}, через VPN {r['vpn'] ?? 0}, напрямую
+            {r['tcp'] ?? 0}{tg.stats.failed ? `, не открылось ${tg.stats.failed}` : ''}.
+          </div>
+        {/if}
+        {#if tg.stats.bad > 0}<div class="note error small">Telegram подключается с неверным секретом: удалите старый прокси в Telegram и нажмите «Подключить Telegram».</div>{/if}
+        {#if tg.stats.lastError}<div class="muted small">Последняя ошибка: {hide(tg.stats.lastError)}</div>{/if}
+      {/if}
+      {#if ui.expert}
+        <label class="lbl" for="tg-port">Порт прокси (127.0.0.1)</label>
+        <input id="tg-port" type="number" min="1024" max="65535" bind:value={tgPort} onchange={() => saveTelegram(tg.enabled)} />
+      {/if}
+      {#if tgError}<div class="note error small">{hide(tgError)}</div>{/if}
+      {#if tgNote && !tgError}<div class="note ok small">{tgNote}</div>{/if}
+    </section>
+  {/snippet}
+
   {#if view && !view.available}
-    <div class="note info">Обход DPI пока работает только на Windows.</div>
+    <div class="note info">Обход DPI (zapret2) пока работает только на Windows.</div>
+    {@render telegramCard(view)}
   {:else if view}
     {#if view.loadError}<div class="note error">{view.loadError}</div>{/if}
 
@@ -323,6 +405,8 @@
         {/if}
       </section>
     {/if}
+
+    {@render telegramCard(view)}
 
     <section class="card info">
       <p class="small">

@@ -150,6 +150,9 @@ func (g *GUI) ZapretInfo() app.ZapretView { return g.ctl.ZapretInfo() }
 // SaveZapret saves the page and applies it (winws2 and the rules).
 func (g *GUI) SaveZapret(in app.ZapretInput) error { return g.ctl.SaveZapret(in) }
 
+// SaveTelegram turns «Telegram без VPN» on or off.
+func (g *GUI) SaveTelegram(in app.TelegramInput) error { return g.ctl.SaveTelegram(in) }
+
 // ZapretRoute: where the user's rules send a service (before «через VPN»).
 func (g *GUI) ZapretRoute(t zapret.Target) (app.ZapretRoute, error) { return g.ctl.ZapretRoute(t) }
 

@@ -126,6 +126,15 @@ func (g *GUI) OpenDataDir() error {
 	return errors.New("данные HyRoute лежат в " + g.dataDir + " (папка администратора)")
 }
 
+// OpenTelegramProxy opens the tg://proxy link of «Telegram без VPN».
+func (g *GUI) OpenTelegramProxy() error {
+	u := g.ctl.TelegramLink()
+	if u == "" {
+		return errors.New("прокси для Telegram не запущен")
+	}
+	return g.win.openPath(u)
+}
+
 func (g *GUI) OpenSubscriptionSupport(id string) error {
 	u, err := g.ctl.SupportLink(id)
 	if err != nil {

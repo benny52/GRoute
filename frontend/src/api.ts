@@ -1938,8 +1938,29 @@ export interface ZapretView {
   pick?: ZapretPick;
   commandLine?: string;
   busy?: string;
+  telegram: TelegramView;
   healNote?: string; // self-healing's last finding, at healAt (Unix ms)
   healAt?: number;
+}
+
+// «Telegram без VPN» (app/tgws.go, internal/tgws).
+export interface TelegramView {
+  enabled: boolean;
+  port: number;
+  running: boolean;
+  error?: string;
+  link?: string; // tg://proxy with the secret: never shown, only opened or copied
+  stats: {
+    active: number;
+    total: number;
+    bad: number;
+    failed: number;
+    routes: Record<string, number> | null; // ws, ws-fronted, vpn, tcp
+    up: number;
+    down: number;
+    lastRoute: string;
+    lastError?: string;
+  };
 }
 
 export interface ZapretInput {
@@ -1956,6 +1977,8 @@ interface GUI {
   ZapretPick(): Promise<ZapretView>;
   ZapretPickCancel(): Promise<void>;
   ZapretRoute(t: ZapretTarget): Promise<ZapretRoute>;
+  SaveTelegram(i: { enabled: boolean; port: number }): Promise<void>;
+  OpenTelegramProxy(): Promise<void>;
   ZapretViaVPN(i: ZapretViaInput): Promise<void>;
 }
 

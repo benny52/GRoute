@@ -101,6 +101,14 @@ jobs:
         run: shellcheck scripts/*.sh
       - name: WinDivert's filter compiler (tools/wdfilter)
         run: ./tools/wdfilter/build.sh
+      - name: Telegram over WebSocket, against Telegram's real servers (tgws)
+        # The bridge asks real Telegram for a key exchange's first step
+        # through every route. Telegram is not HyRoute's: a failure here is
+        # read, not a gate.
+        continue-on-error: true
+        run: go test -v -count=1 -run LiveTelegram ./internal/tgws/
+        env:
+          HYROUTE_TGWS_LIVE: '1'
       - run: go test -race ./...
         env:
           # The filter tests run through WinDivert's own compiler: a main

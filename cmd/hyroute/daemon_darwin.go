@@ -117,6 +117,7 @@ func runDaemon(verbose, stub bool) {
 
 	schedCtx, stopSched := context.WithCancel(context.Background())
 	defer stopSched()
+	ctl.StartZapret() // «Telegram без VPN» when it is on (winws2 is Windows-only)
 	go ctl.RunScheduler(schedCtx)
 	go ctl.RunUpdateChecks(schedCtx)
 	go ctl.RunGeoUpdates(schedCtx)

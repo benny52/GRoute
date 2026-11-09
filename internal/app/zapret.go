@@ -109,6 +109,8 @@ type ZapretView struct {
 	Busy string `json:"busy,omitempty"`
 	// HasServer: there is a main server to send a target through.
 	HasServer bool `json:"hasServer"`
+	// Telegram: «Telegram без VPN» (tgws.go).
+	Telegram TelegramView `json:"telegram"`
 	// Heal: what self-healing last found ("" = nothing yet), and when.
 	HealNote string `json:"healNote,omitempty"`
 	HealAt   int64  `json:"healAt,omitempty"` // Unix ms
@@ -307,6 +309,7 @@ func (c *Controller) zapretApplyLocked() {
 	cfg := c.zapretCfg
 	run := c.zapretRunner()
 	c.syncZapretRules(cfg)
+	c.tgApplyLocked() // Telegram's proxy: on its own switch
 	defer c.zapretWatchLocked(cfg)
 	defer c.zapretHealLocked(cfg)
 	if c.zapretErr != nil || !cfg.Enabled || len(cfg.Targets) == 0 || c.ZapretPrepare == nil || c.ZapretLists == "" {
@@ -589,6 +592,7 @@ func (c *Controller) ZapretInfo() ZapretView {
 func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretView {
 	v := ZapretView{Available: c.ZapretPrepare != nil, Pick: pick, Busy: busy}
 	v.HealNote, v.HealAt = c.healState()
+	v.Telegram = c.telegramViewLocked()
 	c.mu.Lock()
 	v.HasServer = c.mainTargetLocked() != ""
 	c.mu.Unlock()
