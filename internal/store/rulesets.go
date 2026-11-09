@@ -356,6 +356,11 @@ func (s *Store) SaveRulesets(r *Rulesets) error {
 	if err != nil {
 		return err
 	}
+	// LoadRulesets refuses a larger file: written, the profiles would be
+	// lost at the next start.
+	if len(b) > maxRulesetsBytes {
+		return fmt.Errorf("профили правил вместе больше %d МБ, такой файл HyRoute не прочитает: удалите лишние правила или профили", maxRulesetsBytes>>20)
+	}
 	if s.TestRulesetsWrite != nil {
 		if err := s.TestRulesetsWrite(r.Pending != nil); err != nil {
 			return err
