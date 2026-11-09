@@ -111,9 +111,9 @@ func peerAllowed(c *net.UnixConn) (fileUser, error) {
 	return u, fmt.Errorf("пользователь %d не администратор этого Mac", cred.Uid)
 }
 
-// ownApp reports whether p is a HyRoute.app u may have the service
+// userApp reports whether p is a HyRoute.app u may have the service
 // replace: no symbolic link on the way, and the bundle u's or root's.
-func ownApp(p string, u fileUser) bool {
+func userApp(p string, u fileUser) bool {
 	if !filepath.IsAbs(p) || filepath.Base(p) != "HyRoute.app" {
 		return false
 	}
@@ -145,7 +145,7 @@ func (h *winHost) serve(c *net.UnixConn) {
 	p.OnEvent = func(name string, args []json.RawMessage) {
 		if name == "client.app" && len(args) == 1 {
 			var p string
-			if json.Unmarshal(args[0], &p) == nil && ownApp(p, user) {
+			if json.Unmarshal(args[0], &p) == nil && userApp(p, user) {
 				h.mu.Lock()
 				h.app = p
 				h.mu.Unlock()
