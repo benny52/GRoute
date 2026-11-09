@@ -74,6 +74,40 @@ func TestSubscriptionProxies(t *testing.T) {
 	}
 }
 
+// The form's access (from the network, the login and password) changes on
+// every proxy the subscription made, not only on the ones made later.
+func TestSubscriptionProxiesAccessChanges(t *testing.T) {
+	c, _ := newCtl(t)
+	body := "hy2://a@one.example:443#ONE
+hy2://a@two.example:443#TWO
+"
+	v := addSub(t, c, &body)
+	if err := c.SetSubscriptionProxies(v.ID, &SubProxiesInput{Port: 20000, LAN: true, Username: "u", Password: "old-pass"}); err != nil {
+		t.Fatal(err)
+	}
+	check := func(lan bool, user, pass string) {
+		t.Helper()
+		ps := subProxies(c, v.ID)
+		if len(ps) != 2 {
+			t.Fatalf("%+v", ps)
+		}
+		for _, p := range ps {
+			if p.LAN != lan || p.Username != user || p.Password != pass {
+				t.Fatalf("%s: lan %v %q %q", p.Name, p.LAN, p.Username, p.Password)
+			}
+		}
+	}
+	check(true, "u", "old-pass")
+	if err := c.SetSubscriptionProxies(v.ID, &SubProxiesInput{Port: 20000, LAN: true, Username: "u", Password: "new-pass"}); err != nil {
+		t.Fatal(err)
+	}
+	check(true, "u", "new-pass")
+	if err := c.SetSubscriptionProxies(v.ID, &SubProxiesInput{Port: 20000}); err != nil {
+		t.Fatal(err)
+	}
+	check(false, "", "")
+}
+
 func TestSubscriptionProxiesGoWithIt(t *testing.T) {
 	c, _ := newCtl(t)
 	body := "hy2://a@one.example:443#ONE\nhy2://a@two.example:443#TWO\n"

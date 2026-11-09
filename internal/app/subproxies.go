@@ -50,6 +50,7 @@ func (c *Controller) SetSubscriptionProxies(id string, in *SubProxiesInput) erro
 		c.mu.Unlock()
 		return errors.New("подписка не найдена")
 	}
+	old := c.subs[i].Proxies
 	subs := slices.Clone(c.subs)
 	subs[i].Proxies = conf
 	if err := c.saveSubsLocked(subs); err != nil {
@@ -59,11 +60,56 @@ func (c *Controller) SetSubscriptionProxies(id string, in *SubProxiesInput) erro
 	c.subs = subs
 	if conf != nil {
 		c.Redactor.SetGroup("subproxy:"+id, conf.Password)
+		if err := c.restampSubProxiesLocked("sub:"+id, old, *conf); err != nil {
+			c.mu.Unlock()
+			return err
+		}
 	}
 	err := c.syncSubProxiesLocked()
 	c.mu.Unlock()
 	c.changed()
 	return err
+}
+
+// restampSubProxiesLocked gives the proxies a subscription made the access
+// its form now sets (from the local network, the login and password):
+// changed there, it changes on every port at once, not only on the ports
+// of servers that come later. Turned on for the network, a proxy on a
+// port the firewall opens for HyRoute in any network is made again on
+// another (syncSubProxiesLocked). c.mu held.
+func (c *Controller) restampSubProxiesLocked(source string, old *store.SubProxies, conf store.SubProxies) error {
+	if old != nil && old.LAN == conf.LAN && old.Username == conf.Username && old.Password == conf.Password {
+		return nil
+	}
+	changed := false
+	next := make([]store.LocalProxy, 0, len(c.proxies))
+	for _, p := range c.proxies {
+		if p.Source == source {
+			if conf.LAN && p.Port >= relay.PortMin && p.Port <= relay.PortMax {
+				changed = true
+				continue
+			}
+			if p.LAN != conf.LAN || p.Username != conf.Username || p.Password != conf.Password {
+				p.LAN, p.Username, p.Password = conf.LAN, conf.Username, conf.Password
+				normalizeProxy(&p)
+				changed = true
+			}
+		}
+		next = append(next, p)
+	}
+	if !changed {
+		return nil
+	}
+	if err := c.saveProxiesLocked(next); err != nil {
+		return err
+	}
+	for _, p := range next {
+		if p.Source == source {
+			c.Redactor.SetGroup("proxy:"+p.ID, p.Password)
+		}
+	}
+	go c.syncProxiesLife() // the open ports take the new access
+	return nil
 }
 
 func validSubProxies(p store.SubProxies) error {
