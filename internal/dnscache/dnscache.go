@@ -24,7 +24,9 @@ type Cache struct {
 	// cache for the whole TTL without a query on the wire, so a pair dropped
 	// earlier would stay unknown until then.
 	MinTTL, MaxTTL time.Duration
-	// MaxEntries bounds memory; the oldest-expiring pairs go first.
+	// MaxEntries bounds memory; the oldest-expiring pairs go first. A pair
+	// takes about a kilobyte (two small maps and two strings), and a page
+	// can resolve names made up at random: 50 000 keep that near 50 MB.
 	MaxEntries int
 	// QueryTTL is how long a query seen on the wire waits for its answer;
 	// MaxQueries bounds the queries in flight.
@@ -68,7 +70,7 @@ type queryKey struct {
 
 func New() *Cache {
 	return &Cache{
-		MinTTL: time.Minute, MaxTTL: 24 * time.Hour, MaxEntries: 200000,
+		MinTTL: time.Minute, MaxTTL: 24 * time.Hour, MaxEntries: 50000,
 		QueryTTL: 30 * time.Second, MaxQueries: 16384,
 		byIP:    make(map[netip.Addr]map[siteName]time.Time),
 		byName:  make(map[string]map[siteIP]time.Time),
