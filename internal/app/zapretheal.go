@@ -25,6 +25,9 @@ var (
 	zapretHealAgain = time.Minute      // a failed check is repeated before acting
 	zapretHealGap   = 30 * time.Minute // between automatic picks on a network
 	zapretHealIdle  = 2 * time.Hour    // after one that left a service without a method
+	// zapretHealWake: after the computer slept, the network takes a while
+	// to come back; checks wait this long.
+	zapretHealWake = 2 * time.Minute
 )
 
 // zapretHealLocked runs zapretHeal while the bypass is on with it.
@@ -61,13 +64,23 @@ func (c *Controller) stopHeal() {
 func (c *Controller) zapretHeal(ctx context.Context) {
 	t := time.NewTimer(zapretHealFirst)
 	defer t.Stop()
+	// The wall clock: the timer's clock may not count sleep (Windows), the
+	// wall clock does, so a gap far past the interval is a sleep.
+	due := time.Now().Round(0).Add(zapretHealFirst)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
+		if late := time.Now().Round(0).Sub(due); late > zapretHealWake {
+			c.Log.Info("zapret: self-healing: the computer slept; checking later", "late", late.Round(time.Second))
+			due = time.Now().Round(0).Add(zapretHealWake)
+			t.Reset(zapretHealWake)
+			continue
+		}
 		c.zapretHealOnce(ctx)
+		due = time.Now().Round(0).Add(zapretHealEvery)
 		t.Reset(zapretHealEvery)
 	}
 }
@@ -237,9 +250,11 @@ func (c *Controller) healPick(ctx context.Context, key, why string, ts []zapret.
 	}
 	v, err := c.zapretPickLocked(capFirst(why))
 	c.zapretMu.Unlock()
-	found := err == nil && v.Pick != nil
+	// A pick that could not run (winws2 did not start) is no verdict on
+	// the network: the usual gap, not the long one.
+	found := err != nil || v.Pick != nil
 	var lost []zapret.Target
-	if found {
+	if err == nil && v.Pick != nil {
 		for _, t := range ts {
 			if v.Pick.Results[t] == "" {
 				lost = append(lost, t)
@@ -255,7 +270,7 @@ func (c *Controller) healPick(ctx context.Context, key, why string, ts []zapret.
 	c.pickMu.Unlock()
 	switch {
 	case err != nil:
-		c.setHeal(why + ": подобрать заново не вышло — " + err.Error())
+		c.setHeal(fmt.Sprintf("%s: подобрать заново не вышло — %v. Попробую снова через %d мин", why, err, int(zapretHealGap.Minutes())))
 	case len(lost) > 0:
 		c.setHeal(fmt.Sprintf("%s: ни один метод не открыл %s. Попробую снова через %d ч; если не поможет — пустите через VPN", why, targetNames(lost), int(zapretHealIdle.Hours())))
 	default:

@@ -691,3 +691,31 @@ func TestZapretPickSkipsDeadSite(t *testing.T) {
 		t.Fatalf("%+v", v.Pick)
 	}
 }
+
+// Testers slow to start (a busy or just woken computer) are waited for;
+// ones that never start are named so, not with an empty reason.
+func TestZapretPickSlowTesters(t *testing.T) {
+	c, _ := zapFixture(t)
+	spawn, wait := zapretSpawn, zapretStartWait
+	t.Cleanup(func() { zapretStartWait = wait })
+	var delay atomic.Int64
+	delay.Store(int64(50 * time.Millisecond))
+	zapretSpawn = func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) {
+		if !slices.Contains(args, "--wf-raw-filter="+zapret.ProbeExclude()) {
+			time.Sleep(time.Duration(delay.Load())) // a tester
+		}
+		return spawn(exe, args, env, out)
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := c.ZapretPick(); err != nil || v.Pick.Results[zapret.YouTube] == "" {
+		t.Fatalf("%v %+v", err, v.Pick)
+	}
+	zapretStartWait = 20 * time.Millisecond
+	delay.Store(int64(300 * time.Millisecond))
+	_, err := c.ZapretPick()
+	if err == nil || !strings.Contains(err.Error(), "не успел запуститься") {
+		t.Fatalf("%v", err)
+	}
+}

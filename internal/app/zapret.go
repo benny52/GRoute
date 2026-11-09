@@ -70,6 +70,9 @@ const ZapretRulePrefix = "Обход DPI: "
 // Test hooks.
 var (
 	zapretSettle = 1500 * time.Millisecond // winws2 opens WinDivert and reads its lists
+	// zapretStartWait: how long a pick waits for its testers to start (a
+	// busy or just woken computer, an antivirus scanning each winws2).
+	zapretStartWait = 15 * time.Second
 	// The generator: candidates tried around what worked, over the whole
 	// space when nothing did, the strategies kept per target, the time.
 	zapretRefine     = 24
@@ -836,9 +839,9 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 	works := map[zapret.Target][]timed{}
 	round := func(cands []string, targets []zapret.Target) (map[zapret.Target][]timed, error) {
 		out := map[zapret.Target][]timed{}
+		retried := false
 		for len(cands) > 0 && ctx.Err() == nil {
 			batch := cands[:min(len(cands), zapret.ProbeSlots-1)]
-			cands = cands[len(batch):]
 			testers := make([]*zapret.Runner, len(batch))
 			for i, id := range batch {
 				tried[id] = true
@@ -853,6 +856,14 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 				testers[i] = &zapret.Runner{Exe: filepath.Join(dir, "winws2.exe"), Log: c.Log, Spawn: zapretSpawn}
 				testers[i].Start(args)
 			}
+			// Until each has started (or failed), then a moment to settle.
+			up := time.Now().Add(zapretStartWait)
+			for ctx.Err() == nil && time.Now().Before(up) && slices.ContainsFunc(testers, func(r *zapret.Runner) bool { return r.Status().State == zapret.Off }) {
+				select {
+				case <-ctx.Done():
+				case <-time.After(100 * time.Millisecond):
+				}
+			}
 			select {
 			case <-ctx.Done():
 			case <-time.After(zapretSettle):
@@ -862,9 +873,12 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 			started, firstErr := 0, ""
 			for i, id := range batch {
 				if st := testers[i].Status(); st.State != zapret.Running {
-					c.Log.Warn("zapret: tester not running", "method", id, "err", st.Error)
+					c.Log.Warn("zapret: tester not running", "method", id, "state", st.State, "err", st.Error)
 					if firstErr == "" {
 						firstErr = st.Error
+						if firstErr == "" {
+							firstErr = fmt.Sprintf("не успел запуститься за %d с — компьютер занят или антивирус проверяет winws2", int(zapretStartWait.Seconds()))
+						}
 					}
 					testers[i].Stop()
 					update(func(p *ZapretPickView) { p.Done++ })
@@ -887,8 +901,21 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 			}
 			wg.Wait()
 			if started == 0 {
-				return nil, fmt.Errorf("winws2 не работает: %s", firstErr)
+				if !retried && ctx.Err() == nil {
+					// Once more after a pause: the same batch.
+					retried = true
+					update(func(p *ZapretPickView) { p.Done -= len(batch) })
+					c.Log.Warn("zapret: no tester started; the batch again", "err", firstErr)
+					select {
+					case <-ctx.Done():
+					case <-time.After(3 * time.Second):
+					}
+					continue
+				}
+				return nil, fmt.Errorf("winws2 не запускается: %s", firstErr)
 			}
+			retried = false
+			cands = cands[len(batch):]
 		}
 		return out, nil
 	}
