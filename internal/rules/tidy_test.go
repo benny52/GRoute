@@ -181,3 +181,19 @@ func TestTidyGeo(t *testing.T) {
 		t.Fatalf("%v", g)
 	}
 }
+
+// A program rule «with its children» between two others may take their
+// programs (a game started by Steam): no merge moves past it.
+func TestTidyMergeInheritChildren(t *testing.T) {
+	withGeo(t, fakeGeo{})
+	c := Config{DefaultAction: Direct, Rules: []Rule{
+		{ID: "g1", Apps: []AppMatch{{Pattern: "game1.exe"}}, Action: Direct},
+		{ID: "steam", Apps: []AppMatch{{Pattern: "steam.exe", InheritChildren: true}}, Action: Tunnel},
+		{ID: "g2", Apps: []AppMatch{{Pattern: "game2.exe"}}, Action: Direct},
+	}}
+	for _, it := range TidyRules(c, TidyOptions{}).Items {
+		if it.Kind == TidyMerge {
+			t.Fatalf("%+v", it)
+		}
+	}
+}

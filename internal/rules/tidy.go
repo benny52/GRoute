@@ -322,19 +322,19 @@ func portsMeet(a, b []PortRange) bool {
 }
 
 func appsMeet(a, b *compiled) bool {
+	base := func(p *appPat) string {
+		s := p.app
+		if p.kind == "path" {
+			s = s[strings.LastIndexAny(s, `\/`)+1:]
+		}
+		return strings.TrimSuffix(s, ".exe") // macOS names have none
+	}
 	for i := range a.apps {
 		for j := range b.apps {
 			x, y := &a.apps[i], &b.apps[j]
-			if x.kind == "glob" || y.kind == "glob" || x.app == y.app {
-				return true
-			}
-			base := func(p *appPat) string {
-				if p.kind == "path" {
-					return p.app[strings.LastIndexByte(p.app, '\\')+1:]
-				}
-				return p.app
-			}
-			if base(x) == base(y) {
+			// A glob may match the other; a program with its children may
+			// start the other one (a game from steam.exe).
+			if x.kind == "glob" || y.kind == "glob" || x.inherit || y.inherit || x.app == y.app || base(x) == base(y) {
 				return true
 			}
 		}
