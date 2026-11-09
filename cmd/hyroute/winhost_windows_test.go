@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,5 +128,13 @@ func TestWindowMessages(t *testing.T) {
 	}
 	if _, err := win.Call(context.Background(), "window.nothing"); err == nil {
 		t.Fatal("unknown window call answered")
+	}
+}
+
+// The elevated window takes none of the user's WebView2 variables.
+func TestWindowEnv(t *testing.T) {
+	got := windowEnv([]string{"PATH=x", "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER=y", "webview2_additional_browser_arguments=z", "WEBVIEW=ok"})
+	if strings.Join(got, ";") != "PATH=x;WEBVIEW=ok" {
+		t.Fatal(got)
 	}
 }

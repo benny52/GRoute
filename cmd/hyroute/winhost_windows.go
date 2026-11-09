@@ -88,6 +88,7 @@ func (h *winHost) startLocked(state string) error {
 		args = append(args, "--window-geom", h.geom)
 	}
 	cmd := exec.Command(h.exe, args...)
+	cmd.Env = windowEnv(os.Environ())
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		AdditionalInheritedHandles: []syscall.Handle{syscall.Handle(toWinR.Fd()), syscall.Handle(fromWinW.Fd())},
 	}
@@ -273,4 +274,19 @@ func (h *winHost) saveFile(o runtime.SaveDialogOptions) (string, error) {
 	}
 	var s string
 	return s, json.Unmarshal(r, &s)
+}
+
+// windowEnv is the window process's environment: this one without
+// WEBVIEW2_*. The window runs elevated, and the user's environment (their
+// Environment key in HKCU) reaches it: those variables would choose the
+// folder WebView2 loads its browser code from, its user data, or command
+// line switches such as a remote debugging port.
+func windowEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if !strings.HasPrefix(strings.ToUpper(kv), "WEBVIEW2_") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
