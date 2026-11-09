@@ -517,18 +517,20 @@ func (x *planCtx) importServer(key string, s hysteria.Profile, cur *hysteria.Pro
 			x.pl.warn(msg(key).t("Сервер «" + s.Name + "» будет читать настройку ECH из файла ").s(s.TLS.ECH).t("."))
 		}
 	}
+	// The CA path too: Validate refuses one that is not local.
+	if s.TLS.CA != "" {
+		if why := importedPathErr(s.TLS.CA, x.env); why != "" {
+			s.TLS.CA = ""
+			x.pl.warn(msg(key).t("Сервер «" + s.Name + "»: путь к сертификату не перенесён (" + why + ") — укажите файл в редакторе сервера"))
+		}
+	}
 	s, err := validServer(s, x.p.Secrets)
 	if err != nil {
 		x.pl.warn(msg(key).t("Сервер «" + s.Name + "» не восстановлен: " + err.Error()))
 		return s, false
 	}
-	if s.TLS.CA != "" {
-		if why := importedPathErr(s.TLS.CA, x.env); why != "" {
-			s.TLS.CA = ""
-			x.pl.warn(msg(key).t("Сервер «" + s.Name + "»: путь к сертификату не перенесён (" + why + ") — укажите файл в редакторе сервера"))
-		} else if cur == nil || cur.TLS.CA != s.TLS.CA {
-			x.pl.warn(msg(key).t("Сервер «" + s.Name + "» будет проверять сертификат по файлу ").s(s.TLS.CA).t("."))
-		}
+	if s.TLS.CA != "" && (cur == nil || cur.TLS.CA != s.TLS.CA) {
+		x.pl.warn(msg(key).t("Сервер «" + s.Name + "» будет проверять сертификат по файлу ").s(s.TLS.CA).t("."))
 	}
 	return s, true
 }

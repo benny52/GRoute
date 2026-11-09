@@ -274,13 +274,14 @@ func localDrivePath(s string) bool {
 	return c >= 'a' && c <= 'z' && s[1] == ':' && s[2] == '\\' && !strings.Contains(s[2:], ":")
 }
 
-// localFilePath: a full path to a local file: localDrivePath on Windows,
-// an absolute path elsewhere.
+// localFilePath: a full path to a local file: localDrivePath (on any
+// system: profiles and backups made on Windows are read elsewhere too),
+// or an absolute path outside Windows.
 func localFilePath(s string) bool {
-	if runtime.GOOS == "windows" {
-		return localDrivePath(s)
+	if localDrivePath(s) {
+		return true
 	}
-	return s == strings.TrimSpace(s) && filepath.IsAbs(s)
+	return runtime.GOOS != "windows" && s == strings.TrimSpace(s) && filepath.IsAbs(s)
 }
 
 // ValidPin accepts the formats Hysteria normalizes: hex with optional ':'
