@@ -248,6 +248,12 @@ func (c *conv) singBoxRule(n int, m map[string]json.RawMessage) {
 	for _, p := range append(sbList(m, "process_name"), sbList(m, "process_path")...) {
 		apps = append(apps, Item{App, p})
 	}
+	// Sites named but none understood: the rest of the rule (its port,
+	// network or programs) alone would take far more than the source's.
+	if len(sites) == 0 && hasAny(m, "domain", "domain_suffix", "domain_keyword", "domain_regex", "geosite", "geoip", "ip_cidr", "rule_set") {
+		skip("ни один сайт или адрес не распознан — пропущено")
+		return
+	}
 	if len(sites)+len(apps) == 0 && proto == "" && len(ps) == 0 && hasAny(m, "domain", "domain_suffix", "domain_keyword", "domain_regex", "geosite", "geoip", "ip_cidr", "rule_set", "process_name", "process_path") {
 		skip("ни один сайт или адрес не распознан — пропущено")
 		return

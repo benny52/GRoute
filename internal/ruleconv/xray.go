@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -114,6 +115,18 @@ type xrayRule struct {
 	User        []string `json:"user"`
 	// Xray
 	Attrs any `json:"attrs"`
+	// Unknown: condition fields this converter does not know (sourcePort,
+	// localPort, vlessRoute…). Dropped, they would leave the rule wider
+	// than in the source, a rule of none the default route.
+	Unknown []string `json:"-"`
+}
+
+// xrayKnown are the fields of a rule xrayRule reads or that set no
+// condition.
+var xrayKnown = map[string]bool{
+	"type": true, "remarks": true, "enabled": true, "ruleType": true, "outboundTag": true, "balancerTag": true,
+	"port": true, "network": true, "protocol": true, "inboundTag": true, "domain": true, "ip": true,
+	"process": true, "source": true, "user": true, "attrs": true, "id": true, "locked": true, "ruleTag": true, "domainMatcher": true,
 }
 
 // UnmarshalJSON accepts what files write differently: port as a number,
@@ -160,6 +173,12 @@ func (x *xrayRule) UnmarshalJSON(b []byte) error {
 	if raw, ok := m["attrs"]; ok && string(raw) != "null" {
 		x.Attrs = string(raw)
 	}
+	for k := range m {
+		if !xrayKnown[k] {
+			x.Unknown = append(x.Unknown, k)
+		}
+	}
+	sort.Strings(x.Unknown)
 	return nil
 }
 
@@ -218,6 +237,10 @@ func (c *conv) xrayRule(n int, x xrayRule) {
 	}
 	if len(x.InboundTag) > 0 {
 		skip("правило для входа %s (inboundTag) в HyRoute не переносится — пропущено", strings.Join(x.InboundTag, ", "))
+		return
+	}
+	if len(x.Unknown) > 0 {
+		skip("условия %s в HyRoute не переносятся — пропущено", strings.Join(x.Unknown, ", "))
 		return
 	}
 	if len(x.Source) > 0 || len(x.User) > 0 || x.Attrs != nil {

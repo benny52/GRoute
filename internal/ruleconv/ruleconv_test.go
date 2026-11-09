@@ -446,7 +446,54 @@ func TestList(t *testing.T) {
 	if r.Format != List {
 		t.Fatalf("format %s", r.Format)
 	}
-	check(t, r, err, []string{"Список: suffix:example.com suffix:example.org suffix:example.net ip:192.0.2.1 ip:198.51.100.0/24 geosite:example app:app.exe"}, "")
+	// The program is a rule of its own: in one rule HyRoute takes the
+	// program and a site both at once.
+	check(t, r, err, []string{"Список: suffix:example.com suffix:example.org suffix:example.net ip:192.0.2.1 ip:198.51.100.0/24 geosite:example", "Список: app:app.exe"}, "")
+}
+
+// A program's line and the site lines after it go to the same place in
+// the source, each on its own: never one rule taking both at once.
+func TestClashProgramAndSites(t *testing.T) {
+	text := `rules:
+  - PROCESS-NAME,Telegram.exe,Proxy
+  - DOMAIN-SUFFIX,t.me,Proxy
+  - DOMAIN-SUFFIX,telegram.org,Proxy
+  - PROCESS-NAME,Other.exe,Proxy
+  - MATCH,DIRECT
+`
+	r, err := Convert(text, Clash)
+	check(t, r, err, []string{"Proxy: app:Telegram.exe", "Proxy: suffix:t.me suffix:telegram.org", "Proxy: app:Other.exe"}, "DIRECT")
+}
+
+// A rule whose sites are not understood is skipped whole: its port,
+// network or programs alone would take far more.
+func TestSingBoxSitesNotUnderstood(t *testing.T) {
+	text := `{"route": {"rules": [
+  {"rule_set": ["my-ads"], "port": [443], "outbound": "block"},
+  {"domain_suffix": ["*.corp.example"], "network": "tcp", "outbound": "direct"},
+  {"process_name": ["chrome.exe"], "rule_set": ["ru-blocked"], "outbound": "proxy"},
+  {"domain_suffix": ["example.com"], "outbound": "proxy"}
+], "final": "direct"}}`
+	r, err := Convert(text, SingBox)
+	check(t, r, err, []string{"proxy: suffix:example.com"}, "direct")
+	if !hasWarning(r, "не распознан") {
+		t.Fatalf("warnings %v", r.Warnings)
+	}
+}
+
+// An Xray rule with a condition this converter does not know is skipped,
+// not turned into one for everything (which would end the list).
+func TestXrayUnknownCondition(t *testing.T) {
+	text := `{"routing": {"rules": [
+  {"type": "field", "sourcePort": "6881-6889", "outboundTag": "direct"},
+  {"type": "field", "port": "443", "localPort": "1080", "outboundTag": "direct"},
+  {"type": "field", "domain": ["geosite:google"], "outboundTag": "proxy", "domainMatcher": "hybrid"}
+]}}`
+	r, err := Convert(text, Xray)
+	check(t, r, err, []string{"proxy: geosite:google"}, "")
+	if !hasWarning(r, "sourcePort") || !hasWarning(r, "localPort") {
+		t.Fatalf("warnings %v", r.Warnings)
+	}
 }
 
 func TestDetectHysteria(t *testing.T) {

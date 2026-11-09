@@ -413,13 +413,25 @@ func (c *conv) add(r Rule, merge bool) {
 	}
 	if merge && len(c.res.Rules) > 0 {
 		p := &c.res.Rules[len(c.res.Rules)-1]
-		if p.merged && p.Target == r.Target && p.Proto == r.Proto && p.Off == r.Off && equal(p.Ports, r.Ports) {
+		if p.merged && p.Target == r.Target && p.Proto == r.Proto && p.Off == r.Off && equal(p.Ports, r.Ports) && appsOnly(p.Items) == appsOnly(r.Items) {
 			p.Items = append(p.Items, r.Items...)
 			return
 		}
 	}
 	r.merged = merge
 	c.res.Rules = append(c.res.Rules, r)
+}
+
+// appsOnly: the items are programs. A HyRoute rule takes its programs and
+// its sites both at once, while the lines of a line format are either:
+// a program's line and a site's line never join.
+func appsOnly(items []Item) bool {
+	for _, it := range items {
+		if it.Kind != App {
+			return false
+		}
+	}
+	return len(items) > 0
 }
 
 func (c *conv) finish() {
