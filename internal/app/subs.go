@@ -218,13 +218,27 @@ func (c *Controller) fetch(ctx context.Context, u string) (FetchResult, error) {
 	return res, err
 }
 
+// maxSubServers bounds the servers taken from one subscription: each is a
+// profile kept, sealed and merged on every update while the controller
+// waits, and public aggregators list thousands.
+const maxSubServers = 3000
+
+// capServers keeps the first maxSubServers servers of l, with a warning.
+func capServers(l Links) Links {
+	if n := len(l.Profiles); n > maxSubServers {
+		l.Profiles = l.Profiles[:maxSubServers]
+		l.Warnings = append(l.Warnings, fmt.Sprintf("в подписке %d серверов: взяты первые %d", n, maxSubServers))
+	}
+	return l
+}
+
 // parseSubscription turns a body into profiles or an error that explains
 // what came instead. A list of share links (plain or base64) is the usual
 // body; Clash, sing-box and Xray configs are read too (subfmt).
 func parseSubscription(body []byte) (Links, error) {
 	l := ParseLinks(string(body))
 	if len(l.Profiles) > 0 {
-		return l, nil
+		return capServers(l), nil
 	}
 	if r, ok := subfmt.Convert(body); ok {
 		l = ParseLinks(strings.Join(r.Links, "\n"))
@@ -235,7 +249,7 @@ func parseSubscription(body []byte) (Links, error) {
 			l.Ignored[k] += v
 		}
 		if len(l.Profiles) > 0 {
-			return l, nil
+			return capServers(l), nil
 		}
 	}
 	t := strings.TrimSpace(string(body))

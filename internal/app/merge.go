@@ -91,16 +91,23 @@ func mergeSubscription(list []hysteria.Profile, source string, fresh []hysteria.
 	used := make([]bool, len(old))
 	keys := []func(hysteria.Profile) string{connKey, endpointKey, func(p hysteria.Profile) string { return p.Name }}
 	for _, key := range keys {
+		// The old profiles not matched yet by their key, in list order:
+		// each key is built once (a link per profile), not once per pair.
+		byKey := map[string][]int{}
+		for j, o := range old {
+			if !used[j] {
+				k := key(o)
+				byKey[k] = append(byKey[k], j)
+			}
+		}
 		for i, f := range fresh {
 			if match[i] >= 0 {
 				continue
 			}
 			k := key(f)
-			for j, o := range old {
-				if !used[j] && key(o) == k {
-					match[i], used[j] = j, true
-					break
-				}
+			if js := byKey[k]; len(js) > 0 {
+				match[i], used[js[0]] = js[0], true
+				byKey[k] = js[1:]
 			}
 		}
 	}
