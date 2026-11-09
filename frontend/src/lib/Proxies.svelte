@@ -172,7 +172,7 @@
         </label>
         <div class="grow">
           <div class="name">
-            <b>{p.name}</b> <span class="dot {tone(p)}"></span> <span class="muted small"
+            <b>{hide(p.name)}</b> <span class="dot {tone(p)}"></span> <span class="muted small"
               >{#if p.asleep}<span title="Никто не пользуется этим прокси: его сервер остановлен и не тратит трафик. Первое соединение запустит его за 1–3 секунды."
                   >работает · сервер спит</span
                 >{:else}{stateText[p.state]}{/if}</span
@@ -243,7 +243,7 @@
           <p class="muted small">Прокси сервера подписки: название и сервер у него от подписки, порт, пароль и доступ можно менять.</p>
         {/if}
         <label for="pn">Название</label>
-        <input id="pn" bind:value={editing.name} placeholder="Например, «Binance — Япония»" disabled={!!editing.source} />
+        <input id="pn" type={ui.privacy ? 'password' : 'text'} bind:value={editing.name} placeholder="Например, «Binance — Япония»" disabled={!!editing.source} />
 
         <label for="ps">Через сервер</label>
         <select id="ps" bind:value={editing.profile} disabled={!!editing.source}>

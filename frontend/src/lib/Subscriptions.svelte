@@ -447,7 +447,7 @@
               <label for="pf-user">Логин и пароль</label>
               <div class="pf-auth">
                 <input id="pf-user" bind:value={pf.username} placeholder="логин" autocomplete="off" />
-                <input bind:value={pf.password} placeholder="пароль" autocomplete="new-password" />
+                <input type={ui.privacy ? 'password' : 'text'} bind:value={pf.password} placeholder="пароль" autocomplete="new-password" />
                 <button
                   onclick={() => {
                     if (!pf) return;

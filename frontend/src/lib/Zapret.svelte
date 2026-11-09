@@ -202,7 +202,7 @@
       </div>
       {#if enabled && targets.includes('sites')}
         <label class="lbl" for="zp-sites">Свои сайты — по одному на строку: имя (поддомены включаются сами), IP или подсеть</label>
-        <textarea id="zp-sites" rows="4" bind:value={sitesText} placeholder={'example.com\n203.0.113.7\n198.51.100.0/24'}></textarea>
+        <textarea id="zp-sites" rows="4" class:masked={ui.privacy} bind:value={sitesText} placeholder={'example.com\n203.0.113.7\n198.51.100.0/24'}></textarea>
         <span class="muted small">Подбор проверяет только имена, адреса получают те же методы.</span>
       {/if}
 
@@ -387,4 +387,5 @@
   .small-btn { padding: 4px 10px; font-size: 13px; }
   pre { white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; }
   h2 { margin: 0 0 6px; }
+  textarea.masked { -webkit-text-security: disc; }
 </style>

@@ -180,7 +180,7 @@
                     <div class="muted small">
                       совпало: <code>{hide(h.entry)}</code>{#if h.attrs} <code>{h.attrs}</code>{/if}{#if h.ip} · для {hide(h.ip)}{/if}
                     </div>
-                    {#if h.usedBy?.length}<div class="used small"><Icon name="check" size={12} /> в правилах: {h.usedBy.join(', ')}</div>{/if}
+                    {#if h.usedBy?.length}<div class="used small"><Icon name="check" size={12} /> в правилах: {h.usedBy.map((u) => hide(u)).join(', ')}</div>{/if}
                   </div>
                   <div class="acts">
                     <button onclick={() => (viewing = h.tag)} title="Всё, что входит в список">Открыть</button>

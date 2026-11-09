@@ -216,8 +216,8 @@
       {#if p.vless.network === 'ws' || p.vless.network === 'httpupgrade' || p.vless.network === 'xhttp' || (!p.vless.network && p.vless.headerType === 'http')}
         <label for="pe-path">Путь и Host</label>
         <div class="row">
-          <input id="pe-path" class="grow" bind:value={p.vless.path} placeholder="путь, например /ws" />
-          <input class="grow" bind:value={p.vless.host} placeholder="Host, по умолчанию SNI" />
+          <input id="pe-path" class="grow" type={ro ? 'password' : 'text'} bind:value={p.vless.path} placeholder="путь, например /ws" />
+          <input class="grow" type={ro ? 'password' : 'text'} bind:value={p.vless.host} placeholder="Host, по умолчанию SNI" />
         </div>
       {/if}
     {:else}
@@ -257,7 +257,7 @@
           <label for="pe-vpin">Отпечаток (pinSHA256)</label>
           <input id="pe-vpin" class="mono" class:bad={vPinBad} aria-invalid={vPinBad} bind:value={p.vless.pinSHA256} placeholder="SHA-256 сертификата; через запятую — несколько" />
           <label for="pe-vcn">Имя в сертификате</label>
-          <input id="pe-vcn" bind:value={p.vless.verifyName} placeholder="если сертификат выдан на другое имя, чем SNI" />
+          <input id="pe-vcn" type={ro ? 'password' : 'text'} bind:value={p.vless.verifyName} placeholder="если сертификат выдан на другое имя, чем SNI" />
           <label for="pe-ech">ECH</label>
           <input id="pe-ech" class="mono" bind:value={p.vless.ech} placeholder="ECHConfigList в base64" />
         {/if}
@@ -271,7 +271,7 @@
 
         {#if p.vless.network === 'grpc'}
           <label for="pe-auth2">authority</label>
-          <input id="pe-auth2" bind:value={p.vless.authority} placeholder="можно пусто" />
+          <input id="pe-auth2" type={ro ? 'password' : 'text'} bind:value={p.vless.authority} placeholder="можно пусто" />
         {/if}
         {#if p.vless.network === 'xhttp'}
           <label for="pe-extra">extra (JSON)</label>

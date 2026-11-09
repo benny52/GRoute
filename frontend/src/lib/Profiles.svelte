@@ -213,7 +213,7 @@
   {#if adding}
     <section class="card">
       <h2>Добавить сервер</h2>
-      <textarea rows="4" placeholder="Вставьте ссылки hysteria2://…, hy2://… или vless://… (по одной на строку) или конфиг Clash, sing-box, Xray" bind:value={text}></textarea>
+      <textarea rows="4" class:masked={ui.privacy} placeholder="Вставьте ссылки hysteria2://…, hy2://… или vless://… (по одной на строку) или конфиг Clash, sing-box, Xray" bind:value={text}></textarea>
       <div class="row" style="margin-top: 10px">
         <button class="primary" onclick={() => doImport(false)} disabled={!text.trim()}>Добавить</button>
         <button onclick={() => doImport(true)}><Icon name="clipboard" size={16} />Из буфера обмена</button>
@@ -267,7 +267,7 @@
             {#if p.pinned}<span class="badge" title="Сертификат проверяется по отпечатку">pin</span>{:else if p.insecure}<span class="badge warn-b" title="Сертификат не проверяется">insecure</span>{/if}
           </div>
           <div class="muted small ellipsis">
-            {#if p.usedBy.length}Используют: {p.usedBy.join(', ')}{:else}Не используется правилами{/if}
+            {#if p.usedBy.length}Используют: {p.usedBy.map((u) => hide(u)).join(', ')}{:else}Не используется правилами{/if}
           </div>
         </div>
         {#if t}
@@ -346,4 +346,5 @@
   .own .note { margin-top: 8px; }
   .empty b { color: var(--text); }
   .empty p { margin: 4px 0 0; }
+  textarea.masked { -webkit-text-security: disc; }
 </style>

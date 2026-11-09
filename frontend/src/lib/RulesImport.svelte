@@ -237,7 +237,7 @@
             </select>
           </label>
         </div>
-        <textarea bind:value={text} spellcheck="false" wrap="off" placeholder={example} aria-label="Правила другой программы"></textarea>
+        <textarea class:masked bind:value={text} spellcheck="false" wrap="off" placeholder={example} aria-label="Правила другой программы"></textarea>
       </div>
 
       <div class="right">
@@ -368,4 +368,5 @@
   @media (max-width: 760px) {
     .cols { grid-template-columns: 1fr; }
   }
+  textarea.masked { -webkit-text-security: disc; }
 </style>
