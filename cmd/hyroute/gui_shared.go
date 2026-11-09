@@ -272,14 +272,17 @@ func (g *GUI) ClearLogs() error { return g.ctl.ClearLogs() }
 func (g *GUI) Prefs() store.Prefs { return g.ctl.Prefs() }
 
 // SavePrefs keeps the fields other calls own: the rule-database ones
-// (SetGeoPrefs), the postponed version (SkipAppVersion, "Позже") and the
-// command line's mode (SetCLIMode). The settings page may hold an older
-// copy; UpdatePrefs holds the prefs lock across the read and the write.
+// (SetGeoPrefs), the postponed version (SkipAppVersion, "Позже"), the
+// command line's mode (SetCLIMode) and the browser extension's access
+// (SetBrowserOn: its card is on the same page). The settings page may
+// hold an older copy; UpdatePrefs holds the prefs lock across the read
+// and the write.
 func (g *GUI) SavePrefs(p store.Prefs) error {
 	return g.ctl.UpdatePrefs(func(cur *store.Prefs) error {
 		p.GeoSource, p.GeoSiteURL, p.GeoIPURL, p.GeoAutoOff, p.GeoIntervalHours = cur.GeoSource, cur.GeoSiteURL, cur.GeoIPURL, cur.GeoAutoOff, cur.GeoIntervalHours
 		p.SkipVersion = cur.SkipVersion
 		p.CLI = cur.CLI
+		p.Browser = cur.Browser
 		*cur = p
 		return nil
 	})
