@@ -3,11 +3,11 @@ package tgws
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"net"
-	"crypto/rand"
 	"encoding/binary"
+	"net"
 	"os"
 	"testing"
 	"time"
