@@ -2,7 +2,9 @@ package store
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -138,7 +140,26 @@ func (s *Store) SaveSubscriptions(list []Subscription) error {
 // Snapshots keep the last good body of a subscription ("cur") and the one
 // before it ("prev"), sealed: they contain credentials.
 func (s *Store) snapPath(id, which string) string {
-	return filepath.Join(s.Dir, "subs", id+"."+which)
+	return filepath.Join(s.Dir, "subs", snapName(id)+"."+which)
+}
+
+// snapName is a subscription ID as a file name: as it is when plain
+// (letters, digits, - and _), else its hash. The ID comes from files a
+// program of the user may write (subscriptions.json, a restore's undo
+// record): it never makes a path outside subs.
+func snapName(id string) string {
+	plain := id != "" && len(id) <= 64
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			plain = false
+			break
+		}
+	}
+	if plain {
+		return id
+	}
+	h := sha256.Sum256([]byte(id))
+	return "x" + hex.EncodeToString(h[:16])
 }
 
 // PushSnapshot stores body as the current snapshot; the old current one

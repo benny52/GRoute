@@ -10,6 +10,32 @@ import (
 	"time"
 )
 
+// A subscription ID from the files is never a path: a plain one names the
+// snapshot, any other stays inside subs.
+func TestSnapshotIDNeverAPath(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"../../evil", "..", "a/b", `c:\x`, ""} {
+		if err := s.PushSnapshot(id, []byte("body"), nil); err != nil {
+			t.Fatal(id, err)
+		}
+		p := s.snapPath(id, "cur")
+		if filepath.Dir(p) != filepath.Join(dir, "subs") {
+			t.Fatalf("%q: %s", id, p)
+		}
+		s.DeleteSnapshots(id)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "..", "evil.cur")); err == nil {
+		t.Fatal("a snapshot outside the data folder")
+	}
+	if got := filepath.Base(s.snapPath("abc-DEF_1", "prev")); got != "abc-DEF_1.prev" {
+		t.Fatal(got)
+	}
+}
+
 // Pushing the current body again keeps the previous snapshot.
 func TestPushSnapshotSameBodyKeepsPrevious(t *testing.T) {
 	s, err := Open(t.TempDir())
