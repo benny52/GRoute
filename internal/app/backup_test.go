@@ -586,6 +586,26 @@ func TestBackupUndoBrokenSettingsConnected(t *testing.T) {
 	}
 }
 
+// A rule of the copy that sends everything direct (ports alone) is named
+// in the plan, replaced or added: its name may be a service's.
+func TestBackupPlanWideDirect(t *testing.T) {
+	a, _ := richCtl(t)
+	st := a.Settings()
+	st.Rules = append([]rules.Rule{{Name: "YouTube", Ports: rules.PortList{"1-65535"}, Action: rules.Direct}}, st.Rules...)
+	if _, err := a.SaveSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	b := exportAll(t, a, bkPass, "rules")
+	c, _ := newCtl(t)
+	pv := openBk(t, c, b, bkPass)
+	for _, mode := range []string{"replace", "add"} {
+		p, err := c.PlanBackup(pv.Token, BackupChoice{Sections: map[string]string{"rules": mode}})
+		if err != nil || !strings.Contains(planTexts(p), "мимо VPN, трафик на порты 1-65535") {
+			t.Fatalf("%s: %v\n%s", mode, err, planTexts(p))
+		}
+	}
+}
+
 func (c *Controller) prefsError() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

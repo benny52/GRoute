@@ -75,6 +75,27 @@ type rulesWrite struct {
 	only     bool
 }
 
+// wideDirect warns of the rules of the copy that send every site and
+// program direct (on some ports, or all): the plan names rules by their
+// names only, and one named like a service may take everything past the
+// VPN.
+func (x *planCtx) wideDirect(cfg rules.Config) {
+	for _, r := range cfg.Rules {
+		if !r.On() || r.Action != rules.Direct || len(r.AllDomains()) > 0 || len(r.AllApps()) > 0 {
+			continue
+		}
+		what := "весь трафик"
+		if len(r.Ports) > 0 {
+			what = "трафик на порты " + strings.Join(r.Ports, ", ")
+		}
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			name = "без названия"
+		}
+		x.pl.warn(msg("rules").t("Правило «").s(name).t("» из копии отправит напрямую, мимо VPN, " + what + " — всех сайтов и программ."))
+	}
+}
+
 // ---- message builder ----
 
 type msgB struct{ m BackupMsg }
@@ -1078,6 +1099,7 @@ func (x *planCtx) planRules() {
 			pl.rules.rulesets = rs
 			pl.counts.rules = len(a.Config.Rules)
 			pl.line(msg("rules").t(fmt.Sprintf("Правила: %s из копии заменят ваши. Включится профиль правил «%s». ", nProfiles(len(rs.List)), a.Name)).t(defaultText(a.Config, x.fileTargetName)))
+			x.wideDirect(a.Config)
 			return
 		}
 		x.cleanRules(&fileCfg, map[string]bool{})
@@ -1090,6 +1112,7 @@ func (x *planCtx) planRules() {
 		}
 		pl.counts.rules = len(fileCfg.Rules)
 		pl.line(msg("rules").t(fmt.Sprintf("Правила: %s из копии заменят ваши %d. ", nRules(len(fileCfg.Rules)), before)).t(defaultText(fileCfg, x.fileTargetName)))
+		x.wideDirect(fileCfg)
 		return
 	}
 	if rs := x.d.rulesets; rs != nil {
@@ -1133,6 +1156,7 @@ func (x *planCtx) planRules() {
 	// not resolved, so its server gives no lines about it.
 	fileCfg.DefaultProfile, fileCfg.DefaultFallback = "", nil
 	x.resolveConfig(&fileCfg, "")
+	x.wideDirect(fileCfg)
 	next.Settings.Rules = append(slices.Clone(next.Settings.Rules), fileCfg.Rules...)
 	if next.Rulesets != nil {
 		if a := next.Rulesets.Find(next.Rulesets.Active); a != nil {
