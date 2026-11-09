@@ -126,6 +126,16 @@ type bkSub struct {
 	UserInfo string             `json:"userInfo,omitempty"`
 	InfoAt   time.Time          `json:"infoAt,omitzero"` // subinfo
 	Servers  []hysteria.Profile `json:"servers"`
+	Proxies  *bkSubProxies      `json:"proxies,omitempty"`
+}
+
+// bkSubProxies is a subscription's «Прокси для серверов» (store.SubProxies
+// with its password: subscriptions are kept only in a copy with one).
+type bkSubProxies struct {
+	Port     int    `json:"port"`
+	LAN      bool   `json:"lan,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 type bkRules struct {
@@ -572,6 +582,9 @@ func collectSections(st cfgState, keys []string, secrets bool, app *BackupAppear
 			list := []bkSub{}
 			for _, s := range st.Subs {
 				b := bkSub{ID: s.ID, Name: s.Name, URL: s.URL, Enabled: s.Enabled, Interval: s.Interval, UserInfo: s.UserInfo, InfoAt: s.InfoAt, Servers: []hysteria.Profile{}}
+				if p := s.Proxies; p != nil {
+					b.Proxies = &bkSubProxies{Port: p.Port, LAN: p.LAN, Username: p.Username, Password: p.Password}
+				}
 				for _, p := range st.Profiles.List {
 					if p.Source == "sub:"+s.ID {
 						b.Servers = append(b.Servers, p)

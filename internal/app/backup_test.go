@@ -259,6 +259,43 @@ func TestBackupFullRoundTrip(t *testing.T) {
 	waitFor(t, "backup", func() bool { return fetched.Load() == 1 })
 }
 
+// «Прокси для серверов» of a subscription come back with it, and the
+// proxies it made stay when its servers are saved again (an update).
+func TestBackupSubProxies(t *testing.T) {
+	a, _ := richCtl(t)
+	sid := a.Subscriptions()[0].ID
+	if err := a.SetSubscriptionProxies(sid, &SubProxiesInput{Port: 20000, LAN: true, Username: "u", Password: "SUBPROXYPASS9"}); err != nil {
+		t.Fatal(err)
+	}
+	n := len(subProxies(a, sid))
+	if n == 0 {
+		t.Fatal("no proxies made")
+	}
+	b := exportAll(t, a, bkPass)
+	c, _ := newCtl(t)
+	c.Fetch = func(context.Context, string) (FetchResult, error) {
+		return FetchResult{Body: []byte("hy2://s@sub1.example:443#S1\nhy2://s@sub2.example:443#S2\n")}, nil
+	}
+	pv := openBk(t, c, b, bkPass)
+	restore(t, c, pv, replaceAll(pv))
+	id := c.Subscriptions()[0].ID
+	if _, err := c.UpdateSubscription(id); err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	sp := c.subs[0].Proxies
+	c.mu.Unlock()
+	if sp == nil || sp.Port != 20000 || !sp.LAN || sp.Username != "u" || sp.Password != "SUBPROXYPASS9" {
+		t.Fatalf("%+v", sp)
+	}
+	if got := len(subProxies(c, id)); got != n {
+		t.Fatalf("%d proxies of the subscription, want %d", got, n)
+	}
+	if got := c.Redactor.Redact("x SUBPROXYPASS9"); strings.Contains(got, "SUBPROXYPASS9") {
+		t.Fatal(got)
+	}
+}
+
 func TestBackupPlanChanged(t *testing.T) {
 	a, _ := richCtl(t)
 	b := exportAll(t, a, bkPass, "rules", "settings")

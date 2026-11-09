@@ -629,9 +629,9 @@ func (x *planCtx) planSubs() {
 			}
 			src := "sub:" + ns.ID
 			if c, same := curByID[b.ID]; same && c.URL == b.URL && importIDRe.MatchString(b.ID) {
-				name := ns.Name
+				imp := ns
 				ns = c
-				ns.Name, ns.Enabled, ns.Interval = name, b.Enabled, b.Interval
+				ns.Name, ns.Enabled, ns.Interval, ns.Proxies = imp.Name, b.Enabled, b.Interval, imp.Proxies
 				keptIDs[ns.ID] = true
 			}
 			next.Subs = append(next.Subs, ns)
@@ -779,8 +779,17 @@ func (x *planCtx) importSub(b bkSub, usedSub map[string]bool) (store.Subscriptio
 		}
 	}
 	usedSub[id] = true
-	return store.Subscription{ID: id, Name: name, URL: b.URL, Enabled: b.Enabled, Interval: b.Interval,
-		Count: len(b.Servers), UserInfo: b.UserInfo, InfoAt: b.InfoAt}, true
+	ns := store.Subscription{ID: id, Name: name, URL: b.URL, Enabled: b.Enabled, Interval: b.Interval,
+		Count: len(b.Servers), UserInfo: b.UserInfo, InfoAt: b.InfoAt}
+	if p := b.Proxies; p != nil {
+		sp := store.SubProxies{Port: p.Port, LAN: p.LAN, Username: p.Username, Password: p.Password}
+		if err := validSubProxies(sp); err != nil {
+			x.pl.warn(msg("subscriptions").t("Прокси для серверов подписки «" + name + "» не восстановлены: " + err.Error()))
+		} else {
+			ns.Proxies = &sp
+		}
+	}
+	return ns, true
 }
 
 // dropRemoved: a server matched again is not removed.
