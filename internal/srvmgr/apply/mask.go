@@ -240,7 +240,7 @@ func Unmask(candidate, current []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("текущий конфиг: %w", err)
 	}
-	var bad []string
+	var bad, moved []string
 	unmaskComments(cand, cur) // above and below the whole file
 	walk(cand, "", "", func(n *yaml.Node, p, key, parent string) {
 		if n.Kind == yaml.DocumentNode {
@@ -265,12 +265,54 @@ func Unmask(candidate, current []byte) ([]byte, error) {
 			bad = append(bad, p)
 			return
 		}
+		if i := strings.LastIndex(p, "."); i > 0 && movedDest(lookup(cand, p[:i]), lookup(cur, p[:i])) {
+			moved = append(moved, p)
+			return
+		}
 		n.Value, n.Tag, n.Style = v.Value, v.Tag, v.Style
 	})
 	if len(bad) > 0 {
 		return nil, &model.FieldError{Field: bad[0], Msg: "Значение скрыто, но в текущем конфиге его нет: введите его в поле " + bad[0] + "."}
 	}
+	if len(moved) > 0 {
+		return nil, &model.FieldError{Field: moved[0], Msg: "Адрес рядом со скрытым значением изменился: введите " + moved[0] + " заново — сохранённое ушло бы на новый адрес."}
+	}
 	return encode(cand)
+}
+
+// destKeys name where an item sends what it holds (an outbound's addr or
+// url). A secret beside one that changed is not put back but typed again:
+// it would go to the new place, a SOCKS5 password in clear text.
+var destKeys = []string{"addr", "address", "server", "host", "url"}
+
+// movedDest reports whether the mappings a (the candidate's) and b (the
+// current config's) send to different places. A destination kept Hidden
+// in a is b's own.
+func movedDest(a, b *yaml.Node) bool {
+	if a == nil || b == nil || a.Kind != yaml.MappingNode || b.Kind != yaml.MappingNode {
+		return false
+	}
+	for _, k := range destKeys {
+		x, y := valueOf(a, k), valueOf(b, k)
+		switch {
+		case x == nil && y == nil:
+		case x == nil || y == nil:
+			return true
+		case x.Value != Hidden && x.Value != y.Value:
+			return true
+		}
+	}
+	return false
+}
+
+// valueOf is the value of key k in mapping m.
+func valueOf(m *yaml.Node, k string) *yaml.Node {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if strings.EqualFold(m.Content[i].Value, k) {
+			return m.Content[i+1]
+		}
+	}
+	return nil
 }
 
 // unmaskComments gives n back the comments of v that n keeps in their

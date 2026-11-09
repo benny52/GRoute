@@ -104,6 +104,26 @@ func TestUnmaskMatchesListItemsByName(t *testing.T) {
 	}
 }
 
+// A hidden password goes back only to the outbound it was for: one
+// pointed at another address takes it typed again (a SOCKS5 password
+// goes in clear text to whoever answers there).
+func TestUnmaskRefusesMovedOutbound(t *testing.T) {
+	m, _, _ := Mask([]byte(current))
+	moved := strings.Replace(string(m), "addr: 127.0.0.1:40000", "addr: 203.0.113.9:1080", 1)
+	if moved == string(m) {
+		t.Fatalf("fixture did not match:\n%s", m)
+	}
+	_, err := Unmask([]byte(moved), []byte(current))
+	var fe *model.FieldError
+	if !errors.As(err, &fe) || !strings.HasSuffix(fe.Field, "socks5.password") || !strings.Contains(fe.Msg, "Адрес") {
+		t.Fatalf("%v", err)
+	}
+	// The same address: put back as before.
+	if _, err := Unmask(m, []byte(current)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBuildFromText(t *testing.T) {
 	m, _, _ := Mask([]byte(current))
 	text := strings.Replace(string(m), "listen: :443", "listen: :8443", 1)
