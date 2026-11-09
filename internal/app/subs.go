@@ -110,7 +110,23 @@ const maxSubErrors = 5
 // passwords in the body in clear text: it is refused, as for the rule
 // databases.
 func subClient() *http.Client {
-	return &http.Client{Timeout: 30 * time.Second, Transport: directTransport, CheckRedirect: geodata.NoDowngrade}
+	return &http.Client{Timeout: 30 * time.Second, Transport: directTransport, CheckRedirect: subRedirect}
+}
+
+// subRedirect is geodata.NoDowngrade, and a redirect to another host
+// leaves the device's headers behind: its ID is the panel's own
+// (DeviceID), and net/http copies every header but Authorization and
+// Cookie to the next host.
+func subRedirect(req *http.Request, via []*http.Request) error {
+	if err := geodata.NoDowngrade(req, via); err != nil {
+		return err
+	}
+	if len(via) > 0 && !strings.EqualFold(req.URL.Hostname(), via[0].URL.Hostname()) {
+		for _, k := range []string{"X-Hwid", "X-Device-Os", "X-Ver-Os", "X-Device-Model"} {
+			req.Header.Del(k)
+		}
+	}
+	return nil
 }
 
 // subTunnelClient downloads a subscription through tun (the main
@@ -119,7 +135,7 @@ func subClient() *http.Client {
 func subTunnelClient(tun interface {
 	Dial(context.Context, socks5.Addr) (net.Conn, error)
 }) *http.Client {
-	return &http.Client{Timeout: 30 * time.Second, CheckRedirect: geodata.NoDowngrade, Transport: &http.Transport{
+	return &http.Client{Timeout: 30 * time.Second, CheckRedirect: subRedirect, Transport: &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
@@ -133,6 +149,9 @@ func subTunnelClient(tun interface {
 		},
 		TLSHandshakeTimeout:    20 * time.Second,
 		MaxResponseHeaderBytes: 64 << 10,
+		// A client per download: a connection kept idle would hold a
+		// tunnel stream and two goroutines until the server closes it.
+		DisableKeepAlives: true,
 	}}
 }
 

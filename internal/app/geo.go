@@ -584,6 +584,8 @@ func (c *Controller) geoDownload(ctx context.Context, rawURL string, attempt int
 			return tun.Dial(ctx, socks5.Addr{Host: host, Port: uint16(pn)})
 		},
 		TLSHandshakeTimeout: 30 * time.Second,
+		// A client per download: no idle tunnel connection left behind.
+		DisableKeepAlives: true,
 	}}
 	return doGet(ctx, viaVPN, rawURL)
 }

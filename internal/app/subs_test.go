@@ -852,3 +852,25 @@ func TestDeviceHeaders(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// The device's headers stay with the panel's host: a redirect elsewhere
+// gets none of them (net/http copies all headers but a few).
+func TestSubRedirectDropsDeviceHeaders(t *testing.T) {
+	first, _ := http.NewRequest(http.MethodGet, "https://panel.example/sub/x", nil)
+	next := func(u string) *http.Request {
+		r, _ := http.NewRequest(http.MethodGet, u, nil)
+		DeviceInfo{HWID: "fake-hwid", OS: "Windows"}.setHeaders(r.Header)
+		return r
+	}
+	same := next("https://PANEL.example/sub/y")
+	if err := subRedirect(same, []*http.Request{first}); err != nil || same.Header.Get("X-Hwid") == "" {
+		t.Fatalf("same host: %v %v", err, same.Header)
+	}
+	other := next("https://cdn.example/x")
+	if err := subRedirect(other, []*http.Request{first}); err != nil || other.Header.Get("X-Hwid") != "" || other.Header.Get("X-Device-Os") != "" {
+		t.Fatalf("other host: %v %v", err, other.Header)
+	}
+	if err := subRedirect(next("http://panel.example/x"), []*http.Request{first}); err == nil {
+		t.Fatal("https to http allowed")
+	}
+}
