@@ -2,6 +2,7 @@ package dnsproxy
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -337,5 +338,33 @@ func TestNegative(t *testing.T) {
 		if got := Negative(c.q, c.up, c.any); got != c.want {
 			t.Errorf("%s: %v", c.label, got)
 		}
+	}
+}
+
+// A name whose lower case no longer packs (a label of 31 «Ⱥ», 62 bytes,
+// is 93 in lower case) goes as it came: never a query without its
+// question, which the server answers with an error that is no fault of it.
+func TestUpstreamQueryLongerInLowerCase(t *testing.T) {
+	label := strings.Repeat("Ⱥ", 31)
+	wire, err := dnsmessage.NewName(label + ".example.com.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := Query{Name: "x.example.com", Wire: wire, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}
+	var m dnsmessage.Message
+	if err := m.Unpack(UpstreamQuery(q)); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Questions) != 1 || m.Questions[0].Name != wire {
+		t.Fatalf("%+v", m.Questions)
+	}
+	// Plain ASCII is still lower-cased, and the cache key is that name.
+	up, _ := dnsmessage.NewName("WWW.Example.COM.")
+	q.Wire = up
+	if err := m.Unpack(UpstreamQuery(q)); err != nil || m.Questions[0].Name.String() != "www.example.com." {
+		t.Fatalf("%v %+v", err, m.Questions)
+	}
+	if keyOf(0, "", q).name != "www.example.com." {
+		t.Fatal(keyOf(0, "", q))
 	}
 }

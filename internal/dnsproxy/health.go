@@ -51,7 +51,9 @@ type health struct {
 // NOTIMP about one query type, and Windows and browsers ask A, AAAA and
 // HTTPS for a name at once, so counting them would mark a working server
 // down for one broken name. The server answered, so they do not reset the
-// count either.
+// count either. An answer that does not read (errAnswer) and HTTP 400 are
+// about one query as well: a device of the network could otherwise mark
+// the server down for everyone with names made for it.
 func errKind(ctx context.Context, err error) (kind string, code int, counts bool) {
 	if errors.Is(err, ErrTunnelDown) || errors.Is(err, errServerRcode) {
 		return "", 0, false
@@ -61,10 +63,10 @@ func errKind(ctx context.Context, err error) (kind string, code int, counts bool
 	}
 	var he *httpError
 	if errors.As(err, &he) {
-		return "http", he.code, true
+		return "http", he.code, he.code != 400
 	}
 	if errors.Is(err, errAnswer) {
-		return "answer", 0, true
+		return "answer", 0, false
 	}
 	var (
 		rh  tls.RecordHeaderError

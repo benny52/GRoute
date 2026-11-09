@@ -19,8 +19,11 @@ type cacheKey struct {
 	do, cd  bool
 }
 
+// The name is the one sent upstream (the query's own, lower-cased), not
+// q.Name: names that normalize alike (full-width letters, «。») are other
+// questions upstream, and an answer to one would not do for another.
 func keyOf(via dnspolicy.Via, profile string, q Query) cacheKey {
-	return cacheKey{via, profile, q.Name, q.Type, q.Class, q.DO, q.CD}
+	return cacheKey{via, profile, upstreamName(q).String(), q.Type, q.Class, q.DO, q.CD}
 }
 
 type cacheEntry struct {

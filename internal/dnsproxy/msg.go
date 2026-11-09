@@ -124,10 +124,7 @@ func (q Query) MaxUDP() int {
 // to a multiple of 128 bytes (RFC 8467). No other options: no client
 // subnet, no cookies.
 func UpstreamQuery(q Query) []byte {
-	name, err := dnsmessage.NewName(strings.ToLower(q.Wire.String()))
-	if err != nil {
-		name = q.Wire
-	}
+	name := upstreamName(q)
 	build := func(pad int) []byte {
 		b := dnsmessage.NewBuilder(make([]byte, 0, 128), dnsmessage.Header{RecursionDesired: true, CheckingDisabled: q.CD})
 		b.EnableCompression()
@@ -145,6 +142,23 @@ func UpstreamQuery(q Query) []byte {
 		m = build(128 - r)
 	}
 	return m
+}
+
+// upstreamName is the name UpstreamQuery asks: the query's, lower-cased
+// when that still packs. Lower case may be longer in UTF-8 («Ⱥ» → «ⱥ», a
+// byte that is no UTF-8 → «�»): a label over 63 bytes would leave the
+// query without its question. Then the name goes as it came.
+func upstreamName(q Query) dnsmessage.Name {
+	name, err := dnsmessage.NewName(strings.ToLower(q.Wire.String()))
+	if err != nil {
+		return q.Wire
+	}
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{})
+	_ = b.StartQuestions()
+	if b.Question(dnsmessage.Question{Name: name, Type: q.Type, Class: q.Class}) != nil {
+		return q.Wire
+	}
+	return name
 }
 
 // ReplyOpts shapes an upstream answer for the client.
