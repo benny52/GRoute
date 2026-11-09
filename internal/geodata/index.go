@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// maxCategory bounds one category of a file (buildIndex).
+const maxCategory = 128 << 20
+
 // span is where one category's message lives in the file.
 type span struct {
 	off int64
@@ -43,7 +46,11 @@ func buildIndex(path string) (map[string]span, error) {
 		if key>>3 != 1 || key&7 != 2 {
 			return nil, fmt.Errorf("geodata: unexpected field %d/%d, not a geosite/geoip file", key>>3, key&7)
 		}
-		if n > 1<<30 {
+		// A category is read whole into memory to be matched: the
+		// largest real one (ru-blocked-all) is tens of megabytes. A file
+		// with a larger one (damaged or hostile) is refused when checked,
+		// before it is installed.
+		if n > maxCategory {
 			return nil, errors.New("geodata: entry too large")
 		}
 		head, err := r.Peek(min(int(n), 1024))
