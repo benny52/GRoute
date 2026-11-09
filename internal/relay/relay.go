@@ -90,6 +90,8 @@ type Server struct {
 	// running (the connection is then refused).
 	Tunnel func(profile string) Tunnel
 	Log    *slog.Logger
+	// rejects paces the log of rejected tunnel connections.
+	rejects rejectLog
 	// OnDone is called once per connection that had a NAT entry.
 	OnDone func(Result)
 	// ListenIPs defaults to 0.0.0.0 and [::].
@@ -672,8 +674,33 @@ func (s *Server) reject(c net.Conn, res *Result, reason string, err error) {
 	s.Rejected.Add(1)
 	res.Route, res.Reason, res.Err = "rejected", reason, err
 	s.setOutcome(res.Entry, "rst: "+reason)
-	s.Log.Info("relay: tunnel connection rejected", "dst", res.Entry.Flow.Dst, "profile", res.Profile, "reason", reason, "err", err)
+	// The address at Debug only: at Info every one, while a tunnel is
+	// down, would make the log a list of the places visited.
+	s.Log.Debug("relay: tunnel connection rejected", "dst", res.Entry.Flow.Dst, "profile", res.Profile, "reason", reason, "err", err)
+	if n, ok := s.rejects.note(time.Now()); ok {
+		s.Log.Info("relay: tunnel connections rejected", "count", n, "profile", res.Profile, "reason", reason, "err", err)
+	}
 	Reset(c)
+}
+
+// rejectLog lets one line through per 10 seconds, with how many
+// rejections there were since the last.
+type rejectLog struct {
+	mu sync.Mutex
+	at time.Time
+	n  int
+}
+
+func (r *rejectLog) note(now time.Time) (int, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.n++
+	if !r.at.IsZero() && now.Sub(r.at) < 10*time.Second {
+		return 0, false
+	}
+	n := r.n
+	r.at, r.n = now, 0
+	return n, true
 }
 
 // Reset closes c with RST instead of FIN so the application fails fast.
