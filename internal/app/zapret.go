@@ -497,6 +497,23 @@ func sameZapretRule(r, w rules.Rule) bool {
 // rule profile, as the settings want them. A rule the user switched off
 // stays off.
 func (c *Controller) syncZapretRules(cfg zapret.Settings) {
+	// A server or group chosen for «через VPN» and deleted since: the
+	// main server takes its place, as for settings from before the
+	// choice; a rule through a missing one would refuse every connection.
+	c.mu.Lock()
+	var gone []zapret.Target
+	for t, v := range cfg.Via {
+		if v != zapret.ViaRules && !c.targetExistsLocked(v) {
+			gone = append(gone, t)
+		}
+	}
+	c.mu.Unlock()
+	if len(gone) > 0 {
+		cfg.Via = cloneMap(cfg.Via)
+		for _, t := range gone {
+			delete(cfg.Via, t)
+		}
+	}
 	want := zapretRules(cfg)
 	_, err := c.editRules(func(rc *rules.Config) (bool, error) {
 		var have []rules.Rule
@@ -1322,6 +1339,14 @@ func (c *Controller) ZapretViaVPN(in ZapretViaInput) error {
 	if in.EditRule != "" {
 		if in.Via == zapret.ViaRules {
 			return errors.New("выберите сервер")
+		}
+		// Before the user's rule changes: with zapret.json not loaded the
+		// choice would not be saved, and the rule would stay changed.
+		c.zapretMu.Lock()
+		zerr := c.zapretErr
+		c.zapretMu.Unlock()
+		if zerr != nil {
+			return fmt.Errorf("zapret.json не загружен, изменения не сохраняются: %v", zerr)
 		}
 		c.zapretMu.Lock()
 		sites := slices.Clone(c.zapretCfg.Sites)
