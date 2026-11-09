@@ -104,3 +104,15 @@ func TestJournalTail(t *testing.T) {
 		t.Fatalf("Tail(100) = %v", got)
 	}
 }
+
+// A value from the network with a line break is quoted: it never draws a
+// line of its own in the text log.
+func TestJournalQuotesControl(t *testing.T) {
+	j := NewJournal(16)
+	var buf bytes.Buffer
+	slog.New(NewHandler(j, &Redactor{}, slog.LevelInfo, &buf)).Info("dns", "name", "x.example\n12:00:00 INFO fake line")
+	es := j.Since(0, 0)
+	if len(es) != 1 || strings.Contains(es[0].Msg, "\n") {
+		t.Fatalf("%+v", es)
+	}
+}

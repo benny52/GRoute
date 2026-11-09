@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 )
 
 // Entry is one log line for the UI.
@@ -113,7 +114,9 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 			key = h.group + "." + key
 		}
 		v := a.Value.String()
-		if strings.ContainsAny(v, " \t\"") || v == "" {
+		// Quoted also with a control character: a name from the network
+		// (DNS, SNI) with a line break would draw a line of its own.
+		if v == "" || strings.ContainsAny(v, " \t\"") || strings.ContainsFunc(v, unicode.IsControl) {
 			v = fmt.Sprintf("%q", v)
 		}
 		b.WriteString(" " + key + "=" + v)
