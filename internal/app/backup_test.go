@@ -553,6 +553,39 @@ func TestBackupUndoBrokenPrefs(t *testing.T) {
 	}
 }
 
+// «Вернуть как было» bringing back an unreadable settings.json while
+// connected stops routing: the default rules would send everything
+// direct, which Connect refuses for too.
+func TestBackupUndoBrokenSettingsConnected(t *testing.T) {
+	a, _ := richCtl(t)
+	b := exportAll(t, a, bkPass, "servers", "rules", "settings")
+	dir := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"defaultAction":"direct","rules":[],"future":1}`), 0o600))
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := newCtlAt2(t, st)
+	pv := openBk(t, c, b, bkPass)
+	restore(t, c, pv, BackupChoice{Sections: map[string]string{"servers": "replace", "rules": "replace", "settings": "replace"}})
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.UndoRestore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	connected := c.sess != nil
+	c.mu.Unlock()
+	if connected || c.SettingsError() == nil {
+		t.Fatalf("connected %v, settings error %v", connected, c.SettingsError())
+	}
+	if !slices.ContainsFunc(res.Warnings, func(m BackupMsg) bool { return strings.Contains(m.Text, "подключение остановлено") }) {
+		t.Fatalf("%+v", res.Warnings)
+	}
+}
+
 func (c *Controller) prefsError() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

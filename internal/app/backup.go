@@ -1019,6 +1019,12 @@ func (c *Controller) UndoRestore() (BackupApplyResult, error) {
 	if warns == nil {
 		warns = []BackupMsg{}
 	}
+	if res.stopRouting {
+		// The kill switch, when on, keeps the internet closed.
+		c.Log.Warn("restore undone: settings.json came back unreadable, routing stopped")
+		c.disconnect(false)
+		warns = append(warns, msg("settings").t("settings.json вернулся таким, каким был до восстановления, — нечитаемым: подключение остановлено, чтобы трафик не пошёл напрямую по правилам по умолчанию. Исправьте или удалите файл и перезапустите HyRoute.").m)
+	}
 	c.Log.Info("restore undone", "sections", strings.Join(rec.Sections, ","))
 	if len(refresh) > 0 {
 		c.refreshWG.Add(1)

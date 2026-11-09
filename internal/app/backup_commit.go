@@ -240,6 +240,9 @@ type commitResult struct {
 	// reach the running session.
 	flushRules, dnsWritten bool
 	dnsErr                 error
+	// stopRouting: settings.json came back unreadable while connected
+	// (UndoRestore): routing stops rather than take the default rules.
+	stopRouting bool
 }
 
 // commitRestoreLocked writes pl's files in order and installs them. The
@@ -457,8 +460,14 @@ func (c *Controller) reloadRawLocked(names []string) commitResult {
 		res.rulesChanged = !sameRules(oldCfg, c.settings.Config)
 	}
 	if c.sess != nil || c.starting {
-		c.applyRoutingLocked()
-		res.needsReconnect = engineOptionsDiffer(c.sessSet, c.settings)
+		if want["settings.json"] && c.settingsBroken != nil {
+			// The rules in memory are the defaults now: with them every
+			// connection would go direct, as Connect refuses for.
+			res.stopRouting = true
+		} else {
+			c.applyRoutingLocked()
+			res.needsReconnect = engineOptionsDiffer(c.sessSet, c.settings)
+		}
 	}
 	res.flushRules = res.rulesChanged && c.dnsRulesChangedLocked()
 	return res
