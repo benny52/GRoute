@@ -79,7 +79,7 @@ func (e *Editor) Compare(ctx context.Context, serverID int64, from, to int) (Com
 // revision the admin compared with: it must still be the current one.
 func (a *Applier) Rollback(ctx context.Context, serverID int64, base, revision int, actor int64) (model.Job, error) {
 	e := &Editor{Store: a.x.Store, Keys: a.x.Keys}
-	cur, _, err := e.Current(ctx, serverID)
+	cur, curText, err := e.Current(ctx, serverID)
 	if err != nil {
 		return model.Job{}, err
 	}
@@ -108,6 +108,9 @@ func (a *Applier) Rollback(ctx context.Context, serverID int64, base, revision i
 	}
 	if len(errs) > 0 {
 		return model.Job{}, &model.FieldError{Field: "revision", Msg: "Версия не проходит проверку: " + strings.Join(errs, "; ") + "."}
+	}
+	if err := a.x.keepsCascade(ctx, serverID, curText, b); err != nil {
+		return model.Job{}, err
 	}
 	p := Params{Base: cur.Revision, BaseSHA256: cur.SHA256, SHA256: sha(b), From: revision}
 	return a.x.Jobs.Submit(ctx, JobKind, serverID, p, map[string]string{SecretConfig: string(b)}, actor)

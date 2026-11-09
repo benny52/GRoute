@@ -125,6 +125,13 @@ func (a *Applier) Submit(ctx context.Context, serverID int64, base int, text str
 	if !Changed(ch.Diff) && len(ch.Secrets) == 0 {
 		return model.Job{}, &model.FieldError{Field: "yaml", Msg: "Изменений нет: конфиг такой же, как на сервере."}
 	}
+	_, curText, err := e.Current(ctx, serverID)
+	if err != nil {
+		return model.Job{}, err
+	}
+	if err := a.x.keepsCascade(ctx, serverID, curText, cand); err != nil {
+		return model.Job{}, err
+	}
 	p := Params{Base: cur.Revision, BaseSHA256: cur.SHA256, SHA256: sha(cand)}
 	return a.x.Jobs.Submit(ctx, JobKind, serverID, p, map[string]string{SecretConfig: string(cand)}, actor)
 }
