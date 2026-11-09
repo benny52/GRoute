@@ -193,7 +193,8 @@ func TestZapretSitesNeedOne(t *testing.T) {
 	if !strings.Contains(string(b), "\nexample.org\n") {
 		t.Fatalf("%q", b)
 	}
-	if rs := c.Settings().Rules; rs[0].Name != "Обход DPI: Свои сайты" || !slices.Equal(rs[0].Domains, []string{"example.org"}) {
+	// With its subdomains: a plain name in a rule is that name only.
+	if rs := c.Settings().Rules; rs[0].Name != "Обход DPI: Свои сайты" || !slices.Equal(rs[0].Domains, []string{".example.org"}) {
 		t.Fatalf("%+v", rs[0])
 	}
 }
@@ -492,7 +493,9 @@ func TestZapretViaVPN(t *testing.T) {
 		t.Fatalf("not its own: %+v", d.By)
 	}
 
-	// Through DE, changing the user's «YouTube»: no rule of the bypass's.
+	// Through DE, changing the user's «YouTube»: it takes youtube.com and
+	// googlevideo.com only, so the bypass's rule takes the rest of the
+	// service through DE too.
 	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.YouTube, Via: de, EditRule: "yt"}); err != nil {
 		t.Fatal(err)
 	}
@@ -504,11 +507,16 @@ func TestZapretViaVPN(t *testing.T) {
 		}
 		return strings.Join(out, ",")
 	}
-	if names(rs) != "Обход DPI: Discord,Обход DPI: Discord (голос),YouTube,Разное" || rs[2].Profile != de {
-		t.Fatalf("%s %+v", names(rs), rs[2])
+	if names(rs) != "Обход DPI: YouTube,Обход DPI: Discord,Обход DPI: Discord (голос),YouTube,Разное" ||
+		rs[0].Action != rules.Tunnel || rs[0].Profile != de || rs[3].Profile != de {
+		t.Fatalf("%s %+v %+v", names(rs), rs[0], rs[3])
 	}
-	if v := c.ZapretInfo(); v.Settings.Via[zapret.YouTube] != zapret.ViaRules || v.Targets[0].Using != "без обхода, по вашим правилам" {
+	if v := c.ZapretInfo(); v.Settings.Via[zapret.YouTube] != de || v.Targets[0].Using != "через «DE», без обхода" {
 		t.Fatalf("%+v %q", v.Settings.Via, v.Targets[0].Using)
+	}
+	// By the user's rules only when they take all of it.
+	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.YouTube, Via: zapret.ViaRules}); err == nil {
+		t.Fatal("by rules that leave sites of it direct")
 	}
 	// A rule that is not only about the service is never changed.
 	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.Discord, Via: nl, EditRule: "mix"}); err == nil {
@@ -519,8 +527,8 @@ func TestZapretViaVPN(t *testing.T) {
 		t.Fatal(err)
 	}
 	rs = c.Settings().Rules
-	if rs[0].Name != "Обход DPI: Discord" || rs[0].Action != rules.Tunnel || rs[0].Profile != nl || rs[1].Profile != nl || len(rs) != 4 {
-		t.Fatalf("%+v", rs[:2])
+	if rs[1].Name != "Обход DPI: Discord" || rs[1].Action != rules.Tunnel || rs[1].Profile != nl || rs[2].Profile != nl || len(rs) != 5 {
+		t.Fatalf("%+v", rs[:3])
 	}
 	if v := c.ZapretInfo(); v.Targets[1].Using != "через «NL», без обхода" {
 		t.Fatalf("%q", v.Targets[1].Using)
@@ -530,14 +538,69 @@ func TestZapretViaVPN(t *testing.T) {
 	if err := c.SaveZapret(in); err != nil {
 		t.Fatal(err)
 	}
-	if v := c.ZapretInfo(); v.Settings.Via[zapret.Discord] != "" || v.Settings.Via[zapret.YouTube] != zapret.ViaRules {
+	if v := c.ZapretInfo(); v.Settings.Via[zapret.Discord] != "" || v.Settings.Via[zapret.YouTube] != de {
 		t.Fatalf("%+v", v.Settings.Via)
 	}
-	if rs = c.Settings().Rules; rs[0].Action != rules.Direct || rs[0].Profile != "" {
-		t.Fatalf("%+v", rs[0])
+	if rs = c.Settings().Rules; rs[1].Name != "Обход DPI: Discord" || rs[1].Action != rules.Direct || rs[1].Profile != "" {
+		t.Fatalf("%+v", rs[1])
 	}
 	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.YouTube, Via: "nope"}); err == nil {
 		t.Fatal("an unknown server")
+	}
+}
+
+// By the user's rules: only for rules that take every site of the
+// service through the VPN, a name under each too; Discord's voice keeps a
+// rule of the bypass's through the main server; addresses are never
+// left to the rules.
+func TestZapretViaRules(t *testing.T) {
+	c, _ := zapFixture(t)
+	if _, err := c.ImportURIs("hysteria2://p1@a.example:443#NL"); err != nil {
+		t.Fatal(err)
+	}
+	nl := c.Profiles()[0].ID
+	st := c.Settings()
+	st.Rules = []rules.Rule{
+		{ID: "yt", Name: "YouTube", Domains: zapretRuleSites(zapret.YouTube, nil), Action: rules.Tunnel, Profile: nl},
+		{ID: "dc", Name: "Discord", Domains: zapretRuleSites(zapret.Discord, nil), Action: rules.Tunnel, Profile: nl},
+		{ID: "own", Name: "Сайт", Domains: []string{"example.org"}, Action: rules.Tunnel, Profile: nl},
+	}
+	st.DefaultAction = rules.Direct
+	if _, err := c.SaveSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube, zapret.Discord, zapret.Sites},
+		Sites: []string{"example.org", "203.0.113.7"}}); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := c.ZapretRoute(zapret.YouTube); err != nil || !r.Tunnel {
+		t.Fatalf("%+v %v", r, err)
+	}
+	// «example.org» alone takes the name, not the names under it, and
+	// the address is not asked.
+	r, _ := c.ZapretRoute(zapret.Sites)
+	if r.Tunnel || !slices.ContainsFunc(r.By, func(b ZapretRouteRule) bool { return slices.Contains(b.Sites, "*.example.org") }) {
+		t.Fatalf("%+v", r)
+	}
+	if err := c.ZapretViaVPN(ZapretViaInput{Target: zapret.Sites, Via: zapret.ViaRules}); err == nil {
+		t.Fatal("own sites left to rules that miss them")
+	}
+	for _, tg := range []zapret.Target{zapret.YouTube, zapret.Discord} {
+		if err := c.ZapretViaVPN(ZapretViaInput{Target: tg, Via: zapret.ViaRules}); err != nil {
+			t.Fatal(tg, err)
+		}
+	}
+	var got []string
+	for _, r := range c.Settings().Rules {
+		if isZapretRule(r) {
+			got = append(got, r.Name)
+			if r.Name == "Обход DPI: Discord (голос)" && (r.Action != rules.Tunnel || r.Profile != "") {
+				t.Errorf("voice %+v", r)
+			}
+		}
+	}
+	if !slices.Equal(got, []string{"Обход DPI: Discord (голос)", "Обход DPI: Свои сайты"}) {
+		t.Fatalf("%q", got)
 	}
 }
 

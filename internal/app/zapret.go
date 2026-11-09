@@ -442,17 +442,20 @@ func zapretRules(cfg zapret.Settings) []rules.Rule {
 		}
 		// Direct, through winws2; through the main server where the user
 		// chose the VPN for it (blocked by address: no bypass opens that).
-		// The VPN by the user's own rules: none of ours.
+		// The VPN by the user's own rules: none of ours for the sites,
+		// which those rules take through the VPN, every one (ZapretViaVPN
+		// checks); Discord's voice, addresses without names, through the
+		// main server.
 		act, prof := rules.Direct, ""
+		byRules := false
 		if cfg.Methods[t] == zapret.VPN {
 			act, prof = rules.Tunnel, cfg.Via[t]
 			if prof == zapret.ViaRules {
-				continue
+				byRules, prof = true, ""
 			}
 		}
-		doms := zapret.Domains(t, cfg.Sites)
-		if len(doms) > 0 {
-			out = append(out, rules.Rule{Name: ZapretRulePrefix + zapret.TargetName(t), Domains: slices.Clone(doms), Action: act, Profile: prof})
+		if doms := zapretRuleSites(t, cfg.Sites); len(doms) > 0 && !byRules {
+			out = append(out, rules.Rule{Name: ZapretRulePrefix + zapret.TargetName(t), Domains: doms, Action: act, Profile: prof})
 		}
 		if t == zapret.Discord {
 			// Voice goes to addresses without names, from the program.
@@ -465,6 +468,24 @@ func zapretRules(cfg zapret.Settings) []rules.Rule {
 }
 
 func isZapretRule(r rules.Rule) bool { return strings.HasPrefix(r.Name, ZapretRulePrefix) }
+
+// zapretRuleSites are service t's sites as rule items: a name with every
+// name under it («.youtube.com»: a plain name in a rule is that name only,
+// and the service's servers are under it), an address or network as it is.
+func zapretRuleSites(t zapret.Target, sites []string) []string {
+	var out []string
+	for _, d := range zapret.Domains(t, sites) {
+		if len(zapret.SiteNets([]string{d})) == 0 {
+			d = "." + d
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// zapretProbe is put in front of a service's site for a name under it no
+// rule names itself: a rule for the plain name alone does not take it.
+const zapretProbe = "hyroute-probe."
 
 // sameZapretRule: r is the kept rule w (its ID and switch aside).
 func sameZapretRule(r, w rules.Rule) bool {
@@ -1163,36 +1184,48 @@ func (c *Controller) ZapretRoute(t zapret.Target) (ZapretRoute, error) {
 	doms := zapret.SiteNames(zapret.Domains(t, sites))
 	sub := rules.Subject{Proto: 6, Dst: netip.AddrPortFrom(netip.Addr{}, 443)}
 	for _, d := range doms {
-		r := set.EvaluateDomain(sub, d, rules.SrcSNI)
-		i := slices.IndexFunc(res.By, func(b ZapretRouteRule) bool { return b.ID == r.RuleID && b.Name == r.Rule })
-		if i < 0 {
-			b := ZapretRouteRule{ID: r.RuleID, Name: r.Rule, Tunnel: r.Action == rules.Tunnel, Profile: r.Profile}
-			if r.RuleID == "" {
-				b.Name = "Всё остальное"
-			}
-			switch r.Action {
-			case rules.Direct:
-				b.Route = "напрямую"
-			case rules.Block:
-				b.Route = "блокировка"
-			default:
-				b.Route = "через «" + c.profileName(r.Profile) + "»"
-				if r.Profile == "" {
-					b.Route = "через VPN — но сервер не выбран"
+		// The site and a name under it: the service's servers are there.
+		first := -1
+		for _, name := range []string{d, zapretProbe + d} {
+			r := set.EvaluateDomain(sub, name, rules.SrcSNI)
+			i := slices.IndexFunc(res.By, func(b ZapretRouteRule) bool { return b.ID == r.RuleID && b.Name == r.Rule })
+			if i < 0 {
+				b := ZapretRouteRule{ID: r.RuleID, Name: r.Rule, Tunnel: r.Action == rules.Tunnel, Profile: r.Profile}
+				if r.RuleID == "" {
+					b.Name = "Всё остальное"
 				}
+				switch r.Action {
+				case rules.Direct:
+					b.Route = "напрямую"
+				case rules.Block:
+					b.Route = "блокировка"
+				default:
+					b.Route = "через «" + c.profileName(r.Profile) + "»"
+					if r.Profile == "" {
+						b.Route = "через VPN — но сервер не выбран"
+					}
+				}
+				if k := slices.IndexFunc(rc.Rules, func(x rules.Rule) bool { return x.ID != "" && x.ID == r.RuleID }); k >= 0 {
+					b.Own = ownRule(rc.Rules[k], t, sites)
+				}
+				res.By = append(res.By, b)
+				i = len(res.By) - 1
 			}
-			if k := slices.IndexFunc(rc.Rules, func(x rules.Rule) bool { return x.ID != "" && x.ID == r.RuleID }); k >= 0 {
-				b.Own = ownRule(rc.Rules[k], t, sites)
+			switch {
+			case name == d:
+				res.By[i].Sites = append(res.By[i].Sites, d)
+				first = i
+			case i != first:
+				res.By[i].Sites = append(res.By[i].Sites, "*."+d)
 			}
-			res.By = append(res.By, b)
-			i = len(res.By) - 1
-		}
-		res.By[i].Sites = append(res.By[i].Sites, d)
-		if r.Action != rules.Tunnel || r.Profile == "" {
-			res.Tunnel = false
+			if r.Action != rules.Tunnel || r.Profile == "" {
+				res.Tunnel = false
+			}
 		}
 	}
-	if len(doms) == 0 {
+	// Addresses: the rules are not asked about them, the bypass keeps its
+	// rule for them.
+	if len(doms) == 0 || len(zapret.SiteNets(zapret.Domains(t, sites))) > 0 {
 		res.Tunnel = false
 	}
 	return res, nil
@@ -1243,6 +1276,15 @@ func (c *Controller) ZapretViaVPN(in ZapretViaInput) error {
 			return errors.New("сервер не найден: обновите страницу")
 		}
 	}
+	// By the user's rules only when they take every site of it through the
+	// VPN: else a site of it would go wherever the rest of the rules say.
+	covered := func() bool {
+		r, err := c.ZapretRoute(in.Target)
+		return err == nil && r.Tunnel
+	}
+	if in.Via == zapret.ViaRules && !covered() {
+		return errors.New("ваши правила ведут через VPN не все сайты сервиса: выберите сервер")
+	}
 	via := in.Via
 	if in.EditRule != "" {
 		if in.Via == zapret.ViaRules {
@@ -1276,7 +1318,11 @@ func (c *Controller) ZapretViaVPN(in ZapretViaInput) error {
 		if !found {
 			return errors.New("правило не найдено: список правил изменился, откройте выбор снова")
 		}
-		via = zapret.ViaRules
+		// The bypass steps aside only when the rules now take all of it;
+		// else its rule takes the rest through the same server.
+		if covered() {
+			via = zapret.ViaRules
+		}
 	}
 	c.zapretMu.Lock()
 	defer c.zapretMu.Unlock()
