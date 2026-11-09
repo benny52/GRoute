@@ -41,9 +41,10 @@ export function maskIPs(s: string): string {
   return s.replace(v6, (m) => maskV6(m));
 }
 
-// maskURLs hides subscription-like URLs completely: https://***/…
+// maskURLs hides URLs completely, of any scheme (share links carry
+// passwords): https://***/…, hysteria2://***/…
 export function maskURLs(s: string): string {
-  return s.replace(/\bhttps?:\/\/[^\s"'<>]+/g, (m) => m.replace(/^(https?:\/\/)[^\s"'<>]*/, '$1***/…'));
+  return s.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi, (m) => m.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^\s"'<>]*/i, '$1***/…'));
 }
 
 export function maskHosts(s: string, hosts: string[]): string {

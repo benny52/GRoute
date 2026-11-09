@@ -74,6 +74,18 @@
   {
    "in": "connected to 203.0.113.5.",
    "want": "connected to 203.xxx.xxx.5."
+  },
+  {
+   "in": "link hysteria2://pAss@vpn.example.com:443/?obfs=salamander&obfs-password=k3y#NL end",
+   "want": "link hysteria2://***/… end"
+  },
+  {
+   "in": "vless://5f0b7c1e-1234-4abc-9def-0123456789ab@203.0.113.9:443?type=ws x",
+   "want": "vless://***/… x"
+  },
+  {
+   "in": "HTTPS://Panel.example/sub/T",
+   "want": "HTTPS://***/…"
   }
  ]
 }

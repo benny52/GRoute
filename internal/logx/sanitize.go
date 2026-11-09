@@ -141,9 +141,11 @@ var (
 )
 
 var (
-	v4re  = regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`)
-	v6re  = regexp.MustCompile(`[0-9A-Fa-f:]*:[0-9A-Fa-f:]*:[0-9A-Fa-f:]*`)
-	urlre = regexp.MustCompile(`\b(https?://)[^\s"'<>]+`)
+	v4re = regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`)
+	v6re = regexp.MustCompile(`[0-9A-Fa-f:]*:[0-9A-Fa-f:]*:[0-9A-Fa-f:]*`)
+	// urlre: a URL of any scheme; share links (hysteria2://, vless://)
+	// carry passwords.
+	urlre = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)[^\s"'<>]+`)
 	// usersre: the folder name after \Users\ (or /Users/) of a path.
 	usersre = regexp.MustCompile(`(?i)([\\/]Users[\\/])[^\\/\s"'«»<>]+`)
 )
