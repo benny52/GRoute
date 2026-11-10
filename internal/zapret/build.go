@@ -110,11 +110,8 @@ func Build(c BuildConfig) ([]string, error) {
 	for _, name := range []string{"google_tls", "quic_google", "vk_tls"} {
 		args = append(args, "--blob="+name+":@"+filepath.Join(c.Dir, "blobs", BlobFiles[name]))
 	}
-	if circular {
-		args = append(args, "--lua-init=@"+list(LuaFile))
-	}
 	args = append(args, fakeArgs(c.Lists, c.Plans)...)
-	args = append(args, "--wf-raw-filter="+rawFilter(c.Filter, circular))
+	args = append(args, "--wf-raw-filter="+rawFilter(c.Filter))
 	args = append(args, "--lua-gc=60")
 
 	var profiles [][]string
@@ -181,7 +178,7 @@ func tlsProfile(comment string, t Target, ports, l7, hostlist, exclude string, p
 		// methods only the ClientHello. nld=2: one count per domain
 		// (googlevideo.com), not per one of its hundreds of servers; own
 		// sites keep one per host (nld=2 of example.co.uk is co.uk).
-		circular := "--lua-desync=circular:fails=3:retrans=2:success_detector=hyroute_success"
+		circular := "--lua-desync=circular:fails=3:retrans=2"
 		if t != Sites {
 			circular += ":nld=2"
 		}
@@ -245,57 +242,22 @@ func CommandLine(args []string) string {
 	return b.String()
 }
 
-// Packets winws2 need not see, which WinDivert would otherwise carry to it
-// and back (a round trip each, the CPU of every download):
-//   - QUIC (UDP 443) after its first, long-header packets: the profiles
-//     act on the Initial alone, but a QUIC download sends acknowledgements
-//     all along;
-//   - with the circular orchestrator, which reads the answers: any
-//     answer's data but its start — a TLS server's first record (0x16) or
-//     an HTTP answer. winws2 always takes SYN, FIN and RST itself, and an
-//     HTTP redirect is an HTTP answer. hyroute_success (LuaFile) takes the
-//     TLS server's first record as the sign that the connection went
-//     through, which the default detector found in the bytes after it.
-const (
-	quicLean    = "(inbound or !udp or udp.DstPort != 443 or (udp.PayloadLength > 0 and udp.Payload[0] >= 0xC0))"
-	inboundLean = "(outbound or !tcp or tcp.PayloadLength == 0 or tcp.Payload[0] == 0x16 or (tcp.PayloadLength >= 4 and tcp.Payload32[0] == 0x48545450))"
-)
+// quicLean: QUIC (UDP 443) reaches winws2 only in its long-header
+// packets (Initial, handshake): the profiles act on the Initial alone, and
+// a QUIC download sends acknowledgements all along, each a round trip
+// through winws2 otherwise. Inbound TCP is not narrowed so: a filter on a
+// packet's bytes takes some segments of a stream and not others (a segment
+// whose first byte happens to be 0x16), and the ones winws2 holds arrive
+// after the later ones — reordering that slowed downloads (1.3.26). With
+// the circular orchestrator every inbound packet of 80 and 443 goes
+// through winws2, in order, and its default success detector reads them.
+const quicLean = "(inbound or !udp or udp.DstPort != 443 or (udp.PayloadLength > 0 and udp.Payload[0] >= 0xC0))"
 
 // rawFilter is the --wf-raw-filter (only one is allowed): the slots'
-// filter and the lean parts.
-func rawFilter(slots string, circular bool) string {
-	parts := []string{quicLean}
-	if circular {
-		parts = append(parts, inboundLean)
+// filter and quicLean.
+func rawFilter(slots string) string {
+	if slots == "" {
+		return quicLean
 	}
-	if slots != "" {
-		parts = append([]string{"(" + slots + ")"}, parts...)
-	}
-	return strings.Join(parts, " and ")
+	return "(" + slots + ") and " + quicLean
 }
-
-// LuaFile is HyRoute's own Lua for winws2, written into the lists folder
-// (WriteLists): the circular orchestrator's success detector for the
-// packets rawFilter lets through.
-const LuaFile = "hyroute.lua"
-
-const luaSource = `-- HyRoute: the success detector of the circular orchestrator.
--- HyRoute lets an answer reach winws2 only at its start (a TLS server's
--- first record, an HTTP answer), so the default detector, which waits for
--- the answer's later bytes, would never see one. A TLS server's first
--- record, or an HTTP 2xx, means the connection got through. Anything else
--- (an HTTP redirect to a stub page among them) is left to the default
--- detectors.
-function hyroute_success(desync, crec)
-	if desync.dis.tcp and not desync.outgoing and desync.dis.payload and #desync.dis.payload > 0 then
-		local p = desync.dis.payload
-		if string.byte(p, 1) == 0x16 then
-			return true
-		end
-		if #p >= 10 and string.sub(p, 1, 7) == "HTTP/1." and string.sub(p, 10, 10) == "2" then
-			return true
-		end
-	end
-	return standard_success_detector(desync, crec)
-end
-`

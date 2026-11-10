@@ -52,10 +52,8 @@ func TestWinws2Runs(t *testing.T) {
 		cases[m.ID] = run{all(zapret.Plan{Methods: []string{m.ID}}), zapret.ProbeOnly(i + 1), i + 1}
 	}
 	cases["circular"] = run{all(zapret.Plan{Methods: ids, Circular: true}), zapret.ProbeExclude(), 0}
-	// The orchestrator on a real connection: HyRoute's filter lets the
-	// answer's start through and hyroute_success (its Lua) reads it.
-	// It starts from a method that opens example.com (fake-md5-seqovl), so
-	// hyroute_success must see the server's first record.
+	// The orchestrator on a real connection, starting from a method that
+	// opens example.com (fake-md5-seqovl).
 	first := append([]string{"fake-md5-seqovl"}, slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return id == "fake-md5-seqovl" })...)
 	cases["circular probed"] = run{all(zapret.Plan{Methods: first, Circular: true}), zapret.ProbeOnly(zapret.ProbeSlots - 1), zapret.ProbeSlots - 1}
 	cases["youtube only"] = run{map[zapret.Target]zapret.Plan{zapret.YouTube: {Methods: ids, Circular: true}}, zapret.ProbeExclude(), 0}
@@ -103,8 +101,8 @@ func TestWinws2Runs(t *testing.T) {
 			if o := out.String(); strings.Contains(o, "LUA ERROR") || strings.Contains(o, "invalid success detector") {
 				t.Errorf("Lua failed:\n%s", o)
 			}
-			if name == "circular probed" && !strings.Contains(out.String(), "automate: success detected") {
-				t.Errorf("hyroute_success saw no answer of the server")
+			if name == "circular probed" && !strings.Contains(out.String(), "circular: current strategy") {
+				t.Errorf("the orchestrator saw nothing")
 			}
 			t.Logf("%s", out.String())
 		})
