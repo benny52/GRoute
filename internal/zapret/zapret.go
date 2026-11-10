@@ -120,6 +120,11 @@ var Methods = []Method{
 	{ID: "hostfakesplit-vk", Name: "Фейк vk.com + подмена имени на vk.com", tcp: []string{
 		"fake:blob=vk_tls:tcp_ts=-1000:tcp_md5:repeats=6",
 		"hostfakesplit:host=vk.com:tcp_ts=-1000:tcp_md5"}},
+	// Flowseal's zapret-discord-youtube for Google's names (list-google:
+	// googlevideo.com, youtube.com…): one split with a google.com overlap,
+	// the parts with IP ID 0 (--ip-id=zero there; Windows fills it in).
+	{ID: "seqovl-google", Name: "Разрез с перекрытием под google.com, IP ID 0 (как у Flowseal)", tcp: []string{
+		"multisplit:pos=1:seqovl=681:seqovl_pattern=google_tls:ip_id=zero"}},
 }
 
 // FindMethod is a method by ID.
