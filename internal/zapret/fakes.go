@@ -14,9 +14,10 @@ import (
 
 // WhiteNames are sites on TSPU's white list: a fake or an overlap that
 // names one of them can keep a connection out of the "16-20 KB" cut of
-// hosting and CDN addresses (Flowseal uses 4pda.to's ClientHello, zapret2
-// ships vk.com's). The generator tries which works on a network.
-var WhiteNames = []string{"vk.com", "ya.ru", "gosuslugi.ru", "max.ru", "4pda.to", "ozon.ru"}
+// hosting and CDN addresses (Flowseal uses the ClientHellos of 4pda.to,
+// www.sferum.ru, max.ru and 5ka.ru, zapret2 ships vk.com's). The generator
+// tries which works on a network.
+var WhiteNames = []string{"vk.com", "ya.ru", "gosuslugi.ru", "max.ru", "4pda.to", "ozon.ru", "www.sferum.ru", "5ka.ru"}
 
 // whiteKey is the fake's key: vk.com's comes with zapret2, the others
 // HyRoute makes.

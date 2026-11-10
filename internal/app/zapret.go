@@ -1102,12 +1102,17 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 			budget = zapretRefineAuto
 		}
 		if lost {
+			known := zapret.Known()
+			for _, st := range known {
+				add(st.ID())
+			}
 			for _, st := range zapret.Broad(zapretBroad, zapretSeed()) {
 				add(st.ID())
 			}
-			budget = zapretRefine + zapretBroad
+			budget = zapretRefine + len(known) + zapretBroad
 		}
-		// Neighbors of the fastest first, then the spread.
+		// Neighbors of the fastest first, then Flowseal's recipes and the
+		// spread.
 		cands = cands[:min(len(cands), budget)]
 		for len(cands) > 0 && ctx.Err() == nil && time.Now().Before(deadline) {
 			batch := cands[:min(len(cands), zapret.ProbeSlots-1)]

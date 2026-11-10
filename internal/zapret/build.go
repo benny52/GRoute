@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -52,6 +53,10 @@ type BuildConfig struct {
 	Filter string
 }
 
+// quicFake: a QUIC Initial naming google.com before the real one, six
+// times as in Flowseal's presets (a lost fake leaves the real Initial bare).
+const quicFake = "--lua-desync=fake:blob=quic_google:repeats=6"
+
 // decoy is the host a hostfakesplit puts in place of the target's.
 func decoy(t Target) string {
 	switch t {
@@ -74,16 +79,18 @@ func Build(c BuildConfig) ([]string, error) {
 		return nil, errors.New("zapret: пути должны быть полными")
 	}
 	list := func(name string) string { return filepath.Join(c.Lists, name) }
-	circular := false
+	circular, ownLua := false, false
 	tcpOut, udpOut := []string{"80", "443"}, []string{}
 	for t, p := range c.Plans {
 		if len(p.Methods) == 0 {
 			return nil, fmt.Errorf("zapret: нет методов для %s", t)
 		}
 		for _, id := range p.Methods {
-			if _, ok := FindMethod(id); !ok {
+			m, ok := FindMethod(id)
+			if !ok {
 				return nil, fmt.Errorf("zapret: неизвестный метод %q", id)
 			}
+			ownLua = ownLua || slices.ContainsFunc(m.tcp, func(inst string) bool { return strings.Contains(inst, "hyroute_") })
 		}
 		circular = circular || p.Circular && len(p.Methods) > 1
 		udpOut = appendNew(udpOut, "443")
@@ -110,7 +117,7 @@ func Build(c BuildConfig) ([]string, error) {
 	for _, name := range []string{"google_tls", "quic_google", "vk_tls"} {
 		args = append(args, "--blob="+name+":@"+filepath.Join(c.Dir, "blobs", BlobFiles[name]))
 	}
-	if circular {
+	if circular || ownLua {
 		args = append(args, "--lua-init=@"+list(LuaFile))
 	}
 	args = append(args, fakeArgs(c.Lists, c.Plans)...)
@@ -147,14 +154,14 @@ func Build(c BuildConfig) ([]string, error) {
 			profiles = append(profiles,
 				tlsProfile(TargetName(t), t, "80,443", l7, hostlist, exclude, p),
 				[]string{"--comment=" + TargetName(t) + " QUIC", "--filter-udp=443", "--filter-l7=quic", hostlist, exclude,
-					"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+					"--payload=quic_initial", "--out-range=-d10", quicFake})
 		}
 		if nets {
 			ipset := "--ipset=" + list(ListSitesNet)
 			profiles = append(profiles,
 				tlsProfile("Свои адреса", t, "80,443", l7, ipset, exclude, p),
 				[]string{"--comment=Свои адреса QUIC", "--filter-udp=443", "--filter-l7=quic", ipset, exclude,
-					"--payload=quic_initial", "--out-range=-d10", "--lua-desync=fake:blob=quic_google"})
+					"--payload=quic_initial", "--out-range=-d10", quicFake})
 		}
 	}
 	for i, p := range profiles {
@@ -270,10 +277,14 @@ func rawFilter(slots string) string {
 }
 
 // LuaFile is HyRoute's own Lua for winws2, written into the lists folder
-// (WriteLists) and loaded with the circular orchestrator.
+// (WriteLists) and loaded with the circular orchestrator or a method that
+// calls it.
 const LuaFile = "hyroute.lua"
 
-// luaSource: hyroute_hostkey, the circular orchestrator's host key for
+// luaSource. hyroute_ts is the tsauto fooling (strategy.go): zapret2's
+// tcp_ts=-600000 (winws's default, as Flowseal's and kinlay0's presets use
+// it) when the packet has a timestamp option, its tcp_md5 when not.
+// hyroute_hostkey is the circular orchestrator's host key for
 // YouTube. With nld=2 every video server (rr4---sn-aj5go5-5i.googlevideo.com,
 // rr4---sn-aj5go5-5i.c.youtube.com) shared one count with the rest of its
 // domain — www.youtube.com among them — and a DPI treats them apart: the
@@ -291,6 +302,19 @@ function hyroute_hostkey(desync)
 		end
 	end
 	return standard_hostkey(desync)
+end
+
+-- HyRoute: the tsauto fooling (zapret/strategy.go), as apply_fooling's tcp_ts and tcp_md5.
+function hyroute_ts(dis, fooling_options)
+	if not dis.tcp then
+		return
+	end
+	local idx = find_tcp_option(dis.tcp.options, TCP_KIND_TS)
+	if idx and (dis.tcp.options[idx].data and #dis.tcp.options[idx].data or 0) == 8 then
+		dis.tcp.options[idx].data = bu32(u32add(u32(dis.tcp.options[idx].data), -600000)) .. string.sub(dis.tcp.options[idx].data, 5)
+	elseif not find_tcp_option(dis.tcp.options, TCP_KIND_MD5) then
+		table.insert(dis.tcp.options, {kind = TCP_KIND_MD5, data = brandom(16)})
+	end
 end
 `
 

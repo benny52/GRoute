@@ -162,7 +162,7 @@ func stageZapret(t *testing.T) (dir, lists string) {
 var testSites = []string{"example.com", "example.org", "203.0.113.0/24", "2001:db8:1::/48"}
 
 // TestWinws2Generated runs generated strategies (a spread over the whole
-// space and the neighbors of a library method) in the real winws2, twelve
+// space, the neighbors of a library method and Known) in the real winws2, twelve
 // at once as a pick does, each with a probe to example.com from its
 // ports: no Lua function may fail on a real connection.
 func TestWinws2Generated(t *testing.T) {
@@ -176,6 +176,9 @@ func TestWinws2Generated(t *testing.T) {
 	}
 	base, _ := zapret.AsStrategy("fake-vk-seqovl")
 	for _, s := range zapret.Neighbors(base)[:6] {
+		ids = append(ids, s.ID())
+	}
+	for _, s := range zapret.Known() { // Flowseal's recipes, HyRoute's own fooling among them
 		ids = append(ids, s.ID())
 	}
 	opened, total := 0, len(ids)

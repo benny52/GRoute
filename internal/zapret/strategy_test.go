@@ -3,6 +3,7 @@ package zapret
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -54,6 +55,69 @@ func TestStrategyIDs(t *testing.T) {
 	}
 }
 
+// Flowseal's recipes: each a strategy the generator may build, none the
+// library's; its fooling is HyRoute's Lua, loaded with the method alone too.
+func TestStrategyKnown(t *testing.T) {
+	known := Known()
+	if len(known) < 20 || len(known) > 3*(ProbeSlots-1) {
+		t.Fatalf("%d recipes", len(known))
+	}
+	seen := map[string]bool{}
+	for _, m := range Methods {
+		seen[strings.Join(m.tcp, " ")] = true
+	}
+	dir, lists := t.TempDir(), t.TempDir()
+	for _, s := range known {
+		id := s.ID()
+		got, ok := ParseStrategy(id)
+		m, found := FindMethod(id)
+		if !ok || got != s || !found || seen[strings.Join(m.tcp, " ")] {
+			t.Fatalf("%s: %+v %v", id, got, ok)
+		}
+		seen[strings.Join(m.tcp, " ")] = true
+		args, err := Build(BuildConfig{Dir: dir, Lists: lists, Filter: ProbeOnly(1), Plans: map[Target]Plan{YouTube: {Methods: []string{id}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := strings.Join(args, " ")
+		if strings.Contains(line, "hyroute_ts") != strings.Contains(line, "--lua-init=@"+filepath.Join(lists, LuaFile)) {
+			t.Fatalf("%s: %s", id, line)
+		}
+	}
+	s := known[13]
+	if n := s.Name(); n != "Нули и фейк google.com со случайными полями (сдвиг SEQ и ACK, ×11) + перестановка частей в двух местах, IP ID 0" {
+		t.Fatalf("%q", n)
+	}
+	want := []string{
+		"fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:repeats=11:ip_id=zero",
+		"fake:blob=google_tls:tcp_seq=-10000:tcp_ack=-66000:repeats=11:tls_mod=rnd,dupsid:ip_id=zero",
+		"multidisorder:pos=1,midsld:ip_id=zero",
+	}
+	if got := s.instances(); !slices.Equal(got, want) {
+		t.Fatalf("%q", got)
+	}
+	if got := known[5].instances(); !slices.Equal(got, []string{"hostfakesplit:host=www.google.com:fool=hyroute_ts:repeats=1:ip_id=zero"}) {
+		t.Fatalf("%q", got)
+	}
+	// A copy of the real ClientHello under another name as the fake, the
+	// library's fake when zapret2 cannot make it.
+	if got := known[23].instances(); !slices.Equal(got, []string{
+		"tls_client_hello_clone:blob=ch_clone:fallback=google_tls:sni_del:sni_first=www.google.com:sni_snt_new=0",
+		"fake:blob=ch_clone:fool=hyroute_ts:repeats=6:ip_id=zero",
+		"multisplit:pos=sniext+1,midsld:seqovl=1:ip_id=zero",
+	}) {
+		t.Fatalf("%q", got)
+	}
+	if n := known[24].Name(); n != "Фейк-копия настоящего начала под именем max.ru (старая метка времени или TCP MD5, ×6) + разрез в двух местах с перекрытием в 1 байт" {
+		t.Fatalf("%q", n)
+	}
+	// Strategies stored before these parts read as they did.
+	old, ok := ParseStrategy("g:f=w_ya_ru;o=md5;r=6;s=multisplit;p=midsld")
+	if !ok || old.IPID || old.Lead {
+		t.Fatalf("%+v %v", old, ok)
+	}
+}
+
 func TestStrategyRefused(t *testing.T) {
 	for _, id := range []string{
 		"g:", "g:f=google", // a fake needs a fooling and repeats
@@ -66,6 +130,16 @@ func TestStrategyRefused(t *testing.T) {
 		"g:o=ts;r=6;s=multisplit;p=1", // a fooling with nothing to fool
 		"g:s=multisplit;p=1;q=999;n=vk",
 		"g:s=hostfakesplit;o=ts;r=6;h=evil.example",
+		"g:s=multisplit;p=1;i=1",                // not canonical
+		"g:f=zero;o=md5;r=6;l=true",             // nothing after the zeros
+		"g:s=multisplit;p=1;l=true",             // zeros before no fake
+		"g:f=google;o=md5;r=6;i=true;l=true",    // keys out of order
+		"g:f=google;o=fool=hyroute_hostkey;r=6", // a fooling of the user's
+		"g:f=google;o=md5;r=6;c=evil.example",   // a name of the user's in the copy
+		"g:f=zero;o=md5;r=6;c=max.ru",           // no ClientHello to fall back to
+		"g:s=multisplit;p=1;q=1;n=vk",           // one byte has no pattern
+		"g:s=multisplit;p=1;q=681",              // an overlap without one
+
 		"g:r=6;o=ts;f=google", // keys out of order
 		"g:f=google;o=ts;r=6;f=vk",
 		"fake-seqovl", "", "g:s=multisplit;p=1 ;q=568;n=vk",

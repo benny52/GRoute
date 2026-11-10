@@ -25,7 +25,10 @@ type Strategy struct {
 	Pos     string // where to split: a key of positions
 	Seqovl  int    // multisplit: bytes of pattern before the first part
 	Pattern string // seqovl pattern: a key of fakeBlobs (not zero)
-	Host    string // hostfakesplit: a white-listed name
+	Host    string // hostfakesplit: a name of splitHosts
+	Lead    bool   // four zero bytes go as a fake before the fake
+	Clone   string // the fake is the real ClientHello under this name (of splitHosts); Fake when it cannot be made
+	IPID    bool   // every packet of the method with IP ID 0
 }
 
 // GenPrefix starts the ID of a generated strategy (library methods have
@@ -43,11 +46,23 @@ var fakeBlobs = map[string]string{
 
 // foolings: how a fake dies before reaching the server while DPI takes it.
 var foolings = map[string]string{
-	"ts":      "tcp_ts=-1000",
-	"md5":     "tcp_ts=-1000:tcp_md5",
-	"badsum":  "badsum",
-	"seq":     "tcp_seq=-3000",
-	"ack":     "tcp_ack=-66000:tcp_ts_up",
+	"ts":     "tcp_ts=-1000",
+	"md5":    "tcp_ts=-1000:tcp_md5",
+	"badsum": "badsum",
+	"seq":    "tcp_seq=-3000",
+	"ack":    "tcp_ack=-66000:tcp_ts_up",
+	// winws's badseq as Flowseal's presets set it: SEQ moved by its
+	// --dpi-desync-badseq-increment (-10000 when not given, 2, 1000,
+	// 10000000) and ACK by -66000, which makes the server drop the fake.
+	"badseq":    "tcp_seq=-10000:tcp_ack=-66000",
+	"badseq2":   "tcp_seq=2:tcp_ack=-66000",
+	"badseq1k":  "tcp_seq=1000:tcp_ack=-66000",
+	"badseqfar": "tcp_seq=10000000:tcp_ack=-66000",
+	// winws's ts (by its default -600000) where it works: an old timestamp
+	// when the connection has TCP timestamps (Windows sends them only once
+	// the user turned them on, as Flowseal's service.bat does), else a TCP
+	// MD5 option (hyroute_ts of LuaFile).
+	"tsauto":  "fool=hyroute_ts",
 	"ttl":     "ip_ttl=%d:ip6_ttl=%d",
 	"autottl": "ip_autottl=-%d,3-20:ip6_autottl=-%d,3-20",
 }
@@ -56,11 +71,13 @@ var foolings = map[string]string{
 // spoils nothing (no TCP timestamps) and a badsum packet does not leave
 // the machine (Windows CI: the fakes reached example.com and broke the
 // handshake); stored strategies with them still parse.
-var activeFoolings = []string{"md5", "seq", "ack", "ttl", "autottl"}
+var activeFoolings = []string{"md5", "tsauto", "seq", "ack", "badseq", "badseq2", "badseq1k", "badseqfar", "ttl", "autottl"}
 
 var foolingNames = map[string]string{
 	"ts": "старая метка времени", "md5": "TCP MD5", "badsum": "битая сумма", "seq": "сдвиг SEQ",
 	"ack": "сдвиг ACK", "ttl": "малый TTL", "autottl": "TTL по расстоянию",
+	"badseq": "сдвиг SEQ и ACK", "badseq2": "сдвиг SEQ на 2 и ACK", "badseq1k": "сдвиг SEQ на 1000 и ACK",
+	"badseqfar": "сдвиг SEQ на 10 млн и ACK", "tsauto": "старая метка времени или TCP MD5",
 }
 
 // splits of the real ClientHello. faked* and hostfakesplit send fakes of
@@ -74,14 +91,26 @@ var splitNames = map[string]string{
 
 // positions: zapret2 position markers. Lists are for multisplit and
 // multidisorder only.
-var positions = []string{"1", "2", "midsld", "sniext+1", "host+1", "1,midsld", "2,midsld", "1,sniext+1"}
+var positions = []string{"1", "2", "midsld", "sniext+1", "host+1", "1,midsld", "2,midsld", "1,sniext+1", "2,sniext+1",
+	"3,sniext+1", "sniext+1,midsld", posSeven}
+
+// posSeven: the name cut in seven places (kinlay0's presets for zapret2).
+const posSeven = "1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1"
 
 var positionNames = map[string]string{
 	"1": "после 1-го байта", "2": "после 2-го байта", "midsld": "на середине домена", "sniext+1": "в начале SNI",
 	"host+1": "в начале имени", "1,midsld": "в двух местах", "2,midsld": "в двух местах", "1,sniext+1": "в двух местах",
+	"2,sniext+1": "в двух местах", "3,sniext+1": "в двух местах", "sniext+1,midsld": "в двух местах",
+	posSeven: "в семи местах",
 }
 
-var seqovls = []int{336, 568, 681}
+// seqovls: 1 is an overlap of one zero byte (no pattern), the others of a
+// ClientHello (a pattern): Flowseal's are the lengths of its fakes.
+var seqovls = []int{1, 336, 568, 652, 664, 679, 681}
+
+// splitHosts: the names a hostfakesplit may put in place of the site's:
+// the white-listed ones and Flowseal's for Google's names.
+var splitHosts = append([]string{"www.google.com"}, WhiteNames...)
 
 // fakeName is a fake for the UI.
 func fakeName(k string) string {
@@ -126,14 +155,17 @@ func (s Strategy) valid() bool {
 	if needFool != (s.Fool != "") || needFool != (s.Repeats > 0) || s.Repeats > 12 {
 		return false
 	}
-	if s.Mod && (s.Fake == "" || s.Fake == "zero") {
+	if (s.Mod || s.Lead || s.Clone != "") && (s.Fake == "" || s.Fake == "zero") {
+		return false
+	}
+	if s.Clone != "" && !slices.Contains(splitHosts, s.Clone) {
 		return false
 	}
 	switch s.Split {
 	case "":
 		return s.Fake != "" && s.Pos == "" && s.Seqovl == 0 && s.Pattern == "" && s.Host == ""
 	case "multisplit":
-		if s.Seqovl != 0 && (!slices.Contains(seqovls, s.Seqovl) || s.Pattern == "") || s.Seqovl == 0 && s.Pattern != "" {
+		if s.Seqovl != 0 && !slices.Contains(seqovls, s.Seqovl) || (s.Seqovl > 1) != (s.Pattern != "") {
 			return false
 		}
 		return slices.Contains(positions, s.Pos) && s.Host == ""
@@ -142,7 +174,7 @@ func (s Strategy) valid() bool {
 	case "fakedsplit", "fakeddisorder":
 		return slices.Contains(positions, s.Pos) && !strings.Contains(s.Pos, ",") && s.Seqovl == 0 && s.Host == ""
 	case "hostfakesplit":
-		return s.Pos == "" && s.Seqovl == 0 && s.Pattern == "" && slices.Contains(WhiteNames, s.Host)
+		return s.Pos == "" && s.Seqovl == 0 && s.Pattern == "" && slices.Contains(splitHosts, s.Host)
 	}
 	return false
 }
@@ -165,6 +197,9 @@ func (s Strategy) ID() string {
 	add("q", strconv.Itoa(s.Seqovl))
 	add("n", s.Pattern)
 	add("h", s.Host)
+	add("l", strconv.FormatBool(s.Lead))
+	add("c", s.Clone)
+	add("i", strconv.FormatBool(s.IPID))
 	return GenPrefix + strings.Join(p, ";")
 }
 
@@ -208,6 +243,12 @@ func ParseStrategy(id string) (s Strategy, ok bool) {
 			s.Pattern, nok = v, true
 		case "h":
 			s.Host, nok = v, true
+		case "l":
+			s.Lead, nok = true, v == "true"
+		case "c":
+			s.Clone, nok = v, true
+		case "i":
+			s.IPID, nok = true, v == "true"
 		}
 		if !nok {
 			return Strategy{}, false
@@ -234,11 +275,25 @@ func blobOf(k string) string {
 	return whiteBlob(k)
 }
 
+// cloneBlob is the blob a strategy's copy of the real ClientHello is kept as.
+const cloneBlob = "ch_clone"
+
 // instances are the --lua-desync values of s.
 func (s Strategy) instances() []string {
 	var out []string
+	if s.Lead {
+		out = append(out, fmt.Sprintf("fake:blob=0x00000000:%s:repeats=%d", s.fooling(), s.Repeats))
+	}
 	if s.Fake != "" {
-		f := fmt.Sprintf("fake:blob=%s:%s:repeats=%d", blobOf(s.Fake), s.fooling(), s.Repeats)
+		blob := blobOf(s.Fake)
+		if s.Clone != "" {
+			// zapret2 puts the name into a copy of the ClientHello it is
+			// about to send (the browser's own fingerprint) and keeps it as
+			// a blob of this connection.
+			out = append(out, fmt.Sprintf("tls_client_hello_clone:blob=%s:fallback=%s:sni_del:sni_first=%s:sni_snt_new=0", cloneBlob, blob, s.Clone))
+			blob = cloneBlob
+		}
+		f := fmt.Sprintf("fake:blob=%s:%s:repeats=%d", blob, s.fooling(), s.Repeats)
 		if s.Mod {
 			f += ":tls_mod=rnd,dupsid"
 		}
@@ -248,7 +303,10 @@ func (s Strategy) instances() []string {
 	case "multisplit":
 		f := "multisplit:pos=" + s.Pos
 		if s.Seqovl > 0 {
-			f += fmt.Sprintf(":seqovl=%d:seqovl_pattern=%s", s.Seqovl, blobOf(s.Pattern))
+			f += fmt.Sprintf(":seqovl=%d", s.Seqovl)
+			if s.Pattern != "" {
+				f += ":seqovl_pattern=" + blobOf(s.Pattern)
+			}
 		}
 		out = append(out, f)
 	case "multidisorder":
@@ -261,6 +319,13 @@ func (s Strategy) instances() []string {
 		out = append(out, f)
 	case "hostfakesplit":
 		out = append(out, fmt.Sprintf("hostfakesplit:host=%s:%s:repeats=%d", s.Host, s.fooling(), s.Repeats))
+	}
+	if s.IPID {
+		for i := range out {
+			if !strings.HasPrefix(out[i], "tls_client_hello_clone:") { // it sends nothing
+				out[i] += ":ip_id=zero"
+			}
+		}
 	}
 	return out
 }
@@ -281,8 +346,14 @@ func (s Strategy) Name() string {
 	var p []string
 	if s.Fake != "" {
 		f := "фейк " + fakeName(s.Fake)
+		if s.Clone != "" {
+			f = "фейк-копия настоящего начала под именем " + s.Clone
+		}
 		if s.Mod {
 			f += " со случайными полями"
+		}
+		if s.Lead {
+			f = "нули и " + f
 		}
 		p = append(p, fmt.Sprintf("%s (%s, ×%d)", f, foolName(s), s.Repeats))
 	}
@@ -290,7 +361,9 @@ func (s Strategy) Name() string {
 	case "":
 	case "multisplit":
 		f := splitNames[s.Split] + " " + positionNames[s.Pos]
-		if s.Seqovl > 0 {
+		if s.Seqovl == 1 {
+			f += " с перекрытием в 1 байт"
+		} else if s.Seqovl > 0 {
 			f += " с перекрытием " + fakeName(s.Pattern)
 		}
 		p = append(p, f)
@@ -308,6 +381,9 @@ func (s Strategy) Name() string {
 		p = append(p, f)
 	}
 	n := strings.Join(p, " + ")
+	if s.IPID {
+		n += ", IP ID 0"
+	}
 	return strings.ToUpper(n[:2]) + n[2:]
 }
 
@@ -329,6 +405,9 @@ func Neighbors(s Strategy) []Strategy {
 			out = append(out, n)
 		}
 	}
+	ipid := s
+	ipid.IPID = !ipid.IPID
+	try(ipid)
 	if s.Fool != "" {
 		for _, f := range activeFoolings {
 			n := s
@@ -375,14 +454,16 @@ func Neighbors(s Strategy) []Strategy {
 		for _, q := range seqovls {
 			n := s
 			n.Seqovl = q
-			if n.Pattern == "" {
+			if q == 1 {
+				n.Pattern = ""
+			} else if n.Pattern == "" {
 				n.Pattern = "vk"
 			}
 			try(n)
 		}
 	}
 	if s.Split == "hostfakesplit" {
-		for _, h := range WhiteNames {
+		for _, h := range splitHosts {
 			n := s
 			n.Host = h
 			try(n)
@@ -392,6 +473,14 @@ func Neighbors(s Strategy) []Strategy {
 		n := s
 		n.Mod = !n.Mod
 		try(n)
+		n = s
+		n.Lead = !n.Lead
+		try(n)
+		for _, c := range append([]string{""}, splitHosts...) {
+			n = s
+			n.Clone = c
+			try(n)
+		}
 	}
 	return out
 }
@@ -421,12 +510,19 @@ func Broad(n int, seed uint64) []Strategy {
 		if withFake {
 			s.Fake = pick(fakes)
 			s.Mod = s.Fake != "zero" && rnd.IntN(4) == 0
+			s.Lead = s.Fake != "zero" && rnd.IntN(8) == 0
+			if s.Fake != "zero" && rnd.IntN(5) == 0 {
+				s.Clone = pick(splitHosts)
+			}
 		}
+		s.IPID = rnd.IntN(3) == 0
 		switch family {
 		case 0, 1:
 			s.Split, s.Pos = "multisplit", pick(positions)
 			if family == 0 || rnd.IntN(2) == 0 {
-				s.Seqovl, s.Pattern = seqovls[rnd.IntN(len(seqovls))], pick(patterns)
+				if s.Seqovl = seqovls[rnd.IntN(len(seqovls))]; s.Seqovl > 1 {
+					s.Pattern = pick(patterns)
+				}
 			}
 		case 2:
 			s.Split, s.Pos = "multidisorder", pick(positions)
@@ -434,9 +530,8 @@ func Broad(n int, seed uint64) []Strategy {
 			s.Split = pick([]string{"fakedsplit", "fakeddisorder"})
 			s.Pos = pick([]string{"1", "2", "midsld", "sniext+1", "host+1"})
 		case 4:
-			s.Split, s.Host = "hostfakesplit", pick(WhiteNames)
+			s.Split, s.Host = "hostfakesplit", pick(splitHosts)
 		case 5: // a fake alone
-			s.Fake = pick(fakes)
 		}
 		if s.Fake != "" || s.Split == "fakedsplit" || s.Split == "fakeddisorder" || s.Split == "hostfakesplit" {
 			s.Fool = pick(fools)
@@ -453,6 +548,47 @@ func Broad(n int, seed uint64) []Strategy {
 		}
 	}
 	return out
+}
+
+// Known are the recipes for Google's names (list-google in general*.bat)
+// of Flowseal's zapret-discord-youtube 1.10.4 and of kinlay0's
+// zapret2-discord-youtube-strats that the library does not hold, in the
+// generator's terms: their ts fooling is tsauto, badseq with an increment
+// the badseq foolings, --ip-id=zero IPID. Some name max.ru or
+// www.sferum.ru where the others name google.com (for a TSPU that knows the
+// google.com fake). A pick tries them all when nothing opened a service,
+// before the spread.
+func Known() []Strategy {
+	const g, max = "google", "w_max_ru"
+	return []Strategy{
+		{Split: "multisplit", Pos: "2", Seqovl: 652, Pattern: g, IPID: true},                                                    // ALT2
+		{Split: "multisplit", Pos: "2,sniext+1", Seqovl: 679, Pattern: g, IPID: true},                                           // ALT7
+		{Fake: g, Fool: "tsauto", Repeats: 6, IPID: true},                                                                       // ALT10
+		{Fake: g, Fool: "tsauto", Repeats: 8, Split: "multisplit", Pos: "1", Seqovl: 681, Pattern: g, IPID: true},               // ALT11
+		{Fake: g, Fool: "tsauto", Repeats: 6, Split: "fakedsplit", Pos: "2", IPID: true},                                        // ALT
+		{Fool: "tsauto", Repeats: 1, Split: "hostfakesplit", Host: "www.google.com", IPID: true},                                // ALT12
+		{Fool: "tsauto", Repeats: 4, Split: "hostfakesplit", Host: "www.google.com", IPID: true},                                // ALT9
+		{Fake: g, Mod: true, Fool: "tsauto", Repeats: 1, Split: "hostfakesplit", Host: "www.google.com", IPID: true},            // ALT3
+		{Fake: g, Fool: "badseq1k", Repeats: 6, Split: "multisplit", Pos: "2", IPID: true},                                      // ALT4
+		{Fake: g, Fool: "badseq2", Repeats: 6, IPID: true},                                                                      // SIMPLE FAKE ALT
+		{Fake: g, Mod: true, Fool: "badseq2", Repeats: 8, Split: "fakedsplit", Pos: "1", IPID: true},                            // FAKE TLS AUTO ALT
+		{Fake: g, Mod: true, Fool: "badseqfar", Repeats: 8, Split: "multisplit", Pos: "1", Seqovl: 681, Pattern: g, IPID: true}, // FAKE TLS AUTO ALT2
+		{Fake: g, Mod: true, Fool: "tsauto", Repeats: 8, Split: "multisplit", Pos: "1", Seqovl: 681, Pattern: g, IPID: true},    // FAKE TLS AUTO ALT3
+		{Fake: g, Mod: true, Lead: true, Fool: "badseq", Repeats: 11, Split: "multidisorder", Pos: "1,midsld", IPID: true},      // FAKE TLS AUTO
+		{Split: "multisplit", Pos: "1", Seqovl: 681, Pattern: max, IPID: true},
+		{Fake: max, Fool: "tsauto", Repeats: 8, Split: "multisplit", Pos: "1", Seqovl: 681, Pattern: max, IPID: true},
+		// kinlay0's.
+		{Fake: g, Fool: "tsauto", Repeats: 6, Split: "multidisorder", Pos: "2,midsld", IPID: true},                                         // SIMPLE FAKE, DOUBLE FAKE
+		{Split: "multidisorder", Pos: "2,midsld", IPID: true},                                                                              // EXPERIMENTAL TS
+		{Fake: g, Fool: "tsauto", Repeats: 8, Split: "multisplit", Pos: "2", Seqovl: 681, Pattern: g, IPID: true},                          // ALT14
+		{Split: "multidisorder", Pos: posSeven},                                                                                            // EXP1
+		{Fake: g, Mod: true, Fool: "tsauto", Repeats: 6, Split: "multidisorder", Pos: posSeven},                                            // EXP2
+		{Split: "multisplit", Pos: "3,sniext+1", Seqovl: 681, Pattern: g, IPID: true},                                                      // FAKE TLS AUTO ALT4
+		{Fool: "tsauto", Repeats: 8, Split: "fakedsplit", Pos: "2", IPID: true},                                                            // FAKE TLS AUTO ALT6
+		{Fake: g, Clone: "www.google.com", Fool: "tsauto", Repeats: 6, Split: "multisplit", Pos: "sniext+1,midsld", Seqovl: 1, IPID: true}, // EXP5
+		{Fake: max, Clone: "max.ru", Fool: "tsauto", Repeats: 6, Split: "multisplit", Pos: "sniext+1,midsld", Seqovl: 1},                   // CIRCULAR, strategy 1
+		{Fake: "w_www_sferum_ru", Fool: "tsauto", Repeats: 6, Split: "multisplit", Pos: "2", IPID: true},                                   // CIRCULAR, strategy 2
+	}
 }
 
 // AsStrategy is a library method in the generator's terms (to vary it),

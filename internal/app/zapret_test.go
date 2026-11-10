@@ -435,6 +435,38 @@ func TestZapretGeneratorBroad(t *testing.T) {
 	}
 }
 
+// Nothing of the library opens the service: the pick tries Flowseal's
+// recipes (zapret.Known) and runs the one that worked, with HyRoute's Lua
+// for its fooling.
+func TestZapretKnownTried(t *testing.T) {
+	c, argsFor := zapFixture(t)
+	// hostfakesplit with one repeat, alone and after a fake: the spread makes none.
+	known := zapret.Known()
+	want := []string{known[5].ID(), known[7].ID()}
+	zapretCheckFunc = func(ctx context.Context, slot int, urls []string) zapret.Result {
+		if strings.Contains(argsFor(slot), "hostfakesplit:host=www.google.com:fool=hyroute_ts:repeats=1:ip_id=zero") {
+			return zapret.Result{OK: true, Elapsed: time.Second}
+		}
+		return failed(zapret.KindTLS)
+	}
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := c.ZapretPick()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := slices.Clone(v.Pick.Working[zapret.YouTube])
+	slices.Sort(ws)
+	slices.Sort(want)
+	if got := v.Pick.Results[zapret.YouTube]; !slices.Contains(want, got) || !slices.Equal(ws, want) {
+		t.Fatalf("%q %q, want %q: %+v", got, ws, want, v.Pick)
+	}
+	if !strings.Contains(v.CommandLine, "--lua-init=@"+zapret.LuaFile) || !strings.Contains(v.CommandLine, "fool=hyroute_ts") {
+		t.Fatalf("%s", v.CommandLine)
+	}
+}
+
 // Own sites by address: they get the rule, and an address that is local or
 // too wide is refused with its name, not dropped.
 func TestZapretSiteAddresses(t *testing.T) {
