@@ -188,7 +188,9 @@ func tlsProfile(comment string, t Target, ports, l7, hostlist, exclude string, p
 		// methods only the ClientHello. nld=2: one count per domain
 		// (googlevideo.com), not per one of its hundreds of servers; own
 		// sites keep one per host (nld=2 of example.co.uk is co.uk).
-		circular := "--lua-desync=circular:fails=3:retrans=2"
+		// hyroute_circular (LuaFile): circular, noting each method it
+		// takes for a host in StateFile, which the page shows.
+		circular := "--lua-desync=hyroute_circular:target=" + string(t) + ":fails=3:retrans=2"
 		if t != Sites {
 			circular += ":nld=2"
 		}
@@ -302,6 +304,25 @@ function hyroute_hostkey(desync)
 		end
 	end
 	return standard_hostkey(desync)
+end
+
+-- HyRoute: circular, each strategy it takes for a host key noted in
+-- HYROUTE_STATE (the lists folder's circular.log, set below by WriteLists):
+-- "unix time, target, key, strategy, strategy before (0: first)".
+function hyroute_circular(ctx, desync)
+	local hrec = automate_host_record(desync)
+	local before = hrec and hrec.nstrategy
+	local verdict = circular(ctx, desync)
+	if hrec and hrec.nstrategy and hrec.nstrategy ~= before and HYROUTE_STATE then
+		local hkf = desync.arg.hostkey and _G[desync.arg.hostkey] or standard_hostkey
+		local key = hkf(desync) or ""
+		local f = io.open(HYROUTE_STATE, "a")
+		if f then
+			f:write(os.time(), "\t", desync.arg.target or "", "\t", key, "\t", hrec.nstrategy, "\t", before or 0, "\n")
+			f:close()
+		end
+	end
+	return verdict
 end
 
 -- HyRoute: the tsauto fooling (zapret/strategy.go), as apply_fooling's tcp_ts and tcp_md5.

@@ -88,7 +88,7 @@ func TestBuild(t *testing.T) {
 		"zapret-auto.lua", "--blob=google_tls:@", "--blob=vk_tls:@", "--filter-l7=discord,stun",
 		// circular before the payload filter, seeing every packet; the
 		// methods only the ClientHello.
-		"--in-range=-s5556 --lua-desync=circular:fails=3:retrans=2:nld=2 --in-range=x --payload=tls_client_hello --lua-desync=",
+		"--in-range=-s5556 --lua-desync=hyroute_circular:target=discord:fails=3:retrans=2:nld=2 --in-range=x --payload=tls_client_hello --lua-desync=",
 		// QUIC's acknowledgements stay out of winws2; inbound TCP is not
 		// narrowed (a filter on bytes reorders a stream).
 		"--wf-raw-filter=" + quicLean + " ",
@@ -113,7 +113,7 @@ func TestBuild(t *testing.T) {
 	// Own sites count failures per host: nld=2 of example.co.uk is co.uk.
 	sp, _ := Settings{Enabled: true, Targets: []Target{Sites}}.PlanFor(Sites, "")
 	sargs, err := Build(BuildConfig{Dir: dir, Lists: lists, Plans: map[Target]Plan{Sites: sp}})
-	if sl := strings.Join(sargs, " "); err != nil || strings.Contains(sl, "nld") || !strings.Contains(sl, "circular:fails=3:retrans=2 --in-range=x") {
+	if sl := strings.Join(sargs, " "); err != nil || strings.Contains(sl, "nld") || !strings.Contains(sl, "hyroute_circular:target=sites:fails=3:retrans=2 --in-range=x") {
 		t.Fatalf("%v %s", err, sl)
 	}
 	if strings.Contains(line, "Payload[0] == 0x16") || strings.Contains(line, "success_detector") {
@@ -126,7 +126,7 @@ func TestBuild(t *testing.T) {
 	}
 	yp, _ := Settings{Enabled: true, Targets: []Target{YouTube}}.PlanFor(YouTube, "")
 	yargs, _ := Build(BuildConfig{Dir: dir, Lists: lists, Plans: map[Target]Plan{YouTube: yp, Discord: yp}})
-	if yl := strings.Join(yargs, " "); !strings.Contains(yl, "circular:fails=3:retrans=2:nld=2:hostkey=hyroute_hostkey ") || strings.Count(yl, "hostkey=") != 1 {
+	if yl := strings.Join(yargs, " "); !strings.Contains(yl, "hyroute_circular:target=youtube:fails=3:retrans=2:nld=2:hostkey=hyroute_hostkey ") || strings.Count(yl, "hostkey=") != 1 {
 		t.Fatalf("%s", CommandLine(yargs))
 	}
 	// A single method: no orchestrator; the slots' filter goes with QUIC's.
@@ -145,7 +145,8 @@ func TestWriteLists(t *testing.T) {
 	if err := WriteLists(dir, nil, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if l, err := os.ReadFile(filepath.Join(dir, LuaFile)); err != nil || !strings.Contains(string(l), "function hyroute_hostkey(desync)") {
+	if l, err := os.ReadFile(filepath.Join(dir, LuaFile)); err != nil || !strings.Contains(string(l), "function hyroute_hostkey(desync)") ||
+		!strings.Contains(string(l), "function hyroute_circular(ctx, desync)") || !strings.Contains(string(l), "HYROUTE_STATE = [==["+filepath.Join(dir, StateFile)+"]==]") {
 		t.Fatalf("%v", err)
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, ListSites))
@@ -422,5 +423,34 @@ func TestVideoServer(t *testing.T) {
 	}
 	if VideoChecks(nil) != nil {
 		t.Fatal("none seen: none")
+	}
+}
+
+func TestReadSwitches(t *testing.T) {
+	dir := t.TempDir()
+	if ReadSwitches(dir) != nil || ResetSwitches(dir) != nil {
+		t.Fatal("no file: nothing, no error")
+	}
+	body := "1794300000\tyoutube\tyoutube.com\t1\t0\n" +
+		"garbage\n" +
+		"1794300060\tyoutube\tvideo:aj5go5\t3\t2\n" +
+		"1794300061\tdiscord\t\t1\t0\n" + // no key
+		"1794300062\tsites\texample.org\t0\t1\n" // no strategy 0
+	os.WriteFile(filepath.Join(dir, StateFile), []byte(body), 0o644)
+	got := ReadSwitches(dir)
+	want := []Switch{{At: time.Unix(1794300000, 0), Target: YouTube, Key: "youtube.com", Strategy: 1},
+		{At: time.Unix(1794300060, 0), Target: YouTube, Key: "video:aj5go5", Strategy: 3, From: 2}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("%+v", got)
+	}
+	// Only the end of a long file; its cut first line skipped.
+	long := strings.Repeat("1794300000\tyoutube\tyoutube.com\t1\t0\n", maxState/30) + "1794309999\tyoutube\tyoutube.com\t2\t1\n"
+	os.WriteFile(filepath.Join(dir, StateFile), []byte(long), 0o644)
+	got = ReadSwitches(dir)
+	if len(got) == 0 || got[len(got)-1].Strategy != 2 || len(got) > maxState/30 {
+		t.Fatalf("%d", len(got))
+	}
+	if err := ResetSwitches(dir); err != nil || ReadSwitches(dir) != nil {
+		t.Fatal(err)
 	}
 }

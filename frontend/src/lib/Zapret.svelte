@@ -52,6 +52,10 @@
 
   onMount(() => {
     refresh();
+    // zapret switches methods on its own, with no event: look again now and then.
+    const tick = setInterval(() => {
+      if (view?.settings.enabled && !document.hidden) refresh();
+    }, 5000);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const off = onEvent('status', () => {
       if (timer) return;
@@ -62,6 +66,7 @@
     });
     return () => {
       off();
+      clearInterval(tick);
       if (timer) clearTimeout(timer);
     };
   });
@@ -214,6 +219,8 @@
     const name = view?.methods.find((x) => x.id === m)?.name ?? m;
     return `быстрее всех открывает «${name}»` + (spare > 0 ? `; если перестанет, есть ещё ${spare} ${spare === 1 ? 'рабочий метод' : spare < 5 ? 'рабочих метода' : 'рабочих методов'}` : '');
   }
+  // «раз» / «раза» after a number.
+  const times = (n: number) => (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'раза' : 'раз');
   const viaVPNNow = (t: ZapretTarget) => view?.settings.methods?.[t] === 'vpn';
   // How many of the working strategies the generator made (not the library).
   const genFound = $derived(
@@ -358,6 +365,17 @@
               <b>{t.name}</b>
               <span class="muted small">{hints[t.target]}</span>
               {#if t.on && enabled}<span class="small using">Сейчас: {t.using}</span>{/if}
+              {#if t.on && enabled && t.live?.length}
+                <span class="small live">
+                  {#each t.live as l (l.what)}
+                    <span
+                      >{l.what}: «{l.method}»{l.place > 1 ? ` — ${l.place}-й из ${l.of}` : ''}{l.switches
+                        ? `, переключался ${l.switches} ${times(l.switches)}, последний в ${clock(l.at)}`
+                        : ''}</span
+                    >
+                  {/each}
+                </span>
+              {/if}
               {#if t.on && enabled && viaVPNNow(t.target) && !dirty}
                 <button class="link small" onclick={(e) => { e.preventDefault(); viaVPN(t.target, false); }}>Вернуть обход</button>
                 <button class="link small" onclick={(e) => { e.preventDefault(); vpnFor = t.target; }}>Сервер…</button>
@@ -537,6 +555,7 @@
   .tile.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); }
   .tile .grow { display: grid; gap: 2px; min-width: 0; }
   .using { color: var(--accent); }
+  .live { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; color: var(--muted); }
   .lbl { display: block; color: var(--muted); font-weight: 500; margin-top: 12px; }
   textarea { width: 100%; box-sizing: border-box; margin-top: 4px; }
   .methods { display: grid; gap: 6px; margin-top: 4px; }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/netip"
 	"os"
@@ -863,5 +864,43 @@ func TestZapretVideoChecks(t *testing.T) {
 	}
 	if got := c.zapretChecks(zapret.Discord, nil, nil); !slices.Equal(got, zapret.Checks(zapret.Discord, nil)) {
 		t.Fatalf("%q", got)
+	}
+}
+
+// The page shows what the orchestrator uses now: per host key, the method
+// at its place in the plan, the latest switch first; emptied when winws2
+// starts again.
+func TestZapretLive(t *testing.T) {
+	c, _ := zapFixture(t)
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
+		t.Fatal(err)
+	}
+	waitZapret(t, c, zapret.Running)
+	if v := c.ZapretInfo(); len(v.Targets[0].Live) != 0 {
+		t.Fatalf("%+v", v.Targets[0].Live)
+	}
+	c.zapretMu.Lock()
+	plan := c.zapretPlans[zapret.YouTube]
+	c.zapretMu.Unlock()
+	if len(plan.Methods) < 3 {
+		t.Fatalf("%+v", plan)
+	}
+	now := time.Now().Unix()
+	body := fmt.Sprintf("%d\tyoutube\tyoutube.com\t1\t0\n%d\tyoutube\tvideo:aj5goc\t1\t0\n%d\tyoutube\tvideo:aj5goc\t2\t1\n%d\tyoutube\tvideo:aj5goc\t3\t2\n%d\tdiscord\tdiscord.com\t1\t0\n",
+		now-60, now-50, now-40, now-30, now-20)
+	os.WriteFile(filepath.Join(c.ZapretLists, zapret.StateFile), []byte(body), 0o644)
+	live := c.ZapretInfo().Targets[0].Live
+	if len(live) != 2 || live[0].What != "серверы видео aj5goc" || live[0].Place != 3 || live[0].Switches != 2 ||
+		live[0].Method != zapret.MethodName(plan.Methods[2]) || live[0].Of != len(plan.Methods) ||
+		live[1].What != "сайт youtube.com" || live[1].Place != 1 || live[1].Switches != 0 {
+		t.Fatalf("%+v", live)
+	}
+	// A new start of winws2 (another plan): the notes go.
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube, zapret.Discord}}); err != nil {
+		t.Fatal(err)
+	}
+	waitZapret(t, c, zapret.Running)
+	if _, err := os.Stat(filepath.Join(c.ZapretLists, zapret.StateFile)); !os.IsNotExist(err) {
+		t.Fatalf("notes kept: %v", err)
 	}
 }

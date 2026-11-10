@@ -117,6 +117,15 @@ func TestWinws2Runs(t *testing.T) {
 			if name == "youtube video" && !strings.Contains(out.String(), ".video:aj5go5'") {
 				t.Errorf("the video server was not keyed by its cluster")
 			}
+			if name == "youtube video" {
+				// hyroute_circular noted the method it took for the cluster.
+				sw := zapret.ReadSwitches(lists)
+				if !slices.ContainsFunc(sw, func(s zapret.Switch) bool {
+					return s.Target == zapret.YouTube && s.Key == "video:aj5go5" && s.Strategy == 1 && s.From == 0
+				}) {
+					t.Errorf("no note of the orchestrator: %+v", sw)
+				}
+			}
 			t.Logf("%s", out.String())
 		})
 	}

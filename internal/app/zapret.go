@@ -42,6 +42,9 @@ type zapretState struct {
 	// zapretExtra: HyRoute's own hosts in the running bypass's lists (the
 	// Cloudflare domains of «Telegram без VPN»; nil: none).
 	zapretExtra map[zapret.Target][]string
+	// zapretPlans: the plans winws2 was started with (a strategy number of
+	// zapret.StateFile is a place in them).
+	zapretPlans map[zapret.Target]zapret.Plan
 	zapretKey   string             // the network zapretArgs were built for
 	zapretNet   string             // its name, for the page
 	zapretStop  context.CancelFunc // ends zapretWatch
@@ -155,6 +158,23 @@ type ZapretTargetView struct {
 	PickedAt int64  `json:"pickedAt,omitempty"` // Unix ms
 	// Using: what runs now, in words.
 	Using string `json:"using"`
+	// Live: what the automatic bypass uses now per host key, the latest
+	// switch first (zapret.StateFile; empty: no connection seen yet).
+	Live []ZapretLive `json:"live,omitempty"`
+}
+
+// ZapretLive is the method the circular orchestrator uses for one host
+// key now.
+type ZapretLive struct {
+	// What: «сайт youtube.com», «серверы видео aj5go5».
+	What   string `json:"what"`
+	Method string `json:"method"` // its name
+	// Place: the method's place in the round (1: the first, as picked);
+	// Switches: how often this key moved on since winws2 started.
+	Place    int   `json:"place"`
+	Of       int   `json:"of"`
+	Switches int   `json:"switches"`
+	At       int64 `json:"at"` // Unix ms of the latest switch (or the first use)
 }
 
 type ZapretMethodView struct {
@@ -368,7 +388,10 @@ func (c *Controller) zapretApplyLocked() {
 		c.zapretExtra = extra
 		return
 	}
-	c.zapretArgs, c.zapretExtra = args, extra
+	c.zapretArgs, c.zapretExtra, c.zapretPlans = args, extra, plans
+	if err := zapret.ResetSwitches(c.ZapretLists); err != nil {
+		c.Log.Warn("zapret: the orchestrator's notes not emptied", "err", err)
+	}
 	run.Exe = filepath.Join(dir, "winws2.exe")
 	c.Log.Info("zapret: winws2 starting", "targets", len(plans))
 	run.Start(args)
@@ -662,6 +685,10 @@ func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretV
 		v.CommandLine = zapret.CommandLine(c.zapretArgs)
 	}
 	pk := cfg.Picked[key]
+	var switches []zapret.Switch
+	if c.zapretArgs != nil && c.ZapretLists != "" {
+		switches = zapret.ReadSwitches(c.ZapretLists)
+	}
 	for _, t := range zapret.Targets {
 		tv := ZapretTargetView{Target: t, Name: zapret.TargetName(t), On: cfg.On(t), Fixed: cfg.Methods[t], Picked: pk.Methods[t]}
 		if !pk.At.IsZero() && tv.Picked != "" {
@@ -685,6 +712,9 @@ func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretV
 			tv.Using = "не нужен: здесь не блокируется"
 		case p.Circular:
 			tv.Using = "автоматически, начиная с «" + zapret.MethodName(p.Methods[0]) + "»"
+			if c.zapretArgs != nil {
+				tv.Live = zapretLive(t, c.zapretPlans[t], switches)
+			}
 		default:
 			tv.Using = zapret.MethodName(p.Methods[0])
 		}
@@ -1485,4 +1515,47 @@ func (c *Controller) videoServers() []string {
 		}
 	}
 	return out
+}
+
+// maxLive: host keys shown per service.
+const maxLive = 6
+
+// zapretLive is target t's part of the orchestrator's notes: per host key
+// the method it uses now, the latest switch first.
+func zapretLive(t zapret.Target, p zapret.Plan, sw []zapret.Switch) []ZapretLive {
+	type state struct {
+		last     zapret.Switch
+		switches int
+	}
+	keys := map[string]*state{}
+	for _, s := range sw {
+		if s.Target != t {
+			continue
+		}
+		st := keys[s.Key]
+		if st == nil {
+			st = &state{}
+			keys[s.Key] = st
+		}
+		st.last = s
+		if s.From > 0 {
+			st.switches++
+		}
+	}
+	out := make([]ZapretLive, 0, len(keys))
+	for k, st := range keys {
+		what := "сайт " + k
+		if cl, ok := strings.CutPrefix(k, "video:"); ok {
+			what = "серверы видео " + cl
+		}
+		m := fmt.Sprintf("метод №%d", st.last.Strategy)
+		if i := st.last.Strategy - 1; i < len(p.Methods) {
+			m = zapret.MethodName(p.Methods[i])
+		}
+		out = append(out, ZapretLive{What: what, Method: m, Place: st.last.Strategy, Of: len(p.Methods), Switches: st.switches, At: st.last.At.UnixMilli()})
+	}
+	slices.SortFunc(out, func(a, b ZapretLive) int {
+		return cmp.Or(cmp.Compare(b.At, a.At), strings.Compare(a.What, b.What))
+	})
+	return out[:min(len(out), maxLive)]
 }

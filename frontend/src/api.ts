@@ -1901,6 +1901,17 @@ export interface ZapretTargetView {
   picked?: string; // method found here, 'none' = not blocked
   pickedAt?: number;
   using: string;
+  live?: ZapretLive[]; // what the automatic bypass uses now, per site or video servers
+}
+
+// One host key of zapret's circular orchestrator (app/zapret.go).
+export interface ZapretLive {
+  what: string; // «сайт youtube.com», «серверы видео aj5go5»
+  method: string;
+  place: number; // its place in the round (1 = the picked one)
+  of: number;
+  switches: number; // switches since zapret started
+  at: number; // Unix ms of the latest switch (or the first use)
 }
 
 export interface ZapretPick {
