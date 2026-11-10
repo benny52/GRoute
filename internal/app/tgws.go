@@ -120,7 +120,7 @@ func (c *Controller) tgApplyLocked() {
 	c.tgStop = cancel
 	go c.tgChecks(ctx, c.tgBridge)
 	if !want.NoCloudflare {
-		go c.tgFetchCloudflare(ctx)
+		go c.tgFetchCloudflare(ctx, cfFetchPlan{tgCloudflareFetch, tgCloudflareFirst, tgCloudflareEvery, tgCloudflareRetry})
 	}
 	c.tgListenLocked(want)
 }
@@ -181,10 +181,16 @@ var (
 	tgCloudflareRetry = 10 * time.Minute
 )
 
+// cfFetchPlan: the hooks above as a fetch loop starts with them.
+type cfFetchPlan struct {
+	fetch               func(context.Context) ([]string, error)
+	first, every, retry time.Duration
+}
+
 // tgFetchCloudflare keeps the Cloudflare domains current while the bridge
 // runs: tg-ws-proxy's author replaces the domains that get blocked.
-func (c *Controller) tgFetchCloudflare(ctx context.Context) {
-	t := time.NewTimer(tgCloudflareFirst)
+func (c *Controller) tgFetchCloudflare(ctx context.Context, p cfFetchPlan) {
+	t := time.NewTimer(p.first)
 	defer t.Stop()
 	for {
 		select {
@@ -192,16 +198,16 @@ func (c *Controller) tgFetchCloudflare(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		list, err := tgCloudflareFetch(ctx)
+		list, err := p.fetch(ctx)
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
 			c.Log.Info("tgws: Cloudflare domains not fetched, the known ones stay", "err", err)
-			t.Reset(tgCloudflareRetry)
+			t.Reset(p.retry)
 			continue
 		}
-		t.Reset(tgCloudflareEvery)
+		t.Reset(p.every)
 		if cur := c.tgCF.Load(); cur != nil && slices.Equal(*cur, list) {
 			continue
 		}

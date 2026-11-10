@@ -211,14 +211,17 @@ func TestTelegramCloudflare(t *testing.T) {
 	def, fetch := tgCloudflareDefault, tgCloudflareFetch
 	t.Cleanup(func() { tgCloudflareDefault, tgCloudflareFetch = def, fetch })
 	tgCloudflareDefault = func() []string { return []string{"cf-a.test"} }
-	fetched := make(chan struct{}, 1)
-	tgCloudflareFetch = func(context.Context) ([]string, error) {
+	// The fetch answers once released: until then the built-in list.
+	release := make(chan struct{})
+	tgCloudflareFetch = func(ctx context.Context) ([]string, error) {
 		select {
-		case fetched <- struct{}{}:
-		default:
+		case <-release:
+			return []string{"cf-b.test", "cf-c.test", "cf-d.test"}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
-		return []string{"cf-b.test", "cf-c.test", "cf-d.test"}, nil
 	}
+	tgCloudflareFirst = time.Millisecond
 	if err := c.SaveTelegram(TelegramInput{Enabled: true, Port: freePort(t), Cloudflare: true, Workers: []string{"https://W.user.workers.dev/apiws", "w.user.workers.dev", " "}}); err != nil {
 		t.Fatal(err)
 	}
@@ -246,16 +249,7 @@ func TestTelegramCloudflare(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 	// tg-ws-proxy's list fetched: it replaces the built-in one, there too.
-	c.zapretMu.Lock()
-	c.tgStop()
-	ctx, cancel := context.WithCancel(context.Background())
-	c.tgStop = cancel
-	c.zapretMu.Unlock()
-	old := tgCloudflareFirst
-	tgCloudflareFirst = time.Millisecond
-	go c.tgFetchCloudflare(ctx)
-	<-fetched
-	tgCloudflareFirst = old
+	close(release)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		b, _ = os.ReadFile(filepath.Join(c.ZapretLists, zapret.ListDiscord))

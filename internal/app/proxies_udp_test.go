@@ -187,7 +187,7 @@ func TestProxyUDPEndToEnd(t *testing.T) {
 	// The proxy counts a reply once it has sent it on: the client may have
 	// it a moment before the figures do.
 	waitUntil(t, "the server's figures", func() bool { st := m.Statuses()[0]; return st.Sent == 4 && st.Recv == 9 })
-	waitUntil(t, "the proxy's figures", func() bool { v = c.Proxies()[0]; return v.Recv == 9 })
+	waitUntil(t, "the proxy's figures", func() bool { v = c.Proxies()[0]; return v.Sent == 4 && v.Recv == 9 })
 	if v.Active != 0 || v.UDPActive != 1 || v.Sent != 4 || v.Recv != 9 {
 		t.Fatalf("%+v", v)
 	}
