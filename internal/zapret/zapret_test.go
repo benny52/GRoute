@@ -146,7 +146,7 @@ func TestWriteLists(t *testing.T) {
 		t.Fatal(err)
 	}
 	if l, err := os.ReadFile(filepath.Join(dir, LuaFile)); err != nil || !strings.Contains(string(l), "function hyroute_hostkey(desync)") ||
-		!strings.Contains(string(l), "function hyroute_circular(ctx, desync)") || !strings.Contains(string(l), "HYROUTE_STATE = [==["+filepath.Join(dir, StateFile)+"]==]") {
+		!strings.Contains(string(l), "function hyroute_circular(ctx, desync)") || !strings.Contains(string(l), `io.stdout:write("HYROUTE\tswitch\t"`) {
 		t.Fatalf("%v", err)
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, ListSites))
@@ -426,31 +426,41 @@ func TestVideoServer(t *testing.T) {
 	}
 }
 
-func TestReadSwitches(t *testing.T) {
-	dir := t.TempDir()
-	if ReadSwitches(dir) != nil || ResetSwitches(dir) != nil {
-		t.Fatal("no file: nothing, no error")
+func TestParseSwitch(t *testing.T) {
+	sw, ok := ParseSwitch("HYROUTE\tswitch\t1794300060\tyoutube\tvideo:aj5go5\t3\t2")
+	if !ok || sw != (Switch{At: time.Unix(1794300060, 0), Target: YouTube, Key: "video:aj5go5", Strategy: 3, From: 2}) {
+		t.Fatalf("%+v %v", sw, ok)
 	}
-	body := "1794300000\tyoutube\tyoutube.com\t1\t0\n" +
-		"garbage\n" +
-		"1794300060\tyoutube\tvideo:aj5go5\t3\t2\n" +
-		"1794300061\tdiscord\t\t1\t0\n" + // no key
-		"1794300062\tsites\texample.org\t0\t1\n" // no strategy 0
-	os.WriteFile(filepath.Join(dir, StateFile), []byte(body), 0o644)
-	got := ReadSwitches(dir)
-	want := []Switch{{At: time.Unix(1794300000, 0), Target: YouTube, Key: "youtube.com", Strategy: 1},
-		{At: time.Unix(1794300060, 0), Target: YouTube, Key: "video:aj5go5", Strategy: 3, From: 2}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("%+v", got)
+	for _, l := range []string{"winws2 started", "HYROUTE\tswitch\tx\tyoutube\tk\t1\t0", "HYROUTE\tswitch\t1\tyoutube\t\t1\t0",
+		"HYROUTE\tswitch\t1\tyoutube\tk\t0\t1", "HYROUTE\tswitch\t1\tyoutube\tk\t1"} {
+		if _, ok := ParseSwitch(l); ok {
+			t.Fatalf("%q", l)
+		}
 	}
-	// Only the end of a long file; its cut first line skipped.
-	long := strings.Repeat("1794300000\tyoutube\tyoutube.com\t1\t0\n", maxState/30) + "1794309999\tyoutube\tyoutube.com\t2\t1\n"
-	os.WriteFile(filepath.Join(dir, StateFile), []byte(long), 0o644)
-	got = ReadSwitches(dir)
-	if len(got) == 0 || got[len(got)-1].Strategy != 2 || len(got) > maxState/30 {
-		t.Fatalf("%d", len(got))
+}
+
+// The Runner keeps the orchestrator's lines apart from winws2's own, and
+// forgets them when it starts winws2 again.
+func TestRunnerSwitches(t *testing.T) {
+	outs := make(chan io.Writer, 2)
+	r := &Runner{Exe: "winws2.exe", Spawn: func(_ string, _, _ []string, out io.Writer) (hysteria.Child, error) {
+		outs <- out
+		return &fakeChild{done: make(chan struct{})}, nil
+	}}
+	r.Start([]string{"a"})
+	out := <-outs
+	io.WriteString(out, "some line\nHYROUTE\tswitch\t1794300000\tyoutube\tyoutube.com\t1\t0\n")
+	deadline := time.Now().Add(5 * time.Second)
+	for len(r.Switches()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
-	if err := ResetSwitches(dir); err != nil || ReadSwitches(dir) != nil {
-		t.Fatal(err)
+	if sw := r.Switches(); len(sw) != 1 || sw[0].Key != "youtube.com" || slices.ContainsFunc(r.Status().Lines, func(l string) bool { return strings.HasPrefix(l, "HYROUTE") }) {
+		t.Fatalf("%+v %v", sw, r.Status().Lines)
 	}
+	r.Start([]string{"b"})
+	<-outs
+	if len(r.Switches()) != 0 {
+		t.Fatal("kept over a restart")
+	}
+	r.Stop()
 }

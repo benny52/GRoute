@@ -872,6 +872,18 @@ func TestZapretVideoChecks(t *testing.T) {
 // starts again.
 func TestZapretLive(t *testing.T) {
 	c, _ := zapFixture(t)
+	// The user's winws2's output (the testers' are not watched).
+	var outMu sync.Mutex
+	var userOut io.Writer
+	spawn := zapretSpawn
+	zapretSpawn = func(exe string, args, env []string, out io.Writer) (hysteria.Child, error) {
+		if slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--wf-raw-filter=("+zapret.ProbeExclude()+")") }) {
+			outMu.Lock()
+			userOut = out
+			outMu.Unlock()
+		}
+		return spawn(exe, args, env, out)
+	}
 	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
 		t.Fatal(err)
 	}
@@ -886,10 +898,18 @@ func TestZapretLive(t *testing.T) {
 		t.Fatalf("%+v", plan)
 	}
 	now := time.Now().Unix()
-	body := fmt.Sprintf("%d\tyoutube\tyoutube.com\t1\t0\n%d\tyoutube\tvideo:aj5goc\t1\t0\n%d\tyoutube\tvideo:aj5goc\t2\t1\n%d\tyoutube\tvideo:aj5goc\t3\t2\n%d\tdiscord\tdiscord.com\t1\t0\n",
-		now-60, now-50, now-40, now-30, now-20)
-	os.WriteFile(filepath.Join(c.ZapretLists, zapret.StateFile), []byte(body), 0o644)
-	live := c.ZapretInfo().Targets[0].Live
+	p := zapret.SwitchPrefix
+	body := fmt.Sprintf(p+"%d\tyoutube\tyoutube.com\t1\t0\n"+p+"%d\tyoutube\tvideo:aj5goc\t1\t0\n"+p+"%d\tyoutube\tvideo:aj5goc\t2\t1\n"+
+		p+"%d\tyoutube\tvideo:aj5goc\t3\t2\n"+p+"%d\tdiscord\tdiscord.com\t1\t0\n", now-60, now-50, now-40, now-30, now-20)
+	outMu.Lock()
+	io.WriteString(userOut, body)
+	outMu.Unlock()
+	var live []ZapretLive
+	deadline := time.Now().Add(5 * time.Second)
+	for len(live) < 2 && time.Now().Before(deadline) {
+		live = c.ZapretInfo().Targets[0].Live
+		time.Sleep(10 * time.Millisecond)
+	}
 	if len(live) != 2 || live[0].What != "серверы видео aj5goc" || live[0].Place != 3 || live[0].Switches != 2 ||
 		live[0].Method != zapret.MethodName(plan.Methods[2]) || live[0].Of != len(plan.Methods) ||
 		live[1].What != "сайт youtube.com" || live[1].Place != 1 || live[1].Switches != 0 {
@@ -900,7 +920,7 @@ func TestZapretLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitZapret(t, c, zapret.Running)
-	if _, err := os.Stat(filepath.Join(c.ZapretLists, zapret.StateFile)); !os.IsNotExist(err) {
-		t.Fatalf("notes kept: %v", err)
+	if live := c.ZapretInfo().Targets[0].Live; len(live) != 0 {
+		t.Fatalf("notes kept: %+v", live)
 	}
 }

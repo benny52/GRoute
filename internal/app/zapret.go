@@ -43,7 +43,7 @@ type zapretState struct {
 	// Cloudflare domains of «Telegram без VPN»; nil: none).
 	zapretExtra map[zapret.Target][]string
 	// zapretPlans: the plans winws2 was started with (a strategy number of
-	// zapret.StateFile is a place in them).
+	// a zapret.Switch is a place in them).
 	zapretPlans map[zapret.Target]zapret.Plan
 	zapretKey   string             // the network zapretArgs were built for
 	zapretNet   string             // its name, for the page
@@ -159,7 +159,8 @@ type ZapretTargetView struct {
 	// Using: what runs now, in words.
 	Using string `json:"using"`
 	// Live: what the automatic bypass uses now per host key, the latest
-	// switch first (zapret.StateFile; empty: no connection seen yet).
+	// switch first (the orchestrator's lines on winws2's output; empty: no
+	// connection seen yet).
 	Live []ZapretLive `json:"live,omitempty"`
 }
 
@@ -389,9 +390,6 @@ func (c *Controller) zapretApplyLocked() {
 		return
 	}
 	c.zapretArgs, c.zapretExtra, c.zapretPlans = args, extra, plans
-	if err := zapret.ResetSwitches(c.ZapretLists); err != nil {
-		c.Log.Warn("zapret: the orchestrator's notes not emptied", "err", err)
-	}
 	run.Exe = filepath.Join(dir, "winws2.exe")
 	c.Log.Info("zapret: winws2 starting", "targets", len(plans))
 	run.Start(args)
@@ -686,8 +684,8 @@ func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretV
 	}
 	pk := cfg.Picked[key]
 	var switches []zapret.Switch
-	if c.zapretArgs != nil && c.ZapretLists != "" {
-		switches = zapret.ReadSwitches(c.ZapretLists)
+	if c.zapretArgs != nil {
+		switches = c.zapretRunner().Switches()
 	}
 	for _, t := range zapret.Targets {
 		tv := ZapretTargetView{Target: t, Name: zapret.TargetName(t), On: cfg.On(t), Fixed: cfg.Methods[t], Picked: pk.Methods[t]}
