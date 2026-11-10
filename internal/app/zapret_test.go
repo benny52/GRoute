@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lardan099/hyroute/internal/flows"
 	"github.com/lardan099/hyroute/internal/hysteria"
 	"github.com/lardan099/hyroute/internal/rules"
 	"github.com/lardan099/hyroute/internal/zapret"
@@ -800,5 +802,34 @@ func TestZapretPickSlowTesters(t *testing.T) {
 	_, err := c.ZapretPick()
 	if err == nil || !strings.Contains(err.Error(), "не успел запуститься") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// YouTube's checks take the video servers the browser reached lately,
+// newest first, one per cluster; from memory only.
+func TestZapretVideoChecks(t *testing.T) {
+	c, _ := newCtl(t)
+	if got := c.zapretChecks(zapret.YouTube, nil, nil); !slices.Equal(got, zapret.Checks(zapret.YouTube, nil)) {
+		t.Fatalf("no connections: %q", got)
+	}
+	reg := flows.NewRegistry(8)
+	t0 := time.Now()
+	for i, d := range []string{"rr1---sn-old1-aa.googlevideo.com", "www.youtube.com", "rr4---sn-aj5go5-5i.c.youtube.com,rr4.sn-aj5go5-5i.c.youtube.com", "r2---sn-gvnuxaxjvh-jx3s.googlevideo.com"} {
+		r := reg.Open(&flows.Record{Proto: 6, Dst: netip.MustParseAddrPort("192.0.2.1:443"), Start: t0.Add(time.Duration(i) * time.Second)})
+		r.Set(func(f *flows.Fields) { f.Domain = d })
+		if i == 0 {
+			reg.Close(r, t0.Add(time.Minute))
+		}
+	}
+	c.mu.Lock()
+	c.lastFlows = reg
+	c.mu.Unlock()
+	got := c.zapretChecks(zapret.YouTube, nil, nil)
+	want := append(zapret.Checks(zapret.YouTube, nil), "https://r2---sn-gvnuxaxjvh-jx3s.googlevideo.com/generate_204", "https://rr4---sn-aj5go5-5i.c.youtube.com/generate_204")
+	if !slices.Equal(got, want) {
+		t.Fatalf("%q", got)
+	}
+	if got := c.zapretChecks(zapret.Discord, nil, nil); !slices.Equal(got, zapret.Checks(zapret.Discord, nil)) {
+		t.Fatalf("%q", got)
 	}
 }

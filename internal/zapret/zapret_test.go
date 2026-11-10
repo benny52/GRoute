@@ -119,9 +119,19 @@ func TestBuild(t *testing.T) {
 	if strings.Contains(line, "Payload[0] == 0x16") || strings.Contains(line, "success_detector") {
 		t.Fatalf("inbound TCP narrowed by its bytes: %s", line)
 	}
+	// YouTube's video servers keyed by cluster: HyRoute's Lua, loaded;
+	// the other targets keep the standard key.
+	if !strings.Contains(line, "--lua-init=@"+filepath.Join(lists, LuaFile)) || strings.Contains(line, "hostkey=") {
+		t.Fatalf("%s", CommandLine(args))
+	}
+	yp, _ := Settings{Enabled: true, Targets: []Target{YouTube}}.PlanFor(YouTube, "")
+	yargs, _ := Build(BuildConfig{Dir: dir, Lists: lists, Plans: map[Target]Plan{YouTube: yp, Discord: yp}})
+	if yl := strings.Join(yargs, " "); !strings.Contains(yl, "circular:fails=3:retrans=2:nld=2:hostkey=hyroute_hostkey ") || strings.Count(yl, "hostkey=") != 1 {
+		t.Fatalf("%s", CommandLine(yargs))
+	}
 	// A single method: no orchestrator; the slots' filter goes with QUIC's.
 	one, _ := Build(BuildConfig{Dir: dir, Lists: lists, Filter: ProbeOnly(1), Plans: map[Target]Plan{YouTube: {Methods: []string{"fake"}}}})
-	if ol := strings.Join(one, " "); strings.Contains(ol, "--wf-tcp-in") || !strings.Contains(ol, "--wf-raw-filter=("+ProbeOnly(1)+") and "+quicLean+" ") {
+	if ol := strings.Join(one, " "); strings.Contains(ol, "--wf-tcp-in") || strings.Contains(ol, LuaFile) || !strings.Contains(ol, "--wf-raw-filter=("+ProbeOnly(1)+") and "+quicLean+" ") {
 		t.Fatalf("%s", ol)
 	}
 	cl := CommandLine(args)
@@ -134,6 +144,9 @@ func TestWriteLists(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteLists(dir, nil, []netip.Addr{netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.1")}, nil); err != nil {
 		t.Fatal(err)
+	}
+	if l, err := os.ReadFile(filepath.Join(dir, LuaFile)); err != nil || !strings.Contains(string(l), "function hyroute_hostkey(desync)") {
+		t.Fatalf("%v", err)
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, ListSites))
 	if !strings.Contains(string(b), "example.invalid") {
@@ -378,5 +391,36 @@ func TestSiteAddresses(t *testing.T) {
 	}
 	if c := Checks(Sites, []string{"1.2.3.4"}); len(c) != 0 {
 		t.Fatalf("%v", c)
+	}
+}
+
+func TestVideoServer(t *testing.T) {
+	for _, c := range []struct {
+		host, cluster string
+	}{
+		{"rr4---sn-aj5go5-5i.googlevideo.com", "aj5go5"},
+		{"rr4---sn-aj5go5-5i.c.youtube.com", "aj5go5"},
+		{"R2---SN-GVNUXAXJVH-JX3S.googlevideo.com.", "gvnuxaxjvh"},
+		{"rr12---sn-4g5e6nsz.googlevideo.com", "4g5e6nsz"},
+		{"redirector.googlevideo.com", ""},
+		{"www.youtube.com", ""},
+		{"rr4---sn-aj5go5-5i.example.com", ""},
+		{"x4---sn-aj5go5.googlevideo.com", ""},
+		{"rr---sn-aj5go5.googlevideo.com", ""},
+		{"rr4---sn-.googlevideo.com", ""},
+		{"rr4---sn-a.b.googlevideo.com", ""},
+	} {
+		cl, ok := VideoServer(c.host)
+		if cl != c.cluster || ok != (c.cluster != "") {
+			t.Errorf("%s: %q %v", c.host, cl, ok)
+		}
+	}
+	got := VideoChecks([]string{"www.youtube.com", "rr4---sn-aj5go5-5i.c.youtube.com", "rr1---sn-aj5go5-5p.googlevideo.com",
+		"R2---sn-gvnuxaxjvh-jx3s.googlevideo.com", "rr9---sn-other.googlevideo.com"})
+	if !slices.Equal(got, []string{"https://rr4---sn-aj5go5-5i.c.youtube.com/generate_204", "https://r2---sn-gvnuxaxjvh-jx3s.googlevideo.com/generate_204"}) {
+		t.Fatalf("%q", got)
+	}
+	if VideoChecks(nil) != nil {
+		t.Fatal("none seen: none")
 	}
 }

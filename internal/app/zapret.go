@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lardan099/hyroute/internal/flows"
 	"github.com/lardan099/hyroute/internal/hysteria"
 	"github.com/lardan099/hyroute/internal/rules"
 	"github.com/lardan099/hyroute/internal/zapret"
@@ -819,7 +820,7 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 		Results: map[zapret.Target]string{}, Diagnosis: map[zapret.Target]ZapretDiag{}, Auto: why != "", Why: why}
 	checks := map[zapret.Target][]string{}
 	for _, t := range cfg.Targets {
-		checks[t] = zapret.Checks(t, cfg.Sites)
+		checks[t] = c.zapretChecks(t, cfg.Sites, nil)
 	}
 	c.pickMu.Lock()
 	c.zapretPick, c.pickCancel = pick, cancel
@@ -1440,4 +1441,43 @@ func (c *Controller) ZapretViaVPN(in ZapretViaInput) error {
 	c.zapretApplyLocked()
 	c.changed()
 	return nil
+}
+
+// zapretChecks are target t's checks (zapret.ChecksSkip) and, for YouTube,
+// the video servers the browser reached lately (zapret.VideoChecks): the
+// page and the redirector may open with a method that does not open them.
+func (c *Controller) zapretChecks(t zapret.Target, sites, skip []string) []string {
+	out := zapret.ChecksSkip(t, sites, skip)
+	if t == zapret.YouTube {
+		out = append(out, zapret.VideoChecks(c.videoServers())...)
+	}
+	return out
+}
+
+// videoServers: names of YouTube's video servers among the connections
+// in memory, newest first. Read for a check and kept nowhere (statistics
+// never record sites).
+func (c *Controller) videoServers() []string {
+	c.mu.Lock()
+	reg := c.lastFlows
+	c.mu.Unlock()
+	if reg == nil {
+		return nil
+	}
+	views := append(reg.Active(time.Now()), reg.Closed()...)
+	slices.SortFunc(views, func(a, b flows.View) int { return b.Start.Compare(a.Start) })
+	var out []string
+	for _, v := range views {
+		for _, h := range strings.Split(v.Domain, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				if _, ok := zapret.VideoServer(h); ok {
+					out = append(out, h)
+				}
+			}
+		}
+		if len(out) >= 32 {
+			break
+		}
+	}
+	return out
 }

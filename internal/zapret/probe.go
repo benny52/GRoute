@@ -42,6 +42,27 @@ func Checks(t Target, sites []string) []string {
 	return ChecksSkip(t, sites, nil)
 }
 
+// VideoChecks are the checks of YouTube's video servers the user's
+// browser reached (hosts as seen; VideoServer names only, one per cluster,
+// at most two): generate_204 on each, which a DPI that cuts the video
+// servers' handshake shows while the page and the redirector open.
+func VideoChecks(hosts []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, h := range hosts {
+		cl, ok := VideoServer(h)
+		if !ok || seen[cl] {
+			continue
+		}
+		seen[cl] = true
+		out = append(out, "https://"+strings.ToLower(strings.TrimSuffix(h, "."))+"/generate_204")
+		if len(out) == 2 {
+			break
+		}
+	}
+	return out
+}
+
 // ChecksSkip is Checks without the own sites in skip (ones that do not
 // open even without a bypass in a way no bypass beats: a name that does
 // not exist, a block by address). The other targets are as Checks.

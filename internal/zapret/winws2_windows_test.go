@@ -43,20 +43,26 @@ func TestWinws2Runs(t *testing.T) {
 	type run struct {
 		plans  map[zapret.Target]zapret.Plan
 		filter string
-		slot   int // a tester's: a probe from its ports goes through it
+		slot   int    // a tester's: a probe from its ports goes through it
+		url    string // what the probe opens ("": example.com)
 	}
 	cases := map[string]run{}
 	var ids []string
 	for i, m := range zapret.Methods {
 		ids = append(ids, m.ID)
-		cases[m.ID] = run{all(zapret.Plan{Methods: []string{m.ID}}), zapret.ProbeOnly(i + 1), i + 1}
+		cases[m.ID] = run{all(zapret.Plan{Methods: []string{m.ID}}), zapret.ProbeOnly(i + 1), i + 1, ""}
 	}
-	cases["circular"] = run{all(zapret.Plan{Methods: ids, Circular: true}), zapret.ProbeExclude(), 0}
+	cases["circular"] = run{all(zapret.Plan{Methods: ids, Circular: true}), zapret.ProbeExclude(), 0, ""}
 	// The orchestrator on a real connection, starting from a method that
 	// opens example.com (fake-md5-seqovl).
 	first := append([]string{"fake-md5-seqovl"}, slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return id == "fake-md5-seqovl" })...)
-	cases["circular probed"] = run{all(zapret.Plan{Methods: first, Circular: true}), zapret.ProbeOnly(zapret.ProbeSlots - 1), zapret.ProbeSlots - 1}
-	cases["youtube only"] = run{map[zapret.Target]zapret.Plan{zapret.YouTube: {Methods: ids, Circular: true}}, zapret.ProbeExclude(), 0}
+	cases["circular probed"] = run{all(zapret.Plan{Methods: first, Circular: true}), zapret.ProbeOnly(zapret.ProbeSlots - 1), zapret.ProbeSlots - 1, ""}
+	// YouTube's circular on a real video server: HyRoute's host key
+	// (hyroute_hostkey) keys it by its cluster. The slot is circular
+	// probed's: the cases run one after another.
+	cases["youtube video"] = run{map[zapret.Target]zapret.Plan{zapret.YouTube: {Methods: first, Circular: true}}, zapret.ProbeOnly(zapret.ProbeSlots - 1), zapret.ProbeSlots - 1,
+		"https://rr4---sn-aj5go5-5i.googlevideo.com/generate_204"}
+	cases["youtube only"] = run{map[zapret.Target]zapret.Plan{zapret.YouTube: {Methods: ids, Circular: true}}, zapret.ProbeExclude(), 0, ""}
 	var mu sync.Mutex
 	opened := 0
 	for name, c := range cases {
@@ -77,13 +83,17 @@ func TestWinws2Runs(t *testing.T) {
 				// from the tester's ports: the whole chain works. A method
 				// may break an unblocked site; all of them would mean a
 				// broken chain (checked below).
-				r := (&zapret.Prober{Slot: c.slot}).Check(context.Background(), []string{"https://example.com/"})
-				t.Logf("example.com through %s: ok %v %v", name, r.OK, r.Failed)
+				url := c.url
+				if url == "" {
+					url = "https://example.com/"
+				}
+				r := (&zapret.Prober{Slot: c.slot}).Check(context.Background(), []string{url})
+				t.Logf("%s through %s: ok %v %v", url, name, r.OK, r.Failed)
 				// Only the probes' ports reach a tester: it took the probe.
 				if !strings.Contains(out.String(), "dpi desync src=") {
 					t.Errorf("the tester saw no packet of the probe from its ports")
 				}
-				if r.OK {
+				if r.OK && c.url == "" {
 					mu.Lock()
 					opened++
 					mu.Unlock()
@@ -103,6 +113,9 @@ func TestWinws2Runs(t *testing.T) {
 			}
 			if name == "circular probed" && !strings.Contains(out.String(), "circular: current strategy") {
 				t.Errorf("the orchestrator saw nothing")
+			}
+			if name == "youtube video" && !strings.Contains(out.String(), ".video:aj5go5'") {
+				t.Errorf("the video server was not keyed by its cluster")
 			}
 			t.Logf("%s", out.String())
 		})

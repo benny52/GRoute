@@ -169,7 +169,7 @@ func (c *Controller) zapretHealOnce(ctx context.Context) {
 		check = append(check, t)
 	}
 	// Own sites found dead here by the pick are not checked.
-	urls := func(t zapret.Target) []string { return zapret.ChecksSkip(t, cfg.Sites, cfg.Picked[key].SkippedSites) }
+	urls := func(t zapret.Target) []string { return c.zapretChecks(t, cfg.Sites, cfg.Picked[key].SkippedSites) }
 	failing, _ := c.healCheck(ctx, zapret.Live, check, urls)
 	if ctx.Err() != nil {
 		return

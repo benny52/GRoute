@@ -110,6 +110,9 @@ func Build(c BuildConfig) ([]string, error) {
 	for _, name := range []string{"google_tls", "quic_google", "vk_tls"} {
 		args = append(args, "--blob="+name+":@"+filepath.Join(c.Dir, "blobs", BlobFiles[name]))
 	}
+	if circular {
+		args = append(args, "--lua-init=@"+list(LuaFile))
+	}
 	args = append(args, fakeArgs(c.Lists, c.Plans)...)
 	args = append(args, "--wf-raw-filter="+rawFilter(c.Filter))
 	args = append(args, "--lua-gc=60")
@@ -181,6 +184,10 @@ func tlsProfile(comment string, t Target, ports, l7, hostlist, exclude string, p
 		circular := "--lua-desync=circular:fails=3:retrans=2"
 		if t != Sites {
 			circular += ":nld=2"
+		}
+		if t == YouTube {
+			// The video servers counted per cluster (LuaFile).
+			circular += ":hostkey=hyroute_hostkey"
 		}
 		out = append(out, "--out-range=-s34228", "--in-range=-s5556", circular, "--in-range=x", payload)
 		for n, id := range p.Methods {
@@ -260,4 +267,58 @@ func rawFilter(slots string) string {
 		return quicLean
 	}
 	return "(" + slots + ") and " + quicLean
+}
+
+// LuaFile is HyRoute's own Lua for winws2, written into the lists folder
+// (WriteLists) and loaded with the circular orchestrator.
+const LuaFile = "hyroute.lua"
+
+// luaSource: hyroute_hostkey, the circular orchestrator's host key for
+// YouTube. With nld=2 every video server (rr4---sn-aj5go5-5i.googlevideo.com,
+// rr4---sn-aj5go5-5i.c.youtube.com) shared one count with the rest of its
+// domain — www.youtube.com among them — and a DPI treats them apart: the
+// page opened, each success reset the count, and a method that did not
+// open the video servers was never changed (videos stalled). They are
+// keyed by their cluster (sn-aj5go5): a provider's cache and Google's own
+// servers learn their methods apart, the servers of one cluster together.
+const luaSource = `-- HyRoute: the circular orchestrator's host key for YouTube (zapret/build.go).
+function hyroute_hostkey(desync)
+	local h = desync.track and desync.track.hostname
+	if h and not desync.track.hostname_is_ip then
+		local cluster = string.match(string.lower(h), "^rr?%d+%-%-%-sn%-(%w+)")
+		if cluster then
+			return "video:" .. cluster
+		end
+	end
+	return standard_hostkey(desync)
+end
+`
+
+// VideoServer reports a YouTube video server's name
+// (rr4---sn-aj5go5-5i.googlevideo.com, …c.youtube.com) and its cluster
+// (aj5go5), as hyroute_hostkey keys it.
+func VideoServer(host string) (cluster string, ok bool) {
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	var rest string
+	switch {
+	case strings.HasSuffix(h, ".googlevideo.com"):
+		rest = strings.TrimSuffix(h, ".googlevideo.com")
+	case strings.HasSuffix(h, ".c.youtube.com"):
+		rest = strings.TrimSuffix(h, ".c.youtube.com")
+	default:
+		return "", false
+	}
+	node, sn, found := strings.Cut(rest, "---sn-")
+	if !found || strings.Contains(sn, ".") || len(node) < 2 || node[0] != 'r' {
+		return "", false
+	}
+	digits := strings.TrimPrefix(node[1:], "r")
+	if digits == "" || strings.Trim(digits, "0123456789") != "" {
+		return "", false
+	}
+	cluster, _, _ = strings.Cut(sn, "-")
+	if cluster == "" || strings.Trim(cluster, "abcdefghijklmnopqrstuvwxyz0123456789") != "" {
+		return "", false
+	}
+	return cluster, true
 }
