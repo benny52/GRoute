@@ -312,13 +312,16 @@ end
 -- time, target, key, strategy, strategy before (0: first)". Not a file:
 -- winws2 lowers itself to low integrity once started and may write none.
 function hyroute_circular(ctx, desync)
+	-- Its own arguments first: running the methods, circular leaves
+	-- desync.arg as the last method's.
+	local target = desync.arg.target or ""
+	local hkf = desync.arg.hostkey and _G[desync.arg.hostkey] or standard_hostkey
+	local key = hkf(desync) or ""
 	local hrec = automate_host_record(desync)
 	local before = hrec and hrec.nstrategy
 	local verdict = circular(ctx, desync)
 	if hrec and hrec.nstrategy and hrec.nstrategy ~= before then
-		local hkf = desync.arg.hostkey and _G[desync.arg.hostkey] or standard_hostkey
-		local key = hkf(desync) or ""
-		io.stdout:write("HYROUTE\tswitch\t", os.time(), "\t", desync.arg.target or "", "\t", key, "\t", hrec.nstrategy, "\t", before or 0, "\n")
+		io.stdout:write("HYROUTE\tswitch\t", os.time(), "\t", target, "\t", key, "\t", hrec.nstrategy, "\t", before or 0, "\n")
 		io.stdout:flush()
 	end
 	return verdict
