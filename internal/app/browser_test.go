@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -125,12 +126,21 @@ func TestBrowserAddServerAndLost(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
+	// The user's rule above still decided the site: the extension's rules
+	// go above it, and say so.
 	res, err := c.BrowserAdd(BrowserEdit{Sites: []string{".example.org", "x.example.net"}, To: "id:" + de})
-	if err != nil || res.Added != 2 || len(res.Lost) != 1 || res.Lost[0].Pattern != ".example.org" || res.Lost[0].Rule != "blocked" {
+	if err != nil || res.Added != 2 || len(res.Lost) != 0 || res.Raised != "blocked" || res.Rule != "Из браузера: DE one" {
 		t.Fatalf("%+v %v", res, err)
 	}
-	if got := ruleNames(c); got != "Из браузера: DE one (адреса)=x.example.net | blocked=.example.org | Из браузера: DE one=.a.example,.example.org | Из браузера: блок=.b.example" {
+	if got := ruleNames(c); got != "Из браузера: DE one (адреса)=x.example.net | Из браузера: DE one=.a.example,.example.org | blocked=.example.org | Из браузера: блок=.b.example" {
 		t.Fatal(got)
+	}
+	if info, _ := c.BrowserInfo(BrowserQuery{Hosts: []string{"www.example.org"}}); info.Sites[0].Route.To != "id:"+de || !info.Sites[0].Route.Browser {
+		t.Fatalf("%+v", info.Sites[0])
+	}
+	// Nothing above any more: nothing raised.
+	if res, err = c.BrowserAdd(BrowserEdit{Sites: []string{".c.example"}, To: "id:" + de}); err != nil || res.Raised != "" || len(res.Lost) != 0 {
+		t.Fatalf("%+v %v", res, err)
 	}
 	// The rule with a program is the user's: never edited.
 	if _, err := c.BrowserAdd(BrowserEdit{Sites: []string{".b.example"}, To: "vpn"}); err != nil {
@@ -163,6 +173,78 @@ func TestBrowserAddServerAndLost(t *testing.T) {
 	}
 }
 
+// A page's sites live in the rules of its site: one rule per route, read
+// and removed as one.
+func TestBrowserPageRules(t *testing.T) {
+	c := browserCtl(t)
+	if _, err := c.SaveRulesIn(EditGuard{}, rules.Config{DefaultAction: rules.Direct, Rules: []rules.Rule{
+		{Name: "mine", Domains: []string{".mine.example"}, Action: rules.Block},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.BrowserAdd(BrowserEdit{Page: "WWW.Example.com", Sites: []string{".example.com", ".cdn.test", ".fonts.test"}, To: "vpn"})
+	if err != nil || res.Added != 3 || res.Rule != "Из браузера: example.com" || res.Raised != "" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	// Another site loads the same CDN the same way: both rules hold it.
+	if res, err = c.BrowserAdd(BrowserEdit{Page: "shop.other.org", Sites: []string{".other.org", ".cdn.test"}, To: "vpn"}); err != nil || res.Added != 2 || res.Moved != 0 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if got := ruleNames(c); got != "Из браузера: other.org=.other.org,.cdn.test | Из браузера: example.com=.example.com,.cdn.test,.fonts.test | mine=.mine.example" {
+		t.Fatal(got)
+	}
+	// Another route for a name: the last choice is the only one.
+	if res, err = c.BrowserAdd(BrowserEdit{Page: "shop.other.org", Sites: []string{".fonts.test"}, To: "direct"}); err != nil || res.Moved != 1 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	// An address of the page: the site's address rule, above the sites.
+	if res, err = c.BrowserAdd(BrowserEdit{Page: "www.example.com", Sites: []string{"api.example.com"}, To: "block"}); err != nil || res.Added != 1 || res.Rule != "Из браузера: example.com (адреса)" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if got := ruleNames(c); got != "Из браузера: example.com (адреса)=api.example.com | Из браузера: other.org=.fonts.test | "+
+		"Из браузера: other.org=.other.org,.cdn.test | Из браузера: example.com=.example.com,.cdn.test | mine=.mine.example" {
+		t.Fatal(got)
+	}
+	info, err := c.BrowserInfo(BrowserQuery{Page: "shop.other.org", Hosts: []string{"shop.other.org", "api.example.com", "x.fonts.test"}})
+	if err != nil || info.Page == nil || info.Page.Site != "other.org" || info.Page.Label != "other.org" || info.Page.Items != 3 {
+		t.Fatalf("%+v %v", info.Page, err)
+	}
+	if info.Sites[0].Route.To != "vpn" || info.Sites[1].Route.To != "block" || info.Sites[2].Route.To != "direct" {
+		t.Fatalf("%+v", info.Sites)
+	}
+	// A page with no site (an address) and an edit without a page: the
+	// rules by route, as before.
+	if info, _ = c.BrowserInfo(BrowserQuery{Page: "192.0.2.1"}); info.Page != nil {
+		t.Fatalf("%+v", info.Page)
+	}
+	if res, err = c.BrowserAdd(BrowserEdit{Page: "192.0.2.1", Sites: []string{".plain.example"}, To: "vpn"}); err != nil || res.Rule != "Из браузера: VPN" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	// The site goes as one: its rules, nothing of the others'.
+	if res, err = c.BrowserRemove(BrowserEdit{Page: "other.org"}); err != nil || res.Removed != 3 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if got := ruleNames(c); got != "Из браузера: example.com (адреса)=api.example.com | Из браузера: VPN=.plain.example | "+
+		"Из браузера: example.com=.example.com,.cdn.test | mine=.mine.example" {
+		t.Fatal(got)
+	}
+	before := c.SettingsRev()
+	if res, err = c.BrowserRemove(BrowserEdit{Page: "other.org"}); err != nil || res.Removed != 0 || c.SettingsRev() != before {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if _, err = c.BrowserRemove(BrowserEdit{Page: "192.0.2.1"}); err == nil {
+		t.Fatal("nothing to remove accepted")
+	}
+	// A whole page at once.
+	many := make([]string, maxBrowserEdit)
+	for i := range many {
+		many[i] = ".s" + strconv.Itoa(i) + ".example"
+	}
+	if res, err = c.BrowserAdd(BrowserEdit{Page: "big.example", Sites: many, To: "vpn"}); err != nil || res.Added != maxBrowserEdit {
+		t.Fatalf("%+v %v", res, err)
+	}
+}
+
 func TestBrowserUnicodeNames(t *testing.T) {
 	c := browserCtl(t)
 	if _, err := c.BrowserAdd(BrowserEdit{Sites: []string{".пример.рф"}, To: "block"}); err != nil {
@@ -175,6 +257,14 @@ func TestBrowserUnicodeNames(t *testing.T) {
 	s := info.Sites[0]
 	if s.Host != "www.xn--e1afmkfd.xn--p1ai" || s.Label != "www.пример.рф" || s.SiteLabel != "пример.рф" || s.Route.To != "block" {
 		t.Fatalf("%+v", s)
+	}
+	// The site's rule is named as people read it, and found by that name.
+	res, err := c.BrowserAdd(BrowserEdit{Page: "www.пример.рф", Sites: []string{".пример.рф", ".cdn.test"}, To: "vpn"})
+	if err != nil || res.Rule != "Из браузера: пример.рф" || res.Moved != 1 || res.Added != 1 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if info, _ = c.BrowserInfo(BrowserQuery{Page: "xn--e1afmkfd.xn--p1ai"}); info.Page == nil || info.Page.Label != "пример.рф" || info.Page.Items != 2 {
+		t.Fatalf("%+v", info.Page)
 	}
 }
 

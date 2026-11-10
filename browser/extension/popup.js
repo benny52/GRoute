@@ -1,7 +1,8 @@
 // HyRoute popup: the names of the current tab, how HyRoute sends each of
-// them now, and three buttons to change that. HyRoute is reached through
-// its native messaging host (hyroutectl.exe), installed from HyRoute's
-// settings.
+// them now, and buttons to change that: the whole page at once or the
+// checked names. What is sent from a page is kept in HyRoute as the rules
+// of that page's site. HyRoute is reached through its native messaging
+// host (hyroutectl.exe), installed from HyRoute's settings.
 
 const HOST = 'com.hyroute.browser';
 
@@ -13,6 +14,9 @@ const state = {
   hosts: {}, // host -> {n, err} from the background worker
   info: null, // HyRoute's answer
   whole: true, // rows are whole sites
+  onlyErr: false, // only the rows that failed are shown
+  shown: [], // keys of the rows shown
+  master: null, // the «all» checkbox
   checked: new Set(), // row keys
   touched: false, // the user changed the selection
   busy: false,
@@ -143,7 +147,11 @@ function rowEl(row) {
       only ? routeText(only) : 'по-разному'),
   );
   const out = [label];
-  if (row.top && row.pattern) {
+  const page = state.info?.page;
+  if (row.top && page?.items) {
+    out.push(el('div', { class: 'mine' }, `В правилах сайта: ${page.items} ${plural(page.items, 'адрес', 'адреса', 'адресов')}`,
+      el('button', { class: 'linkbtn', type: 'button', title: 'Удалить правила «Из браузера: ' + page.label + '» со всеми адресами', onclick: () => removeSite() }, 'убрать сайт целиком')));
+  } else if (row.top && row.pattern) {
     out.push(el('div', { class: 'mine' }, 'Есть в правилах из браузера',
       el('button', { class: 'linkbtn', type: 'button', onclick: () => remove(row.pattern) }, 'убрать')));
   } else if (row.top && only?.rule && !only.browser) {
@@ -163,13 +171,32 @@ function render() {
     $('actions').hidden = true;
     return;
   }
-  const list = rows();
+  const all = rows();
+  const failed = all.filter((r) => r.err).length;
+  // The page's own site stays in sight: the rest is hidden, not unchecked
+  // behind the user's back (the selection starts over with the filter).
+  const list = state.onlyErr ? all.filter((r) => r.top || r.err) : all;
+  state.shown = list.map((r) => r.key);
   if (!state.touched) {
     state.checked = new Set(list.filter((r) => r.top || (r.err && !dnsErr(r.err))).map((r) => r.key));
   } else {
-    const keys = new Set(list.map((r) => r.key));
+    const keys = new Set(state.shown);
     state.checked = new Set([...state.checked].filter((k) => keys.has(k)));
   }
+  const master = el('input', { type: 'checkbox', title: 'Отметить все или снять все' });
+  master.addEventListener('change', () => {
+    state.touched = true;
+    state.checked = new Set(master.checked ? state.shown : []);
+    render();
+  });
+  state.master = master;
+  const only = el('input', { type: 'checkbox' });
+  only.checked = state.onlyErr;
+  only.addEventListener('change', () => {
+    state.onlyErr = only.checked;
+    state.touched = false;
+    render();
+  });
   const whole = el('input', { type: 'checkbox' });
   whole.checked = state.whole;
   whole.addEventListener('change', () => {
@@ -179,9 +206,14 @@ function render() {
     render();
   });
   main.append(el('div', { class: 'listhead' },
-    el('h2', {}, `Адреса страницы: ${list.length}`),
-    el('label', { class: 'check', title: 'Отправлять сайт вместе с поддоменами (www, cdn, api…)' }, whole, 'целиком сайты')));
+    el('label', { class: 'check all' }, master, el('h2', {}, `Адреса: ${all.length}`)),
+    el('span', { class: 'checks' },
+      el('label', { class: 'check', title: 'Показать только адреса, которые не загрузились' }, only, `с ошибкой: ${failed}`),
+      el('label', { class: 'check', title: 'Отправлять сайт вместе с поддоменами (www, cdn, api…)' }, whole, 'целиком сайты'))));
   for (const row of list) main.append(...rowEl(row));
+  if (state.onlyErr && !failed) main.append(el('p', { class: 'muted center small' }, 'Все адреса страницы загрузились.'));
+  $('to-all').textContent = `Весь сайт через VPN · ${all.length} ${plural(all.length, 'адрес', 'адреса', 'адресов')}`;
+  $('to-all').title = 'Отправить через VPN сайт и всё, что загружает его страница, одним правилом «Из браузера: ' + (info.page?.label || state.top) + '»';
 
   const sel = $('server');
   const keep = sel.value || state.server || 'vpn';
@@ -194,9 +226,14 @@ function render() {
 
 function renderSelection() {
   const n = state.checked.size;
-  $('selcount').textContent = n ? `Отправить ${n} ${plural(n, 'сайт', 'сайта', 'сайтов')}:` : 'Отметьте сайты, которые нужно отправить.';
-  const off = !n || state.busy || !!state.info?.problem;
-  for (const id of ['to-vpn', 'to-direct', 'to-block']) $(id).disabled = off;
+  $('selcount').textContent = n ? `Или только отмеченные (${n}):` : 'Или отметьте адреса и выберите, куда их отправить:';
+  const stop = state.busy || !!state.info?.problem;
+  for (const id of ['to-vpn', 'to-direct', 'to-block']) $(id).disabled = !n || stop;
+  $('to-all').disabled = stop || !state.info?.sites?.length;
+  if (state.master) {
+    state.master.checked = n > 0 && n === state.shown.length;
+    state.master.indeterminate = n > 0 && n < state.shown.length;
+  }
 }
 
 function showProblem(text, steps) {
@@ -239,7 +276,7 @@ async function refresh() {
     .sort((a, b) => (a === state.top ? -1 : b === state.top ? 1 : !!state.hosts[b]?.err - !!state.hosts[a]?.err || (state.hosts[b]?.n || 0) - (state.hosts[a]?.n || 0)))
     .slice(0, 200);
   try {
-    state.info = await hy('browser-info', { hosts });
+    state.info = await hy('browser-info', { hosts, page: state.top });
   } catch (e) {
     $('loading')?.remove();
     $('actions').hidden = true;
@@ -257,15 +294,18 @@ async function refresh() {
   if (state.info.problem) showProblem(state.info.problem);
 }
 
-async function send(to, word) {
-  const sites = [...state.checked];
+// send: the checked rows, or every row of the page (all).
+async function send(to, word, all) {
+  const sites = all ? rows().map((r) => r.key) : [...state.checked];
   if (!sites.length) return;
   state.busy = true;
   renderSelection();
   try {
-    const res = await hy('browser-add', { sites, to });
+    const res = await hy('browser-add', { sites, to, page: state.top });
     const n = res.added + res.moved;
-    let text = n ? `Готово: ${n} ${plural(n, 'сайт', 'сайта', 'сайтов')} → ${word}, правило «${res.rule}».` : `Уже ${word}: ничего не изменилось.`;
+    let text = n ? `Готово: ${n} ${plural(n, 'адрес', 'адреса', 'адресов')} → ${word}, правило «${res.rule}».` : `Уже ${word}: ничего не изменилось.`;
+    if (all && n) text = `Готово: весь сайт (${sites.length}) → ${word}, правило «${res.rule}».`;
+    if (res.raised) text += ` Правила из браузера подняты наверх: выше стояло правило «${res.raised}», оно решало сайт.`;
     $('done-text').textContent = text;
     $('done-lost').replaceChildren(...res.lost.map((l) =>
       el('li', {}, `${l.pattern.replace(/^\./, '')}: всё ещё решает правило «${l.rule}» выше. Поднимите правила «Из браузера» в HyRoute.`)));
@@ -300,10 +340,33 @@ async function remove(pattern) {
   }
 }
 
-$('to-vpn').addEventListener('click', () => {
+// removeSite takes the page's site out whole: its rules with everything
+// sent from its pages.
+async function removeSite() {
+  state.busy = true;
+  renderSelection();
+  try {
+    const res = await hy('browser-remove', { sites: [], page: state.top });
+    $('done-text').textContent = `Сайт «${state.info.page?.label || state.top}» убран из правил браузера целиком (${res.removed} ${plural(res.removed, 'адрес', 'адреса', 'адресов')}): дальше решают остальные правила.`;
+    $('done-lost').replaceChildren();
+    $('done').hidden = false;
+    state.touched = false;
+    await refresh();
+  } catch (e) {
+    const [text, steps] = problemOf(e);
+    showProblem(text, steps);
+  } finally {
+    state.busy = false;
+    renderSelection();
+  }
+}
+
+function vpnWord() {
   const sel = $('server');
-  send(sel.value, 'через ' + (sel.value === 'vpn' ? state.info.main || 'VPN' : sel.selectedOptions[0].textContent.replace(/^группа /, '')));
-});
+  return 'через ' + (sel.value === 'vpn' ? state.info.main || 'VPN' : sel.selectedOptions[0].textContent.replace(/^группа /, ''));
+}
+$('to-all').addEventListener('click', () => send($('server').value, vpnWord(), true));
+$('to-vpn').addEventListener('click', () => send($('server').value, vpnWord()));
 $('to-direct').addEventListener('click', () => send('direct', 'напрямую'));
 $('to-block').addEventListener('click', () => send('block', 'в блок'));
 $('server').addEventListener('change', () => chrome.storage.local.set({ server: $('server').value }));

@@ -13,12 +13,16 @@ import (
 
 // The browser extension (browser/): it asks how the sites of a page go and
 // sends a site to a server, direct or to the block list. Its sites live in
-// rules of their own, «Из браузера: <куда>», at the top of the active rule
-// profile: exact addresses in the «(адреса)» rules, whole sites
+// rules of their own at the top of the active rule profile, one per page's
+// site and route: «Из браузера: example.com» holds what the user sent from
+// the pages of example.com (the site itself and what its pages load), so a
+// site reads as one rule and goes away as one. An edit without a page (an
+// extension before 1.1) goes to «Из браузера: <куда>», one rule per route.
+// Exact addresses are in the «(адреса)» rules, whole sites
 // (".example.com") in the others, the address rules above the site rules.
-// Whole sites never overlap one another (registrable domains are disjoint)
-// and an address is narrower than its site, so this order lets every
-// choice decide its own name whatever the user picked before.
+// A name has one route in the extension's rules (the last one chosen), and
+// an address is narrower than its site, so this order lets every choice
+// decide its own name whatever the user picked before.
 
 // browserState is the Controller's part for the extension.
 type browserState struct {
@@ -45,7 +49,7 @@ const browserHostsSuffix = " (адреса)"
 // Limits of one request from the extension.
 const (
 	maxBrowserHosts = 200
-	maxBrowserEdit  = 100
+	maxBrowserEdit  = 200 // a whole page at once
 )
 
 // BrowserQuery is what the extension asks about: the names a page used.
@@ -54,6 +58,8 @@ type BrowserQuery struct {
 	// programs decide its connections too.
 	App   string   `json:"app,omitempty"`
 	Hosts []string `json:"hosts"`
+	// Page is the tab's own host ("" = an extension before 1.1).
+	Page string `json:"page,omitempty"`
 }
 
 // BrowserRoute is where a name goes now.
@@ -91,6 +97,14 @@ type BrowserTarget struct {
 	Group bool   `json:"group,omitempty"`
 }
 
+// BrowserPage is what the extension's rules hold for the page's site.
+type BrowserPage struct {
+	Site  string `json:"site"` // the registrable domain
+	Label string `json:"label"`
+	// Items: the names in the site's own rules (0 = it has none).
+	Items int `json:"items"`
+}
+
 // BrowserInfo answers BrowserQuery.
 type BrowserInfo struct {
 	State   string          `json:"state"`   // as Status
@@ -98,6 +112,8 @@ type BrowserInfo struct {
 	Main    string          `json:"main"`    // the main server or group ("" = none)
 	Targets []BrowserTarget `json:"targets"`
 	Sites   []BrowserSite   `json:"sites"`
+	// Page: the page's site, when it can have rules of its own.
+	Page *BrowserPage `json:"page,omitempty"`
 	// Problem: why rules cannot be changed now ("" = they can).
 	Problem string `json:"problem,omitempty"`
 }
@@ -110,6 +126,9 @@ type BrowserEdit struct {
 	// "www.example.com" (only that name).
 	Sites []string `json:"sites"`
 	To    string   `json:"to,omitempty"`
+	// Page is the tab's own host: BrowserAdd keeps the sites in the rules
+	// of its site; BrowserRemove with no Sites removes those rules whole.
+	Page string `json:"page,omitempty"`
 }
 
 // BrowserLoss is a name an edit did not give the chosen route.
@@ -127,7 +146,10 @@ type BrowserResult struct {
 	Removed int    `json:"removed"`
 	// Lost: names a rule above the extension's still decides.
 	Lost []BrowserLoss `json:"lost"`
-	Rev  uint64        `json:"rev"`
+	// Raised: the rule that stood above the extension's and decided a
+	// name of the edit; the extension's rules went above it ("" = none).
+	Raised string `json:"raised,omitempty"`
+	Rev    uint64 `json:"rev"`
 }
 
 // ErrBrowserOff: the extension is turned off in HyRoute.
@@ -184,6 +206,14 @@ func (c *Controller) BrowserInfo(q BrowserQuery) (BrowserInfo, error) {
 	c.mu.Unlock()
 	if main != "" {
 		info.Main = c.profileName(main)
+	}
+	if site, label := browserSite(q.Page); site != "" {
+		info.Page = &BrowserPage{Site: site, Label: label}
+		for _, r := range cfg.Rules {
+			if isBrowserRule(r) && browserRuleSite(r) == site {
+				info.Page.Items += len(r.Domains)
+			}
+		}
 	}
 	proc := browserProc(q.App)
 	seen := map[string]bool{}
@@ -277,6 +307,54 @@ func isBrowserRule(r rules.Rule) bool {
 // browserHostsRule: an address rule of the extension (by name).
 func browserHostsRule(r rules.Rule) bool { return strings.HasSuffix(r.Name, browserHostsSuffix) }
 
+// browserSite is the site a page's rules are kept under: the registrable
+// domain of its host and how people read it ("" for an IP, a single label
+// or a public suffix: such a page has no rules of its own).
+func browserSite(page string) (site, label string) {
+	h, ok := rules.HostName(page)
+	if !ok {
+		return "", ""
+	}
+	if site, ok = rules.Registrable(h); !ok {
+		return "", ""
+	}
+	return site, unicodeName(site)
+}
+
+// browserRuleSite is the site of a per-site rule of the extension, by its
+// name («Из браузера: example.com», «… (адреса)»); "" for a rule by route
+// («Из браузера: VPN», «Из браузера: <сервер>»). A server named exactly as
+// a registrable domain reads as that site: its rule by route then takes
+// the edits of that site's pages with the same route, nothing more.
+func browserRuleSite(r rules.Rule) string {
+	name := strings.TrimSuffix(strings.TrimPrefix(r.Name, BrowserRulePrefix), browserHostsSuffix)
+	h, ok := rules.HostName(name)
+	if !ok {
+		return ""
+	}
+	if site, ok := rules.Registrable(h); ok && site == h {
+		return site
+	}
+	return ""
+}
+
+// hoistBrowserRules puts the extension's rules first: the address rules,
+// then the site rules, each in their order, then everything else.
+func hoistBrowserRules(rs []rules.Rule) []rules.Rule {
+	var addrs, sites, rest []rules.Rule
+	for _, r := range rs {
+		switch {
+		case !isBrowserRule(r):
+			rest = append(rest, r)
+		case browserHostsRule(r):
+			addrs = append(addrs, r)
+		default:
+			sites = append(sites, r)
+		}
+	}
+	return slices.Concat(addrs, sites, rest)
+}
+
 // browserPattern normalizes an item of the extension: ".example.com" or
 // an exact name; no IPs, wildcards or keywords.
 func browserPattern(p string) (string, bool) {
@@ -347,10 +425,13 @@ func browserItems(list []string) ([]string, error) {
 	return out, nil
 }
 
-// BrowserAdd sends sites where e.To says: into that route's rule of the
-// extension (made at the top when missing), out of the extension's other
-// rules. A whole site also takes its addresses out of the address rules:
-// «весь сайт» is the last word on its names.
+// BrowserAdd sends sites where e.To says: into the rule of the page's site
+// with that route (the rule by route without a page; made at the top when
+// missing), out of the extension's rules with another route. A whole site
+// also takes its addresses out of the address rules: «весь сайт» is the
+// last word on its names. When a rule of the user's above still decides a
+// name, the extension's rules go above everything: what the user sends
+// from the browser is the latest word.
 func (c *Controller) BrowserAdd(e BrowserEdit) (BrowserResult, error) {
 	if !c.BrowserOn() {
 		return BrowserResult{}, ErrBrowserOff
@@ -364,19 +445,25 @@ func (c *Controller) BrowserAdd(e BrowserEdit) (BrowserResult, error) {
 		return BrowserResult{}, err
 	}
 	proc := browserProc(e.App)
+	site, label := browserSite(e.Page)
+	if site == "" {
+		label = word
+	}
 	var res BrowserResult
 	save, err := c.editRules(func(cfg *rules.Config) (bool, error) {
 		changed := false
 		for _, p := range items {
 			hosts := !strings.HasPrefix(p, ".")
-			name := BrowserRulePrefix + word
+			name := BrowserRulePrefix + label
 			if hosts {
 				name += browserHostsSuffix
 			}
-			res.Rule = name
+			if res.Rule == "" || !hosts {
+				res.Rule = name
+			}
 			mine := -1
 			for i, r := range cfg.Rules {
-				if isBrowserRule(r) && r.On() && browserHostsRule(r) == hosts && r.Action == act && r.Profile == profile {
+				if isBrowserRule(r) && r.On() && browserHostsRule(r) == hosts && r.Action == act && r.Profile == profile && browserRuleSite(r) == site {
 					mine = i
 					break
 				}
@@ -391,9 +478,12 @@ func (c *Controller) BrowserAdd(e BrowserEdit) (BrowserResult, error) {
 				if !isBrowserRule(*r) {
 					continue
 				}
+				// The same name with the same route in another site's rule
+				// stays: each site's rule is whole by itself.
+				other := r.Action != act || r.Profile != profile
 				n := len(r.Domains)
 				r.Domains = slices.DeleteFunc(r.Domains, func(d string) bool {
-					return d == p || !hosts && !strings.HasPrefix(d, ".") && browserCatches(p, d)
+					return other && d == p || !hosts && !strings.HasPrefix(d, ".") && browserCatches(p, d)
 				})
 				if len(r.Domains) != n {
 					moved, changed = true, true
@@ -425,17 +515,29 @@ func (c *Controller) BrowserAdd(e BrowserEdit) (BrowserResult, error) {
 			return false, nil
 		}
 		// What the edit could not change: a rule above the extension's.
-		res.Lost = []BrowserLoss{}
-		for _, p := range items {
-			host := strings.TrimPrefix(p, ".")
-			w, _ := rules.Winner(*cfg, rules.Flow{Proc: proc, Proto: 6, Name: host})
-			if w < 0 || !isBrowserRule(cfg.Rules[w]) || cfg.Rules[w].Action != act || cfg.Rules[w].Profile != profile {
-				rule := "«Всё остальное»"
-				if w >= 0 {
-					rule = cfg.Rules[w].Name
+		lost := func() (out []BrowserLoss, above string) {
+			out = []BrowserLoss{}
+			for _, p := range items {
+				host := strings.TrimPrefix(p, ".")
+				w, _ := rules.Winner(*cfg, rules.Flow{Proc: proc, Proto: 6, Name: host})
+				if w < 0 || !isBrowserRule(cfg.Rules[w]) || cfg.Rules[w].Action != act || cfg.Rules[w].Profile != profile {
+					rule := "«Всё остальное»"
+					if w >= 0 {
+						rule = cfg.Rules[w].Name
+						if above == "" && !isBrowserRule(cfg.Rules[w]) {
+							above = rule
+						}
+					}
+					out = append(out, BrowserLoss{Pattern: p, Rule: rule})
 				}
-				res.Lost = append(res.Lost, BrowserLoss{Pattern: p, Rule: rule})
 			}
+			return out, above
+		}
+		var above string
+		if res.Lost, above = lost(); above != "" {
+			cfg.Rules = hoistBrowserRules(cfg.Rules)
+			res.Raised = above
+			res.Lost, _ = lost()
 		}
 		return true, nil
 	})
@@ -451,14 +553,20 @@ func (c *Controller) BrowserAdd(e BrowserEdit) (BrowserResult, error) {
 }
 
 // BrowserRemove takes items out of the extension's rules: the names go
-// back to the rest of the rules.
+// back to the rest of the rules. With a page and no items it removes the
+// rules of the page's site whole.
 func (c *Controller) BrowserRemove(e BrowserEdit) (BrowserResult, error) {
 	if !c.BrowserOn() {
 		return BrowserResult{}, ErrBrowserOff
 	}
-	items, err := browserItems(e.Sites)
-	if err != nil {
-		return BrowserResult{}, err
+	site, _ := browserSite(e.Page)
+	whole := len(e.Sites) == 0 && site != ""
+	var items []string
+	if !whole {
+		var err error
+		if items, err = browserItems(e.Sites); err != nil {
+			return BrowserResult{}, err
+		}
 	}
 	res := BrowserResult{Lost: []BrowserLoss{}}
 	save, err := c.editRules(func(cfg *rules.Config) (bool, error) {
@@ -468,7 +576,13 @@ func (c *Controller) BrowserRemove(e BrowserEdit) (BrowserResult, error) {
 				continue
 			}
 			n := len(r.Domains)
-			r.Domains = slices.DeleteFunc(r.Domains, func(d string) bool { return slices.Contains(items, d) })
+			if whole {
+				if browserRuleSite(*r) == site {
+					r.Domains = nil
+				}
+			} else {
+				r.Domains = slices.DeleteFunc(r.Domains, func(d string) bool { return slices.Contains(items, d) })
+			}
 			res.Removed += n - len(r.Domains)
 		}
 		cfg.Rules = dropEmptyBrowserRules(cfg.Rules)
