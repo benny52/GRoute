@@ -220,6 +220,20 @@ func TestBrowserPageRules(t *testing.T) {
 	if res, err = c.BrowserAdd(BrowserEdit{Page: "192.0.2.1", Sites: []string{".plain.example"}, To: "vpn"}); err != nil || res.Rule != "Из браузера: VPN" {
 		t.Fatalf("%+v %v", res, err)
 	}
+	// Sent again from its page, a site leaves the rule by route for the
+	// page's rule: the old heaps empty out as the sites are visited.
+	if res, err = c.BrowserAdd(BrowserEdit{Page: "plain.example", Sites: []string{".plain.example", ".cdn.test"}, To: "vpn"}); err != nil || res.Moved != 1 || res.Added != 1 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if got := ruleNames(c); strings.Contains(got, "Из браузера: VPN") || !strings.Contains(got, "Из браузера: plain.example=.plain.example,.cdn.test") {
+		t.Fatal(got)
+	}
+	if res, err = c.BrowserAdd(BrowserEdit{Page: "192.0.2.1", Sites: []string{".plain.example"}, To: "vpn"}); err != nil || res.Rule != "Из браузера: VPN" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if _, err = c.BrowserRemove(BrowserEdit{Page: "plain.example"}); err != nil {
+		t.Fatal(err)
+	}
 	// The site goes as one: its rules, nothing of the others'.
 	if res, err = c.BrowserRemove(BrowserEdit{Page: "other.org"}); err != nil || res.Removed != 3 {
 		t.Fatalf("%+v %v", res, err)

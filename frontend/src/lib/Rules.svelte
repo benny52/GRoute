@@ -384,7 +384,7 @@
       title={editId ? 'Пошагово настраивает включённый профиль правил: вернитесь к нему' : 'Все правила по шагам с объяснениями: сервисы, программы, сайты, блокировка, серверы'}
       ><Icon name="wand" size={16} />Пошагово</button
     >
-    <button onclick={() => (tidying = true)} disabled={!s || !s.rules.length} title="Найти лишние правила и повторы, объединить правила с одним маршрутом, заменить домены списками из базы правил"
+    <button onclick={() => (tidying = true)} disabled={!s || !s.rules.length} title="Найти лишние правила и повторы, собрать правила из браузера и части одного правила, заменить домены списками из базы правил"
       ><Icon name="check" size={16} />Навести порядок</button
     >
     <button onclick={() => (picking = true)} disabled={!s}><Icon name="sparkles" size={16} />Шаблоны</button>

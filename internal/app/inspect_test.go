@@ -164,9 +164,10 @@ func TestTidyRulesGeo(t *testing.T) {
 		got = append(got, t.ID)
 	}
 	// ai: openai (category-ai-chat-!cn is a category-*, geolocation a
-	// region); yt: its repeat, then youtube (named after it, one site
-	// left after the repeat goes is enough, plus youtu.be).
-	if strings.Join(got, " ") != "sites:yt merge:ai,yt geo:ai:openai geo:yt:youtube" || v.GeoNote != "" {
+	// region); yt: its repeat. «ИИ» and «YouTube» are two rules of the
+	// user's, not pieces of one: no merge. The test database's youtube
+	// list holds no more than the rule names already: not suggested.
+	if strings.Join(got, " ") != "sites:yt geo:ai:openai" || v.GeoNote != "" {
 		t.Fatalf("%v %q", got, v.GeoNote)
 	}
 	v = c.TidyRules(st, []string{"geo:ai:openai", "sites:yt"})
@@ -175,7 +176,7 @@ func TestTidyRulesGeo(t *testing.T) {
 	}
 	c.geo.db.Dir = t.TempDir()
 	c.geo.db.Forget()
-	if v := c.TidyRules(st, nil); !strings.Contains(v.GeoNote, "не скачана") || len(v.Items) != 2 {
+	if v := c.TidyRules(st, nil); !strings.Contains(v.GeoNote, "не скачана") || len(v.Items) != 1 {
 		t.Fatalf("%+v", v)
 	}
 }

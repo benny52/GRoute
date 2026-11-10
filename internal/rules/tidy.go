@@ -11,11 +11,17 @@ import (
 // and merge never change where a connection goes (merge says so when it
 // would: Changes); geo does: a geosite category brings the rest of a
 // service's addresses.
+//
+// A merge puts together the pieces of one rule: rules of the same name
+// (or all without one) and the same route. Rules named apart are the
+// user's own order and stay apart: merged, «YouTube» and a nameless rule
+// read as a «YouTube» full of other sites, and two services under one
+// name can no longer be switched off one by one.
 
 const (
 	TidyDrop  = "drop"  // a rule that never matches or repeats one above
 	TidySites = "sites" // sites a rule never gets or has twice
-	TidyMerge = "merge" // rules with the same route, one after another
+	TidyMerge = "merge" // rules of one name and one route
 	TidyGeo   = "geo"   // sites of a service → its geosite category
 )
 
@@ -55,6 +61,11 @@ type TidyOptions struct {
 	Categories func(names []string) (map[string][]SiteCategory, error)
 	// Route names a server or group ID ("" = the main one).
 	Route func(id string) string
+	// Kept: rules a tool of the app keeps as plain sites (the browser
+	// extension's): no merge takes them (the app puts those together
+	// itself) and no geosite list goes into them (the tool would stop
+	// keeping the rule).
+	Kept func(Rule) bool
 }
 
 // TidyResult is the list of suggestions.
@@ -68,7 +79,9 @@ type tidyRow struct {
 	r       Rule
 	cr      compiled
 	id      string
-	use     bool // enabled, compiles, not managed
+	name    string // for the texts: every row has one, used or not
+	use     bool   // enabled, compiles, not managed
+	kept    bool
 	dropped bool // a drop suggestion: matches nothing
 }
 
@@ -76,7 +89,7 @@ func tidyRows(c Config, o TidyOptions) []tidyRow {
 	g := currentGeo()
 	rows := make([]tidyRow, len(c.Rules))
 	for i, r := range c.Rules {
-		rows[i] = tidyRow{r: r, id: tidyID(i, r)}
+		rows[i] = tidyRow{r: r, id: tidyID(i, r), name: ruleName(i, r), kept: o.Kept != nil && o.Kept(r)}
 		cr, err := compileRule(i, r, g)
 		if err != nil || !r.On() || o.Managed != nil && o.Managed(r) {
 			continue
@@ -261,10 +274,10 @@ func usesGeo(cr *compiled) bool {
 }
 
 // mergeKey: rules that can be merged are sites only (any program) or
-// programs only (any site).
+// programs only (any site), of one name and one route.
 func mergeKey(row *tidyRow) (string, bool) {
 	cr := &row.cr
-	if !row.use || row.dropped || cr.hasApp() == cr.hasDest() {
+	if !row.use || row.dropped || row.kept || cr.hasApp() == cr.hasDest() {
 		return "", false
 	}
 	kind := "d"
@@ -276,7 +289,30 @@ func mergeKey(row *tidyRow) (string, bool) {
 		prof = cr.profile
 	}
 	return strings.Join([]string{kind, fmt.Sprint(uint8(cr.action)), prof, strings.Join(cr.fallback, ","),
-		fmt.Sprint(cr.proto), fmt.Sprint(cr.ports)}, "\x00"), true
+		fmt.Sprint(cr.proto), fmt.Sprint(cr.ports), strings.ToLower(strings.TrimSpace(row.r.Name))}, "\x00"), true
+}
+
+// CanMoveUp reports whether rule j of c can be put right below rule base
+// (above it in the list): no rule between them decides, another way,
+// anything rule j decides for everyone. between names the rules between
+// that decide it another way for their programs (or sites) only: moved,
+// those connections go rule j's way.
+func CanMoveUp(c Config, o TidyOptions, base, j int) (ok bool, between []string) {
+	if base < 0 || j <= base || j >= len(c.Rules) {
+		return false, nil
+	}
+	rows := tidyRows(c, o)
+	if !rows[j].use {
+		return false, nil
+	}
+	hard, soft := moveUp(rows, base, j)
+	if hard {
+		return false, nil
+	}
+	for _, k := range soft {
+		between = append(between, rows[k].name)
+	}
+	return true, between
 }
 
 // moveUp tells what moving rule j up to just below base changes: hard
@@ -461,19 +497,22 @@ func tidyMerges(rows []tidyRow, o TidyOptions) []Tidy {
 		if len(g.members) < 2 {
 			continue
 		}
-		var ids, names []string
+		var ids []string
 		for _, m := range g.members {
 			ids = append(ids, rows[m].id)
-			names = append(names, "«"+rows[m].cr.name+"»")
 		}
 		first := &rows[g.members[0]].cr
-		t := Tidy{ID: "merge:" + strings.Join(ids, ","), Kind: TidyMerge, Rules: ids, Name: mergedName(rows, g.members),
-			Title:   fmt.Sprintf("Объединить %d правил(а) %s в одно", len(ids), routeText(first, o)),
-			Details: []string{strings.Join(names, ", ")}}
+		name := strings.TrimSpace(rows[g.members[0]].r.Name)
+		title := fmt.Sprintf("Объединить %d %s «%s» (%s) в одно", len(ids), ruCount(len(ids), "правило", "правила", "правил"), name, routeText(first, o))
+		if name == "" {
+			title = fmt.Sprintf("Объединить %d %s без названия (%s) в одно", len(ids), ruCount(len(ids), "правило", "правила", "правил"), routeText(first, o))
+		}
+		t := Tidy{ID: "merge:" + strings.Join(ids, ","), Kind: TidyMerge, Rules: ids, Name: name, Title: title,
+			Details: []string{mergeItems(rows, g.members)}}
 		if len(g.soft) > 0 {
 			var by []string
 			for _, k := range g.soft {
-				by = append(by, "«"+rows[k].cr.name+"»")
+				by = append(by, "«"+rows[k].name+"»")
 			}
 			t.Changes = true
 			t.Details = append(t.Details, "Правила "+strings.Join(by, ", ")+" стоят между ними: для их программ (или сайтов) эти соединения пойдут "+routeText(first, o)+".")
@@ -483,20 +522,34 @@ func tidyMerges(rows []tidyRow, o TidyOptions) []Tidy {
 	return out
 }
 
-func mergedName(rows []tidyRow, members []int) string {
-	var names []string
+// mergeItems says what a merged rule will hold.
+func mergeItems(rows []tidyRow, members []int) string {
+	var items []string
 	for _, m := range members {
-		if n := strings.TrimSpace(rows[m].r.Name); n != "" && !slices.Contains(names, n) {
-			names = append(names, n)
+		for _, a := range rows[m].r.AllApps() {
+			if !slices.Contains(items, a.Pattern) {
+				items = append(items, a.Pattern)
+			}
+		}
+		for _, d := range rows[m].r.AllDomains() {
+			if d = strings.TrimSpace(d); !slices.Contains(items, d) {
+				items = append(items, d)
+			}
 		}
 	}
+	return "В одном правиле будет: " + sitesText(items) + "."
+}
+
+// ruCount picks the Russian plural form for n.
+func ruCount(n int, one, few, many string) string {
+	m10, m100 := n%10, n%100
 	switch {
-	case len(names) == 0:
-		return ""
-	case len(names) <= 3:
-		return strings.Join(names, ", ")
+	case m10 == 1 && m100 != 11:
+		return one
+	case m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14):
+		return few
 	}
-	return fmt.Sprintf("%s, %s и ещё %d", names[0], names[1], len(names)-2)
+	return many
 }
 
 // tidyGeo: plain sites of a rule a service's geosite category holds.
@@ -512,7 +565,7 @@ func tidyGeo(rows []tidyRow, o TidyOptions) ([]Tidy, string) {
 	byRow := map[int][]item{}
 	var names []string
 	for j := range rows {
-		if !rows[j].use || rows[j].dropped || !rows[j].cr.hasDom() {
+		if !rows[j].use || rows[j].dropped || rows[j].kept || !rows[j].cr.hasDom() {
 			continue
 		}
 		for _, d := range rows[j].r.AllDomains() {
@@ -570,6 +623,9 @@ func tidyGeo(rows []tidyRow, o TidyOptions) ([]Tidy, string) {
 				if len(c.items) == 1 && !relatedName(c.name, c.items[0].dom) {
 					continue
 				}
+				if c.size <= len(c.items) {
+					continue // the list holds no more than the rule already names
+				}
 				if len(c.items) > len(best.items) || len(c.items) == len(best.items) && (c.size < best.size || c.size == best.size && c.name < best.name) {
 					best = *c
 				}
@@ -584,7 +640,7 @@ func tidyGeo(rows []tidyRow, o TidyOptions) ([]Tidy, string) {
 			out = append(out, Tidy{ID: "geo:" + rows[j].id + ":" + best.name, Kind: TidyGeo, Rules: []string{rows[j].id},
 				Sites: srcs, Category: "geosite:" + best.name, Changes: true,
 				Title:   fmt.Sprintf("«%s»: заменить %s списком geosite:%s", rows[j].cr.name, sitesText(srcs), best.name),
-				Details: []string{fmt.Sprintf("В списке %d записей: правило поймает и другие адреса этого сервиса, а список обновляется вместе с базой правил.", best.size)}})
+				Details: []string{fmt.Sprintf("В списке %d %s: правило поймает и другие адреса этого сервиса, а список обновляется вместе с базой правил.", best.size, ruCount(best.size, "запись", "записи", "записей"))}})
 			left = slices.DeleteFunc(left, func(it item) bool {
 				return slices.ContainsFunc(best.items, func(b item) bool { return b.src == it.src })
 			})
@@ -615,8 +671,46 @@ func relatedName(cat, dom string) bool {
 // ApplyTidy applies the accepted suggestions (their IDs) of TidyRules(c,
 // o) and returns the rules. A merge is checked again on the list as the
 // other changes left it: a rule it can no longer move stays where it is.
+// What the accepted ones made idle in turn (a site a new geosite list
+// covers, a rule a merge left with nothing of its own) goes with them, as
+// long as it changes no route: the list comes out with nothing more of
+// that kind to suggest.
 func ApplyTidy(c Config, o TidyOptions, accept []string) Config {
-	all := TidyRules(c, o).Items
+	first := TidyRules(c, o).Items
+	out := applyTidy(c, o, first, accept)
+	if len(accept) == 0 {
+		return out
+	}
+	offered := map[string]bool{}
+	for _, t := range first {
+		offered[t.ID] = true
+	}
+	return ApplyIdle(out, o, offered)
+}
+
+// ApplyIdle removes what a change made idle: the suggestions for c that
+// change no route and were not among the offered ones (those the user saw
+// and left unticked stay).
+func ApplyIdle(c Config, o TidyOptions, offered map[string]bool) Config {
+	out := c
+	for range 4 {
+		next := TidyRules(out, o).Items
+		var more []string
+		for _, t := range next {
+			if (t.Kind == TidyDrop || t.Kind == TidySites) && !t.Changes && !offered[t.ID] {
+				more = append(more, t.ID)
+				offered[t.ID] = true
+			}
+		}
+		if len(more) == 0 {
+			break
+		}
+		out = applyTidy(out, o, next, more)
+	}
+	return out
+}
+
+func applyTidy(c Config, o TidyOptions, all []Tidy, accept []string) Config {
 	ok := map[string]bool{}
 	for _, a := range accept {
 		ok[a] = true

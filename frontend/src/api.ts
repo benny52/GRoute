@@ -243,10 +243,11 @@ export interface GeoInfo {
   popular: GeoCategory[];
 }
 
-// «Навести порядок»: suggestions for the rule list (rules.Tidy).
+// «Навести порядок»: suggestions for the rule list (rules.Tidy; 'browser'
+// is the app's own, for the extension's rules by route).
 export type Tidy = {
   id: string;
-  kind: 'drop' | 'sites' | 'merge' | 'geo';
+  kind: 'drop' | 'sites' | 'browser' | 'merge' | 'geo';
   title: string;
   details: string[] | null;
   rules: string[];

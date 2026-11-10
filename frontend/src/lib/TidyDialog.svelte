@@ -14,9 +14,10 @@
   let busy = $state(false);
 
   // Safe ones start ticked: they change nothing about where traffic goes.
-  // Merges and lists change how the list reads or what it catches: the
-  // user decides.
-  const safe = (t: Tidy) => (t.kind === 'drop' || t.kind === 'sites') && !t.changes;
+  // So does putting the extension's rules together, unless a program's
+  // rule stands between them. Merges and lists change how the list reads
+  // or what it catches: the user decides.
+  const safe = (t: Tidy) => (t.kind === 'drop' || t.kind === 'sites' || t.kind === 'browser') && !t.changes;
 
   onMount(async () => {
     try {
@@ -32,7 +33,12 @@
   const groups: { kind: Tidy['kind']; title: string; hint: string }[] = [
     { kind: 'drop', title: 'Лишние правила', hint: 'Они ничего не решают: всё, что они ловят, раньше забирают правила выше. Удаление ничего не меняет.' },
     { kind: 'sites', title: 'Лишние сайты в правилах', hint: 'Повторы и сайты, которые всё равно уходят по правилу выше. Удаление ничего не меняет.' },
-    { kind: 'merge', title: 'Объединить правила', hint: 'Правила с одним маршрутом становятся одним — список короче. Сервисы будут в одном правиле: выключить один из них отдельно будет нельзя.' },
+    {
+      kind: 'browser',
+      title: 'Правила из браузера',
+      hint: 'То, что расширение складывало в «Из браузера: VPN / сервер / напрямую» до правил по сайтам. Одно правило на маршрут, названное так, как маршрут называется сейчас; списки и сети, добавленные вручную, — в отдельные правила. По сайтам их не разложить: с какой страницы пришёл адрес, не записывалось. Сайт переедет в своё правило, когда вы снова отправите его из браузера.',
+    },
+    { kind: 'merge', title: 'Объединить части одного правила', hint: 'Правила с одним названием (или все без названия) и одним маршрутом становятся одним. Правила с разными названиями не объединяются: это ваши отдельные сервисы.' },
     { kind: 'geo', title: 'Списки из базы правил (dat)', hint: 'Вместо россыпи доменов — готовый список сервиса. Он обновляется с базой и ловит и те адреса сервиса, которых нет в правиле.' },
   ];
 
@@ -75,7 +81,7 @@
       <p class="muted">Проверяю правила…</p>
     {:else if view}
       {#if !view.items.length}
-        <div class="note ok">Всё в порядке: лишних правил, повторов и того, что можно заменить списком из базы, не нашлось.</div>
+        <div class="note ok">Всё в порядке: лишних правил, повторов, разрозненных частей одного правила и того, что можно заменить списком из базы, не нашлось.</div>
       {:else}
         <p class="muted small">Отметьте, что сделать: изменения сохранятся сразу, как обычная правка правил.</p>
       {/if}
@@ -98,7 +104,6 @@
                   <input type="checkbox" bind:checked={picked[t.id]} />
                   <span class="body">
                     <span class="title">{hide(t.title)}</span>
-                    {#if t.kind === 'merge' && t.name}<span class="muted small">Новое название: «{hide(t.name)}»</span>{/if}
                     {#each t.details ?? [] as d, i (i)}<span class="muted small">{hide(d)}</span>{/each}
                     {#if t.changes}<span class="warn small"><Icon name="alert" size={13} />Меняет, куда пойдёт часть соединений</span>{/if}
                   </span>

@@ -22,7 +22,9 @@ import (
 // (".example.com") in the others, the address rules above the site rules.
 // A name has one route in the extension's rules (the last one chosen), and
 // an address is narrower than its site, so this order lets every choice
-// decide its own name whatever the user picked before.
+// decide its own name whatever the user picked before. What a page sends
+// leaves the rules by route for the page's rule; «Навести порядок» puts
+// the rules by route themselves in order (browser_tidy.go).
 
 // browserState is the Controller's part for the extension.
 type browserState struct {
@@ -479,8 +481,10 @@ func (c *Controller) BrowserAdd(e BrowserEdit) (BrowserResult, error) {
 					continue
 				}
 				// The same name with the same route in another site's rule
-				// stays: each site's rule is whole by itself.
-				other := r.Action != act || r.Profile != profile
+				// stays: each site's rule is whole by itself. A rule by
+				// route is no site's: what a page sends again leaves it
+				// for the page's rule, and the old heaps empty out.
+				other := r.Action != act || r.Profile != profile || site != "" && browserRuleSite(*r) == ""
 				n := len(r.Domains)
 				r.Domains = slices.DeleteFunc(r.Domains, func(d string) bool {
 					return other && d == p || !hosts && !strings.HasPrefix(d, ".") && browserCatches(p, d)

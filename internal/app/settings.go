@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -549,11 +550,14 @@ type TidyView struct {
 }
 
 // TidyRules lists the suggestions for st's rules; with accept (their IDs)
-// it also applies those. The page saves the result as any edit.
+// it also applies those. The page saves the result as any edit. The
+// extension's rules by route get one suggestion of their own
+// (browser_tidy.go), applied after the others.
 func (c *Controller) TidyRules(st settings.Settings, accept []string) TidyView {
 	c.initGeo()
 	o := rules.TidyOptions{
 		Managed: isZapretRule,
+		Kept:    func(r rules.Rule) bool { return strings.HasPrefix(r.Name, BrowserRulePrefix) },
 		Route: func(id string) string {
 			if id == "" {
 				return "основной сервер"
@@ -563,8 +567,21 @@ func (c *Controller) TidyRules(st settings.Settings, accept []string) TidyView {
 		Categories: c.serviceCategories,
 	}
 	v := TidyView{TidyResult: rules.TidyRules(st.Config, o)}
+	if _, did, changes := c.browserTidy(st.Config, o); len(did) > 0 {
+		v.Items = append(v.Items, rules.Tidy{ID: TidyBrowser, Kind: TidyBrowser, Details: did, Rules: []string{}, Changes: changes,
+			Title: "Собрать правила «Из браузера» по маршрутам"})
+	}
 	if len(accept) > 0 {
-		v.Rules = rules.ApplyTidy(st.Config, o, accept).Rules
+		offered := map[string]bool{}
+		for _, t := range v.Items {
+			offered[t.ID] = true
+		}
+		cfg := rules.ApplyTidy(st.Config, o, slices.DeleteFunc(slices.Clone(accept), func(id string) bool { return id == TidyBrowser }))
+		if slices.Contains(accept, TidyBrowser) {
+			cfg, _, _ = c.browserTidy(cfg, o)
+			cfg = rules.ApplyIdle(cfg, o, offered)
+		}
+		v.Rules = cfg.Rules
 	}
 	if v.Rules == nil {
 		v.Rules = []rules.Rule{}
