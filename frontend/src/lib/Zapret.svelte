@@ -38,7 +38,12 @@
         enabled = v.settings.enabled;
         targets = [...(v.settings.targets ?? [])];
         sitesText = (v.settings.sites ?? []).join('\n');
-        methods = { ...(v.settings.methods ?? {}) };
+        // Every service has a value: an automatic one is "", not missing
+        // (undefined left the select blank once the generator's options
+        // came).
+        const m: Partial<Record<ZapretTarget, string>> = { ...(v.settings.methods ?? {}) };
+        for (const t of v.targets) m[t.target] ??= '';
+        methods = m;
       }
     } catch (e) {
       error = errText(e);
