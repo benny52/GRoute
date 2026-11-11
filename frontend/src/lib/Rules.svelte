@@ -42,6 +42,47 @@
   let importing = $state(false); // «Импорт»: rules of another program
   let wizard = $state(false);
   let tidying = $state(false); // «Навести порядок»
+  // The list's view, the window's own (not settings): a search over names,
+  // sites, programs and routes, and rows in one line. dense: the user's
+  // choice once made, else by the list's length.
+  let query = $state('');
+  let compact = $state<boolean | null>(storedCompact());
+  const q = $derived(query.trim().toLowerCase());
+  const dense = $derived(compact ?? (s?.rules.length ?? 0) > 10);
+
+  function storedCompact(): boolean | null {
+    try {
+      const v = localStorage.getItem('hyroute.rulesCompact');
+      return v === '1' ? true : v === '0' ? false : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function setCompact(on: boolean) {
+    compact = on;
+    try {
+      localStorage.setItem('hyroute.rulesCompact', on ? '1' : '0');
+    } catch {}
+  }
+
+  const has = (text: string) => text.toLowerCase().includes(q);
+
+  // found: the search matches the rule's title, a site, a program or where
+  // it sends.
+  function found(r: Rule): boolean {
+    if (!q) return true;
+    return has(title(r)) || has(routeLabel(r)) || (r.domains ?? []).some((d) => has(d) || has(siteLabel(d))) || (r.apps ?? []).some((a) => has(a.pattern));
+  }
+
+  // hitsFirst: a rule shows its first few items; the ones the search
+  // found come first, so the reason a rule is listed is in sight.
+  function hitsFirst<T>(items: T[], text: (x: T) => string): T[] {
+    if (!q) return items;
+    return [...items.filter((x) => has(text(x))), ...items.filter((x) => !has(text(x)))];
+  }
+
+  const foundCount = $derived(s && q ? s.rules.filter(found).length : 0);
   let dragFrom = $state<number | null>(null);
   let dragOver = $state<number | null>(null);
   // The list a drag started on: a drop on a reloaded list is cancelled.
@@ -434,8 +475,22 @@
   {#if error}<div class="note error">{hide(error)}</div>{/if}
 
   {#if s}
-    <div class="list">
+    {#if s.rules.length > 1}
+      <div class="row tools">
+        <input class="grow search" type="text" placeholder="Найти правило: сайт, программа, название или сервер" bind:value={query} />
+        {#if q}<span class="muted small found">{foundCount} из {s.rules.length}</span>{/if}
+        <div class="seg">
+          <button class:on={!dense} onclick={() => setCompact(false)} title="Название и под ним сайты и программы">Крупно</button>
+          <button class:on={dense} onclick={() => setCompact(true)} title="Правило в одну строку: на экране помещается вдвое больше">Компактно</button>
+        </div>
+      </div>
+    {/if}
+    <div class="list" class:dense>
+      {#if q && !foundCount}
+        <div class="card muted">Ничего не нашлось. Куда пойдёт адрес, покажет «Проверить адрес» внизу страницы: возможно, его решает «Всё остальное».</div>
+      {/if}
       {#each s.rules as r, i (i + ':' + JSON.stringify(r))}
+        {#if found(r)}
         {@const pr = problem(r)}
         {@const li = lint.filter((x) => x.index === i)}
         {@const more = Math.max(0, (r.apps?.length ?? 0) - 3) + Math.max(0, (r.domains?.length ?? 0) - 4)}
@@ -457,17 +512,23 @@
         >
           <span
             class="grip"
-            draggable="true"
+            class:still={!!q}
+            draggable={q ? 'false' : 'true'}
             role="button"
             tabindex="-1"
-            title="Перетащите, чтобы изменить порядок"
+            title={q ? 'Порядок меняется, когда виден весь список: очистите поиск' : 'Перетащите, чтобы изменить порядок'}
             ondragstart={(e) => {
+              if (q) {
+                e.preventDefault();
+                return;
+              }
               dragFrom = i;
               dragList = s;
               e.dataTransfer?.setData('text/plain', String(i));
             }}
             ondragend={() => (dragFrom = dragOver = null)}><Icon name="grip" size={16} /></span
           >
+          {#if dense || q}<span class="num" title="Место правила в списке: первое подходящее сверху срабатывает">{i + 1}</span>{/if}
           <label class="switch" title={r.enabled === false ? 'Выключено' : 'Включено'}>
             <input type="checkbox" checked={r.enabled !== false} onchange={() => toggle(i)} />
             <span></span>
@@ -475,10 +536,10 @@
           <button class="body" onclick={() => openEditor(i, JSON.parse(JSON.stringify(r)), 'Правило')}>
             <span class="t ellipsis">{title(r)}</span>
             <span class="what">
-              {#each (r.apps ?? []).slice(0, 3) as a}<span class="tag"><Icon name="app" size={12} />{appLabel(a.pattern)}</span>{/each}
-              {#each (r.domains ?? []).slice(0, 4) as d}
+              {#each hitsFirst(r.apps ?? [], (a) => a.pattern).slice(0, 3) as a}<span class="tag" class:hit={!!q && has(a.pattern)}><Icon name="app" size={12} />{appLabel(a.pattern)}</span>{/each}
+              {#each hitsFirst(r.domains ?? [], (d) => d + ' ' + siteLabel(d)).slice(0, 4) as d}
                 {@const il = itemLabel(d)}
-                <span class="tag" class:geo={il?.geo} class:miss={!!il?.missing} title={il?.geo ? il.tip : hide(il?.tip)}
+                <span class="tag" class:hit={!!q && (has(d) || has(siteLabel(d)))} class:geo={il?.geo} class:miss={!!il?.missing} title={il?.geo ? il.tip : hide(il?.tip)}
                   ><Icon name={il?.missing ? 'alert' : il?.geo ? 'database' : 'globe'} size={12} />{il?.geo ? siteLabel(d) : hide(siteLabel(d))}{#if il?.geo}<span
                       class="src">{il.kind}</span
                     >{/if}</span
@@ -491,8 +552,10 @@
           <Icon name="arrow" size={16} />
           <span class="pill {r.action}" title={routeLabel(r)}>{routeLabel(r)}</span>
           <div class="acts">
-            <button class="icon" onclick={() => move(i, i - 1)} disabled={i === 0} title="Выше"><Icon name="up" size={16} /></button>
-            <button class="icon" onclick={() => move(i, i + 1)} disabled={i === s.rules.length - 1} title="Ниже"><Icon name="down" size={16} /></button>
+            <button class="icon" onclick={() => move(i, i - 1)} disabled={i === 0 || !!q} title={q ? 'Очистите поиск, чтобы менять порядок' : 'Выше'}><Icon name="up" size={16} /></button>
+            <button class="icon" onclick={() => move(i, i + 1)} disabled={i === s.rules.length - 1 || !!q} title={q ? 'Очистите поиск, чтобы менять порядок' : 'Ниже'}
+              ><Icon name="down" size={16} /></button
+            >
             <button class="icon danger" onclick={() => remove(i)} title="Удалить"><Icon name="trash" size={16} /></button>
           </div>
           {#if pr || li.length}
@@ -502,6 +565,7 @@
             </div>
           {/if}
         </div>
+        {/if}
       {/each}
 
       {#if s.rules.length === 0}
@@ -703,6 +767,22 @@
   header > .grow { min-width: 280px; }
   .sub { margin: 4px 0 0; }
   .list { display: grid; gap: 8px; }
+
+  .tools { gap: 10px; align-items: center; }
+  .search { max-width: 460px; }
+  .found { white-space: nowrap; }
+  .num { color: var(--faint); font-size: 12px; min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; flex: none; }
+  .tag.hit { outline: 1px solid var(--accent); color: var(--text); }
+  .grip.still { cursor: default; opacity: 0.35; }
+  /* Rows in one line: the name, then as many of its items as fit. */
+  .list.dense { gap: 4px; }
+  .list.dense .rule { padding: 3px 10px; gap: 8px; }
+  .list.dense .body { flex-direction: row; align-items: center; gap: 10px; padding: 0 4px; overflow: hidden; }
+  .list.dense .t { flex: none; max-width: 46%; }
+  .list.dense .what { flex: 1; min-width: 0; flex-wrap: nowrap; overflow: hidden; }
+  .list.dense .tag { flex: none; }
+  .list.dense .pill { max-width: 210px; padding: 2px 9px; }
+  .list.dense .problems { padding-left: 86px; }
 
   .rule { display: flex; align-items: center; gap: 10px; padding: 10px 12px; flex-wrap: wrap; }
   .rule.over { border-color: var(--accent); border-style: dashed; }
