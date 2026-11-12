@@ -43,6 +43,7 @@
   // VLESS (run by Xray): its settings live in p.vless; switching keeps
   // what was typed for the other protocol until the save, where the
   // backend drops it.
+  const isAWG = $derived(p.protocol === 'amneziawg');
   const isVLESS = $derived(p.protocol === 'vless');
   function setProtocol(proto: string) {
     p.protocol = proto;
@@ -99,7 +100,9 @@
 >
   <div class="dialog" role="dialog" aria-modal="true">
     <h2>{p.id ? 'Сервер' : 'Новый сервер'}</h2>
-    {#if sourceName && isVLESS}
+    {#if sourceName && isAWG}
+      <div class="note warn">При обновлении подписки «{hide(sourceName)}» параметры AmneziaWG загрузятся заново.</div>
+    {:else if sourceName && isVLESS}
       <div class="note warn">
         Сервер из подписки «{hide(sourceName)}». При её обновлении все его настройки, кроме «Резолвить адрес», снова возьмутся из
         подписки, так что их правки здесь временные. Добавить этот сервер отдельно с теми же адресом, UUID и настройками нельзя: это
@@ -122,10 +125,14 @@
     <div class="grid">
       <label for="pe-proto">Протокол</label>
       <div class="row">
+        {#if isAWG}
+          <span id="pe-proto">AmneziaWG</span>
+        {:else}
         <select id="pe-proto" value={p.protocol ?? ''} onchange={(e) => setProtocol((e.currentTarget as HTMLSelectElement).value)}>
           <option value="">Hysteria 2</option>
           <option value="vless">VLESS (Xray)</option>
         </select>
+        {/if}
       </div>
 
       <label for="pe-name">Название</label>
@@ -142,7 +149,7 @@
         {:else}
           <input id="pe-host" class="grow" bind:value={p.host} placeholder="example.com или IP" />
         {/if}
-        {#if isVLESS}
+        {#if isVLESS || isAWG}
           <input bind:value={p.ports} style="width: 170px" placeholder="443" title="Порт сервера" />
         {:else}
           <input bind:value={p.ports} style="width: 170px" placeholder="443 или 443,20000-50000" title="Порт или диапазоны для port hopping" />
@@ -220,7 +227,7 @@
           <input class="grow" type={ro ? 'password' : 'text'} bind:value={p.vless.host} placeholder="Host, по умолчанию SNI" />
         </div>
       {/if}
-    {:else}
+    {:else if !isAWG}
 
       <label for="pe-auth">Пароль</label>
       <div class="row">
@@ -295,7 +302,7 @@
         </label>
       </div>
     </details>
-    {:else}
+    {:else if !isAWG}
     <details class="adv">
       <summary>Дополнительно: TLS, скорость, port hopping</summary>
       <div class="grid">

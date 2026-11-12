@@ -241,9 +241,9 @@ func (m *Manager) newEndpoint(key string, p hysteria.Profile, test bool) *Endpoi
 func (m *Manager) run(e *Endpoint, p hysteria.Profile) {
 	defer close(e.started)
 	if err := e.r.Start(); err != nil {
-		m.log().Error("hysteria not started", "profile", p.Name, "err", err)
+		m.log().Error("tunnel not started", "engine", p.EngineName(), "profile", p.Name, "err", err)
 	} else {
-		m.log().Info("hysteria started", "profile", p.Name, "test", e.Test)
+		m.log().Info("tunnel started", "engine", p.EngineName(), "profile", p.Name, "test", e.Test)
 	}
 }
 
@@ -253,7 +253,7 @@ func (m *Manager) stop(e *Endpoint) {
 	<-e.started
 	e.r.Stop()
 	m.setIPs(e.ipKey, nil)
-	m.log().Info("hysteria stopped", "profile", e.Profile.Name, "test", e.Test)
+	m.log().Info("tunnel stopped", "engine", e.Profile.EngineName(), "profile", e.Profile.Name, "test", e.Test)
 }
 
 func (m *Manager) setIPs(key string, ips []netip.Addr) error {

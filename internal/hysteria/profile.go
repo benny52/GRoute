@@ -24,6 +24,7 @@ import (
 const (
 	ProtoHysteria2 = "" // the default: profiles saved before VLESS have none
 	ProtoVLESS     = "vless"
+	ProtoAmneziaWG = "amneziawg"
 )
 
 type Profile struct {
@@ -33,6 +34,7 @@ type Profile struct {
 	// profile uses Host, Ports (one port), PinServerIP and VLESS; the
 	// Hysteria fields stay empty.
 	Protocol string         `json:"protocol,omitempty"`
+	AWG      AWGSettings    `json:"awg,omitzero"`
 	VLESS    vless.Settings `json:"vless,omitzero"`
 	// Host is a domain or IP literal (no brackets).
 	Host string `json:"host"`
@@ -82,7 +84,12 @@ func SameConnectionNoSecrets(a, b Profile) bool {
 // IsVLESS: the profile runs through Xray.
 func (p *Profile) IsVLESS() bool { return p.Protocol == ProtoVLESS }
 
+func (p *Profile) IsAmneziaWG() bool { return p.Protocol == ProtoAmneziaWG }
+
 func (p *Profile) EngineName() string {
+	if p.IsAmneziaWG() {
+		return "AmneziaWG"
+	}
 	if p.IsVLESS() {
 		return "Xray"
 	}
@@ -91,6 +98,9 @@ func (p *Profile) EngineName() string {
 
 // ProtocolName names the protocol for the user.
 func (p *Profile) ProtocolName() string {
+	if p.IsAmneziaWG() {
+		return "AmneziaWG"
+	}
 	if p.IsVLESS() {
 		return "VLESS"
 	}
@@ -100,6 +110,11 @@ func (p *Profile) ProtocolName() string {
 // Normalize clears the fields of the other protocol (an editor may send
 // both) and puts VLESS's transport name in HyRoute's form.
 func (p *Profile) Normalize() {
+	if p.IsAmneziaWG() {
+		*p = Profile{ID: p.ID, Name: p.Name, Source: p.Source, Missing: p.Missing, Protocol: p.Protocol, Host: p.Host, Ports: p.Ports, PinServerIP: p.PinServerIP, AWG: p.AWG}
+		return
+	}
+	p.AWG = AWGSettings{}
 	if p.IsVLESS() {
 		p.Auth, p.TLS, p.Obfs, p.Hop, p.Bandwidth, p.Congestion, p.QUIC, p.FastOpen = "", TLS{}, Obfs{}, Hop{}, Bandwidth{}, Congestion{}, QUIC{}, false
 		p.VLESS.Network = vless.NormalizeNetwork(p.VLESS.Network)
@@ -133,21 +148,23 @@ func (p *Profile) Transport() string {
 // Secrets are the values no log may show: the auth and obfuscation
 // passwords of Hysteria, the user ID of VLESS.
 func (p *Profile) Secrets() []string {
-	return []string{p.Auth, p.Obfs.Password, p.VLESS.ID}
+	return []string{p.Auth, p.Obfs.Password, p.VLESS.ID, p.AWG.PrivateKey, p.AWG.PresharedKey, p.AWG.HeaderProtectionKey}
 }
 
 // ClearSecrets empties the secrets (a backup without them).
 func (p *Profile) ClearSecrets() {
+	p.AWG.AWGKeys = AWGKeys{}
 	p.Auth, p.Obfs.Password, p.VLESS.ID = "", "", ""
 }
 
 // HasSecrets: any secret is set.
 func (p *Profile) HasSecrets() bool {
-	return p.Auth != "" || p.Obfs.Password != "" || p.VLESS.ID != ""
+	return p.Auth != "" || p.Obfs.Password != "" || p.VLESS.ID != "" || p.AWG.AWGKeys != (AWGKeys{})
 }
 
 // CopySecrets takes the secrets of from.
 func (p *Profile) CopySecrets(from Profile) {
+	p.AWG.AWGKeys = from.AWG.AWGKeys
 	p.Auth, p.Obfs.Password, p.VLESS.ID = from.Auth, from.Obfs.Password, from.VLESS.ID
 }
 
@@ -199,7 +216,12 @@ func (p *Profile) Validate() error {
 	if p.Host == "" {
 		return errors.New("server host is empty")
 	}
+	if !p.IsAmneziaWG() && p.AWG != (AWGSettings{}) {
+		return errors.New("лишние параметры AmneziaWG в профиле")
+	}
 	switch p.Protocol {
+	case ProtoAmneziaWG:
+		return p.validateAWG()
 	case ProtoHysteria2:
 	case ProtoVLESS:
 		return p.validateVLESS()

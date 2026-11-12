@@ -136,7 +136,7 @@ func TestParseSubscriptionErrors(t *testing.T) {
 		"trojan://a@b:1\nvmess://abc": "только другие протоколы",
 		// Its own links' errors come first, and a short answer in words is
 		// quoted; a web address in it is no protocol.
-		"trojan://a@b:1\nhy2://pw@h.example:443/?obfs=salamander": "ни один сервер Hysteria 2 или VLESS не разобран (1)",
+		"trojan://a@b:1\nhy2://pw@h.example:443/?obfs=salamander": "ни один сервер не разобран (1)",
 		"Подписка истекла, продлите: https://t.me/example_bot":    "ответил текстом",
 	} {
 		if _, err := parseSubscription([]byte(body)); err == nil || !strings.Contains(err.Error(), want) {

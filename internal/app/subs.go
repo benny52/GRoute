@@ -286,13 +286,13 @@ func parseSubscription(body []byte) (Links, error) {
 		return l, errors.New("сервер вернул веб-страницу, а не подписку: проверьте ссылку")
 	case len(l.Errors) > 0:
 		// Its own links come first: the other protocols are not the issue.
-		msg := fmt.Sprintf("ни один сервер Hysteria 2 или VLESS не разобран (%d): %s", len(l.Errors), l.Errors[0])
+		msg := fmt.Sprintf("ни один сервер не разобран (%d): %s", len(l.Errors), l.Errors[0])
 		if l.IgnoredTotal() > 0 {
 			msg += "; других протоколов: " + ignoredText(l.Ignored)
 		}
 		return l, errors.New(msg)
 	case l.IgnoredTotal() > 0:
-		return l, fmt.Errorf("в подписке нет серверов Hysteria 2 и VLESS, только другие протоколы (%s)", ignoredText(l.Ignored))
+		return l, fmt.Errorf("в подписке нет поддерживаемых серверов, только другие протоколы (%s)", ignoredText(l.Ignored))
 	case l.Format != "":
 		return l, fmt.Errorf("в конфиге %s нет серверов", l.Format)
 	case strings.HasPrefix(t, "{") || strings.HasPrefix(t, "["):
@@ -302,7 +302,7 @@ func parseSubscription(body []byte) (Links, error) {
 		// than any guess.
 		return l, fmt.Errorf("сервер подписки ответил текстом, а не ссылками: «%s»", t)
 	}
-	return l, errors.New("в ответе нет ссылок hysteria2://, hy2:// или vless://")
+	return l, errors.New("в ответе нет поддерживаемых ссылок")
 }
 
 func ignoredText(m map[string]int) string {

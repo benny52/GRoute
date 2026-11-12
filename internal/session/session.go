@@ -9,6 +9,7 @@ import (
 	"net"
 	"path/filepath"
 
+	"github.com/lardan099/hyroute/internal/awg"
 	"github.com/lardan099/hyroute/internal/dnspolicy"
 	"github.com/lardan099/hyroute/internal/flows"
 	"github.com/lardan099/hyroute/internal/groups"
@@ -40,10 +41,12 @@ func (cfg *Config) XrayPath() string {
 	return filepath.Join(cfg.Dir, "xray.exe")
 }
 
-// RunnerFactory starts a hysteria.Supervisor per profile: hysteria.exe, or
-// xray.exe for VLESS. The profile check uses it outside a session too.
+// RunnerFactory selects the profile's engine for sessions and profile checks.
 func RunnerFactory(cfg Config) tunnels.Factory {
 	return func(p hysteria.Profile, h tunnels.Hooks) tunnels.Runner {
+		if p.IsAmneziaWG() {
+			return awg.NewRunner(p, h)
+		}
 		exe, path := cfg.HysteriaPath(), cfg.HysteriaPath
 		if p.IsVLESS() {
 			exe, path = cfg.XrayPath(), cfg.XrayPath

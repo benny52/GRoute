@@ -62,6 +62,9 @@ func (c *Controller) summaryLocked(p *hysteria.Profile) ProfileSummary {
 		s.Protocol, s.Transport, s.Flow = "vless", p.Transport(), p.VLESS.Flow
 		s.SNI, s.Pinned = p.VLESS.SNI, p.VLESS.PinSHA256 != ""
 	}
+	if p.IsAmneziaWG() {
+		s.Protocol = hysteria.ProtoAmneziaWG
+	}
 	s.SourceName = c.sourceNameLocked(p.Source)
 	return s
 }
@@ -265,7 +268,7 @@ func (c *Controller) ImportURIs(text string) (ImportResult, error) {
 	}
 	res.Warnings, res.Errors = parsed.Warnings, parsed.Errors
 	if len(parsed.Profiles) == 0 && len(res.Errors) == 0 {
-		return res, errors.New("не найдено ни одной ссылки hysteria2://, hy2:// или vless://")
+		return res, errors.New("не найдено поддерживаемой ссылки или конфигурации сервера")
 	}
 	c.mu.Lock()
 	var added []hysteria.Profile

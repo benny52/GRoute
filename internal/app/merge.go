@@ -159,7 +159,7 @@ func mergeSubscription(list []hysteria.Profile, source string, fresh []hysteria.
 // is the user's: the rest of the editor's Hysteria settings mean nothing
 // to the other protocol.
 func keepLocal(fresh, old hysteria.Profile) hysteria.Profile {
-	if fresh.IsVLESS() || old.IsVLESS() {
+	if fresh.Protocol != hysteria.ProtoHysteria2 || old.Protocol != hysteria.ProtoHysteria2 {
 		fresh.PinServerIP = old.PinServerIP
 		return fresh
 	}

@@ -38,12 +38,22 @@ func (l *Links) IgnoredTotal() int {
 	return n
 }
 
-// ParseLinks finds hysteria2://, hy2:// and vless:// links in text (one
-// per line or separated by spaces). A body without any "://" is tried as base64 (the
-// common subscription format).
+// ParseLinks accepts a client .conf or a plain/base64 subscription with
+// Hysteria 2, VLESS and AmneziaWG share links.
 func ParseLinks(text string) Links {
-	res := Links{Ignored: map[string]int{}}
+	res := Links{Ignored: map[string]int{}, Warnings: []string{}, Errors: []string{}}
 	text = strings.TrimPrefix(strings.TrimSpace(text), "\ufeff")
+	if looksLikeAWGConfig(text) {
+		p, err := hysteria.ParseAWGConfig(text)
+		res.Format = "AmneziaWG .conf"
+		if err != nil {
+			res.Errors = []string{err.Error()}
+			res.Skipped = []SubEntry{skippedEntry("", "amneziawg", err.Error())}
+		} else {
+			res.Profiles = []hysteria.Profile{p}
+		}
+		return res
+	}
 	if !strings.Contains(text, "://") {
 		if dec, ok := decodeBase64(text); ok && strings.Contains(dec, "://") {
 			text, res.Base64 = dec, true
@@ -59,17 +69,14 @@ func ParseLinks(text string) Links {
 		}
 		if !slices.Contains(hysteria.LinkSchemes, scheme) {
 			res.Ignored[scheme]++
-			entry := skippedLink(f, scheme, "")
-			if scheme == "vpn" && amneziaWG(f, &decodeBudget) {
-				entry.Protocol = "AmneziaWG"
-				entry.Reason = "Протокол AmneziaWG не поддерживается"
-			}
-			res.Skipped = append(res.Skipped, entry)
+			res.Skipped = append(res.Skipped, skippedLink(f, scheme, ""))
 			continue
 		}
-		if msg, ok := panelNotice(f); ok {
-			res.Notices = append(res.Notices, msg)
-			continue
+		if scheme != "vpn" && scheme != "amneziawg" {
+			if msg, ok := panelNotice(f); ok {
+				res.Notices = append(res.Notices, msg)
+				continue
+			}
 		}
 		n++
 		p, warns, err := hysteria.ParseURI(f)
@@ -78,6 +85,18 @@ func ParseLinks(text string) Links {
 			label = p.Host
 		}
 		if err != nil {
+			if scheme == "vpn" {
+				entry := skippedLink(f, scheme, "")
+				if amneziaWG(f, &decodeBudget) {
+					entry.Protocol = "AmneziaWG"
+					entry.Reason = "Неполная или неподдерживаемая конфигурация AmneziaWG"
+					res.Errors = append(res.Errors, fmt.Sprintf("ссылка %d: %s", n, entry.Reason))
+				} else {
+					res.Ignored[scheme]++
+				}
+				res.Skipped = append(res.Skipped, entry)
+				continue
+			}
 			res.Errors = append(res.Errors, fmt.Sprintf("ссылка %d: %v", n, err))
 			res.Skipped = append(res.Skipped, skippedLink(f, scheme, err.Error()))
 			continue
@@ -92,12 +111,6 @@ func ParseLinks(text string) Links {
 	}
 	for _, m := range res.Notices {
 		res.Warnings = append(res.Warnings, "сообщение панели: «"+m+"»")
-	}
-	if res.Warnings == nil {
-		res.Warnings = []string{}
-	}
-	if res.Errors == nil {
-		res.Errors = []string{}
 	}
 	return res
 }
@@ -160,4 +173,16 @@ func decodeBase64(s string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// Only interpret a complete file, never an embedded sample in a subscription.
+func looksLikeAWGConfig(text string) bool {
+	for line := range strings.SplitSeq(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return strings.EqualFold(line, "[Interface]")
+	}
+	return false
 }

@@ -6,6 +6,8 @@ toolchain go1.27.1
 
 require (
 	fyne.io/systray v1.12.2
+	github.com/amnezia-vpn/amneziawg-go v0.2.19 // integration test peer for AmneziaWG 2.0
+	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260828
 	github.com/go-ole/go-ole v1.3.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/pkg/sftp v1.13.11
@@ -18,6 +20,7 @@ require (
 	golang.org/x/sys v0.48.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
+	gvisor.dev/gvisor v0.0.0-20231202080848-1f7806d17489
 	modernc.org/sqlite v1.60.1
 	rsc.io/qr v0.2.0
 )
@@ -28,6 +31,7 @@ require (
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/google/btree v1.1.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
@@ -53,6 +57,8 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	go4.org/netipx v0.0.0-20220725152314-7e7bdc8411bf // indirect
 	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/time v0.9.0 // indirect
+	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect

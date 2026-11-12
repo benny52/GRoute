@@ -57,6 +57,26 @@ func TestAddrRoundTrip(t *testing.T) {
 	}
 }
 
+type offlineNetwork struct{}
+
+func (offlineNetwork) ListenUDP(bool) (net.PacketConn, error) { return nil, errors.New("offline") }
+func (offlineNetwork) ResolveUDP(context.Context, Addr) (*net.UDPAddr, error) {
+	return nil, errors.New("offline")
+}
+
+func TestUnavailablePacketNetworkRejectsAssociate(t *testing.T) {
+	s := &Server{UDPNetwork: offlineNetwork{}}
+	if err := s.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	client := &Client{Server: s.Addr()}
+	if assoc, err := client.UDPAssociate(t.Context()); err == nil {
+		assoc.Close()
+		t.Fatal("association opened with no tunnel sockets")
+	}
+}
+
 func TestConnectWithAuth(t *testing.T) {
 	echo := echoServer(t)
 	var seen Addr

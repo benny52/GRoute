@@ -29,7 +29,7 @@
 <div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && !running && onclose()}>
   <div class="dialog panel">
     <h2>Проверка профиля «{hide(profile.name)}»</h2>
-    <p>{profile.protocol === 'vless' ? 'VLESS' : 'Hysteria 2'} · {profile.engine}</p>
+    <p>{#if profile.protocol === 'amneziawg'}AmneziaWG · локальный SOCKS5{:else}{profile.protocol === 'vless' ? 'VLESS' : 'Hysteria 2'} · {profile.engine}{/if}</p>
     {#if running}
       <p class="muted">Проверяем соединение…</p>
     {/if}

@@ -97,6 +97,9 @@ func (c *Controller) Diagnostics(system []string, privacy bool) string {
 		if p.Obfs != "" {
 			flags = append(flags, "obfs "+p.Obfs)
 		}
+		if p.Protocol == "amneziawg" {
+			flags = append(flags, p.Engine)
+		}
 		if p.Protocol == "vless" {
 			flags = append(flags, "VLESS "+p.Transport)
 			if p.Flow != "" {

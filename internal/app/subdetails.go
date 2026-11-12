@@ -54,6 +54,8 @@ func protocolLabel(s string) string {
 	switch s {
 	case "hy2", "hysteria2":
 		return "Hysteria 2"
+	case "amneziawg":
+		return "AmneziaWG"
 	case "vless":
 		return "VLESS"
 	}

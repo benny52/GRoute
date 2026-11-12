@@ -195,7 +195,10 @@ func validServer(p hysteria.Profile, secrets bool) (hysteria.Profile, error) {
 	}
 	p.Host, p.Ports = host, ports
 	q := p
-	if !secrets && !q.IsVLESS() && q.Obfs.Password == "" {
+	if !secrets && q.IsAmneziaWG() && q.AWG.PrivateKey == "" {
+		q.AWG.PrivateKey = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	}
+	if !secrets && q.Protocol == hysteria.ProtoHysteria2 && q.Obfs.Password == "" {
 		q.Obfs.Password = "x"
 	}
 	if !secrets && q.IsVLESS() && q.VLESS.ID == "" {

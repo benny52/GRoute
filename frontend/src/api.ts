@@ -106,7 +106,7 @@ export interface ProfileSummary {
   sni: string;
   insecure: boolean;
   pinned: boolean;
-  protocol: string; // hysteria2 | vless
+  protocol: string; // hysteria2 | vless | amneziawg
   engine: string;
   transport: string; // VLESS: "REALITY", "WS · TLS" …
   flow: string; // VLESS flow, '' none

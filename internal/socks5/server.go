@@ -1,6 +1,7 @@
 package socks5
 
 import (
+	"context"
 	"io"
 	"net"
 	"net/netip"
@@ -11,13 +12,21 @@ import (
 
 var netipV4zero = netip.IPv4Unspecified()
 
-// Server is a small SOCKS5 server that connects directly. It stands in for
-// Hysteria in tests and in the PoC "--socks-stub" mode; it is not meant to
-// be exposed beyond loopback.
+// UDPNetwork supplies the outbound sockets and DNS for an association.
+// A missing address family may return an error. The listener to the SOCKS
+// client is independent and stays on loopback.
+type UDPNetwork interface {
+	ListenUDP(ipv6 bool) (net.PacketConn, error)
+	ResolveUDP(context.Context, Addr) (*net.UDPAddr, error)
+}
+
+// Server supplies a loopback SOCKS5 endpoint. Custom TCP and UDP backends
+// serve a userspace tunnel; the defaults use the host network for the stub.
 type Server struct {
 	Username, Password string
-	// Dial overrides the outbound dialer (tests).
-	Dial func(network, addr string) (net.Conn, error)
+	// Dial overrides the outbound TCP dialer.
+	Dial       func(network, addr string) (net.Conn, error)
+	UDPNetwork UDPNetwork
 	// OnConnect is called for every CONNECT request (logging, tests).
 	OnConnect func(dst Addr)
 
@@ -128,7 +137,7 @@ func (s *Server) handle(c net.Conn) {
 	case CmdConnect:
 		s.connect(c, dst)
 	case CmdUDPAssociate:
-		s.associate(c)
+		s.associate(c, dst)
 	default:
 		reply(c, 7, Addr{})
 	}
@@ -180,6 +189,14 @@ func (s *Server) connect(c net.Conn, dst Addr) {
 		return
 	}
 	defer up.Close()
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.conn[up] = struct{}{}
+	s.mu.Unlock()
+	defer s.untrack(up)
 	reply(c, 0, AddrFromAddrPort(up.LocalAddr().(*net.TCPAddr).AddrPort()))
 	_ = c.SetDeadline(time.Time{})
 	Pipe(c, up)
@@ -189,64 +206,117 @@ func (s *Server) connect(c net.Conn, dst Addr) {
 // connection closes. The client talks to a socket on the control
 // connection's address (loopback for the stub); the remotes to another one
 // on any address: a socket bound to loopback cannot reach them.
-func (s *Server) associate(c net.Conn) {
-	pc, err := net.ListenUDP("udp", &net.UDPAddr{IP: c.LocalAddr().(*net.TCPAddr).IP})
+func (s *Server) associate(c net.Conn, requested Addr) {
+	pc, err := ListenUDP("udp", net.JoinHostPort(c.LocalAddr().(*net.TCPAddr).IP.String(), "0"))
 	if err != nil {
 		reply(c, 1, Addr{})
 		return
 	}
 	defer pc.Close()
-	out, err := net.ListenUDP("udp", nil)
-	if err != nil {
+	network := s.UDPNetwork
+	if network == nil {
+		network = hostUDPNetwork{}
+	}
+	out := map[bool]net.PacketConn{}
+	for _, ipv6 := range []bool{false, true} {
+		if sock, err := network.ListenUDP(ipv6); err == nil {
+			out[ipv6] = sock
+		}
+	}
+	if len(out) == 0 {
 		reply(c, 1, Addr{})
 		return
 	}
-	defer out.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	var workers sync.WaitGroup
+	defer func() {
+		cancel()
+		c.Close()
+		pc.Close()
+		for _, sock := range out {
+			sock.Close()
+		}
+		workers.Wait()
+	}()
 	reply(c, 0, AddrFromAddrPort(pc.LocalAddr().(*net.UDPAddr).AddrPort()))
 	_ = c.SetDeadline(time.Time{})
+	workers.Add(1)
 	go func() {
+		defer workers.Done()
 		io.Copy(io.Discard, c)
+		cancel()
 		pc.Close()
-		out.Close()
 	}()
 	var client atomic.Pointer[net.UDPAddr]
-	go func() {
-		// Replies from the remotes: wrapped and sent to the client.
-		buf := make([]byte, 65535)
-		for {
-			n, from, err := out.ReadFromUDPAddrPort(buf)
-			if err != nil {
-				return
+	for _, sock := range out {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			// Replies from the remotes: wrapped and sent to the client.
+			buf := make([]byte, 65535)
+			for {
+				n, remote, err := sock.ReadFrom(buf)
+				if err != nil {
+					return
+				}
+				to := client.Load()
+				if to == nil {
+					continue
+				}
+				from := remote.(*net.UDPAddr).AddrPort()
+				from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
+				hdr, _ := AppendAddr([]byte{0, 0, 0}, AddrFromAddrPort(from))
+				pc.WriteToUDP(append(hdr, buf[:n]...), to)
 			}
-			to := client.Load()
-			if to == nil {
-				continue
-			}
-			from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
-			hdr, _ := AppendAddr([]byte{0, 0, 0}, AddrFromAddrPort(from))
-			pc.WriteToUDP(append(hdr, buf[:n]...), to)
-		}
-	}()
+		}()
+	}
 	buf := make([]byte, 65535)
 	for {
 		n, from, err := pc.ReadFromUDP(buf)
 		if err != nil {
 			return
 		}
+		if !from.IP.Equal(c.RemoteAddr().(*net.TCPAddr).IP) || (requested.Port != 0 && requested.Port != uint16(from.Port)) {
+			continue
+		}
 		if cur := client.Load(); cur != nil && !(from.IP.Equal(cur.IP) && from.Port == cur.Port) {
 			continue // only the first sender is the client
 		}
-		client.Store(from)
 		dst, payload, err := ParseUDPHeader(buf[:n])
 		if err != nil {
 			continue
 		}
-		ua, err := net.ResolveUDPAddr("udp", dst.String())
+		client.Store(from)
+		ua, err := network.ResolveUDP(ctx, dst)
 		if err != nil {
 			continue
 		}
-		out.WriteToUDP(payload, ua)
+		if sock := out[ua.IP.To4() == nil]; sock != nil {
+			sock.WriteTo(payload, ua)
+		}
 	}
+}
+
+type hostUDPNetwork struct{}
+
+func (hostUDPNetwork) ListenUDP(ipv6 bool) (net.PacketConn, error) {
+	network := "udp4"
+	if ipv6 {
+		network = "udp6"
+	}
+	return net.ListenUDP(network, nil)
+}
+
+func (hostUDPNetwork) ResolveUDP(ctx context.Context, dst Addr) (*net.UDPAddr, error) {
+	ip := dst.IP
+	if !ip.IsValid() {
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", dst.Host)
+		if err != nil || len(ips) == 0 {
+			return nil, &net.DNSError{Err: "host not found"}
+		}
+		ip = ips[0]
+	}
+	return net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip, dst.Port)), nil
 }
 
 // Pipe copies both directions with half-close and returns when both

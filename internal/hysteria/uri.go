@@ -1,6 +1,8 @@
 package hysteria
 
 import (
+	"encoding/base64"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -9,13 +11,19 @@ import (
 )
 
 // LinkSchemes are the share link schemes ParseURI reads.
-var LinkSchemes = []string{"hysteria2", "hy2", "vless"}
+var LinkSchemes = []string{"hysteria2", "hy2", "vless", "vpn", "amneziawg"}
 
 // ParseURI parses hysteria2:// and hy2:// share links (see hy2uri.Parse
 // for the accepted variants) and vless:// ones (vless.Parse) into a
 // profile.
 func ParseURI(s string) (p Profile, warnings []string, err error) {
-	if scheme, _, _ := strings.Cut(strings.TrimSpace(s), "://"); strings.EqualFold(scheme, "vless") {
+	s = strings.TrimSpace(s)
+	scheme, _, _ := strings.Cut(s, "://")
+	switch strings.ToLower(scheme) {
+	case "vpn", "amneziawg":
+		p, err := parseAWGURI(s)
+		return p, nil, err
+	case "vless":
 		return parseVLESS(s)
 	}
 	l, warnings, err := hy2uri.Parse(s)
@@ -71,6 +79,13 @@ func parseVLESS(s string) (p Profile, warnings []string, err error) {
 // parameters are included (bandwidth, hop intervals etc. are not part of the
 // share-link spec).
 func (p *Profile) URI() string {
+	if p.IsAmneziaWG() {
+		link := "vpn://" + base64.RawURLEncoding.EncodeToString([]byte(p.AWGConfig()))
+		if p.Name != "" {
+			link += "#" + url.PathEscape(p.Name)
+		}
+		return link
+	}
 	if p.IsVLESS() {
 		port, _ := VLESSPort(p.Ports)
 		return vless.Link{Name: p.Name, Host: p.Host, Port: port, Settings: p.VLESS}.String()

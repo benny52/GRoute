@@ -216,8 +216,8 @@ func waitConnected(ctx context.Context, ep *tunnels.Endpoint, timeout time.Durat
 			if st.Message != "" {
 				return st, errors.New(st.Message)
 			}
-			if core == "Xray" {
-				return st, fmt.Errorf("Xray не подключилась за %d с: сервер не отвечает", int(timeout.Seconds()))
+			if core != "Hysteria" {
+				return st, fmt.Errorf("%s: сервер не ответил за %d с", core, int(timeout.Seconds()))
 			}
 			return st, fmt.Errorf("Hysteria не подключилась за %d с: сервер не отвечает (порт, obfs-пароль или блокировка UDP)", int(timeout.Seconds()))
 		}
