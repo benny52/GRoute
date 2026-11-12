@@ -15,7 +15,6 @@
   let limit = $state(pageSize);
   let selected = $state('');
   let paused = $state(false);
-  let width = $state(700);
   let settings = $state.raw<Settings | null>(null);
   let settingsError = $state('');
   $effect(() => {
@@ -108,11 +107,13 @@
     return { columns, focus, wires, remaining: available.length - paths.length };
   });
   const spacing = 54;
+  const columnPercent = 24;
+  const stepPercent = (100 - columnPercent) / 2;
   const height = $derived(Math.max(...graph.columns.map(c => c.length)) * spacing);
-  const columnOffsets = $derived(graph.columns.map((column, index) => index === 1 ? 0 : (height - column.length * spacing) / 2));
+  const columnOffsets = $derived(graph.columns.map(column => (height - column.length * spacing) / 2));
   function path(wire: Wire) {
-    const x = width * (wire.layer * .38 + .24);
-    const end = width * ((wire.layer + 1) * .38);
+    const x = wire.layer * stepPercent + columnPercent;
+    const end = (wire.layer + 1) * stepPercent;
     const mid = (x + end) / 2;
     const y = columnOffsets[wire.layer] + (wire.from + 0.5) * spacing;
     const yy = columnOffsets[wire.layer + 1] + (wire.to + 0.5) * spacing;
@@ -142,10 +143,10 @@
   <p class="empty muted">{showAll ? (settings ? 'Маршрутов пока нет.' : settingsError ? 'Нет наблюдаемых соединений.' : 'Загрузка маршрутов…') : 'Сейчас нет наблюдаемых соединений.'}</p>
 {:else}
   <div class="viewport">
-    <div class="diagram">
+    <div class="diagram" style:--column-width={columnPercent + '%'}>
       <div class="head">{#each headings as h}<strong>{h}</strong>{/each}</div>
-      <div class="board" bind:clientWidth={width} style:height={height + 'px'} style:--row={spacing + 'px'}>
-        <svg class="wires" aria-hidden="true" class:paused width="100%" height="100%">
+      <div class="board" style:height={height + 'px'} style:--row={spacing + 'px'}>
+        <svg class="wires" aria-hidden="true" class:paused width="100%" height="100%" viewBox={'0 0 100 ' + height} preserveAspectRatio="none">
           {#each graph.wires as w (w.key)}
             {@const d = path(w)}
             <g class="wire" class:active={w.up > 0 || w.down > 0}>
@@ -175,12 +176,12 @@
   .pause { margin-inline-start:auto; }
   .viewport { overflow-x:auto; margin-top:12px; }
   .diagram { min-width:460px; }
-  .head,.board { display:grid; grid-template-columns:repeat(3,24%); justify-content:space-between; }
+  .head,.board { display:grid; grid-template-columns:repeat(3,var(--column-width)); justify-content:space-between; }
   .head { color:var(--muted); font-size:12px; padding:8px 0; border-bottom:1px solid var(--border); }
   .head strong { padding-inline:9px; }
   .board { position:relative; isolation:isolate; }
   .wires { position:absolute; inset:0; z-index:-1; pointer-events:none; }
-  .wire path { fill:none; }
+  .wire path { fill:none; vector-effect:non-scaling-stroke; }
   .rim { stroke:color-mix(in srgb,var(--muted) 50%,var(--border)); stroke-width:12; }
   .bore { stroke:var(--surface); stroke-width:9; }
   .active .rim { stroke:color-mix(in srgb,var(--accent) 48%,var(--muted)); }
@@ -190,7 +191,7 @@
   .paused .packet { animation-play-state:paused; }
   @keyframes run { from { stroke-dashoffset:50; } to { stroke-dashoffset:0; } }
   @media (prefers-reduced-motion:reduce) { .packet { animation:none; } }
-  .column { display:grid; align-content:start; grid-auto-rows:var(--row); align-items:center; min-width:0; }
+  .column { display:grid; grid-template-columns:minmax(0,1fr); align-content:start; grid-auto-rows:var(--row); align-items:center; min-width:0; }
   .node { display:flex; justify-content:flex-start; align-items:center; gap:7px; width:100%; height:38px; padding:0 9px; border:1px solid var(--border); border-radius:7px; background:var(--surface); text-align:left; }
   .node:hover,.node[aria-pressed=true] { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 7%,var(--surface)); }
   .node span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

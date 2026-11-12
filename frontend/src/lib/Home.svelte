@@ -125,6 +125,14 @@
   const main = $derived(mainTarget());
   const mainProfile = $derived(ui.profiles.find((p) => p.id === main?.id));
   const mainTunnel = $derived(mainProfile && st?.tunnels?.find((t) => t.id === mainProfile.id));
+  function tunnelRank(id: string): number {
+    if (id === main?.id) return 0;
+    const reasons = st?.tunnelReasons?.[id] ?? [];
+    if (reasons.some(r => r.role === 'main' || r.role === 'primary')) return 1;
+    if (reasons.some(r => r.role === 'main-fallback' || r.role === 'fallback')) return 2;
+    return 3;
+  }
+  const orderedTunnels = $derived([...(st?.tunnels ?? [])].sort((a, b) => tunnelRank(a.id) - tunnelRank(b.id)));
   const waitingForMain = $derived(!main && ui.profiles.length === 0 && st?.warnings?.some((w) => w.kind === 'no-main'));
   const everything = $derived(settings?.defaultAction === 'tunnel');
   const selected = $derived(settings?.defaultAction === 'direct');
@@ -529,7 +537,7 @@
       <section class="card">
         <h2>Работающие серверы</h2>
         <div class="tunnels">
-          {#each st.tunnels as t (t.id)}
+          {#each orderedTunnels as t (t.id)}
             <div class="tunnel">
               <span class="dot {tunnelTone(t)}"></span>
               <div class="grow">
