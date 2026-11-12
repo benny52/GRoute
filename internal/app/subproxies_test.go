@@ -120,12 +120,12 @@ func TestSubscriptionProxiesGoWithIt(t *testing.T) {
 	if got := c.Redactor.Redact("pw secret-pw"); strings.Contains(got, "secret-pw") {
 		t.Fatalf("password in a log line: %s", got)
 	}
-	// Its proxies do not keep its servers: they leave with it, all but ONE,
-	// the main server, which stays as a manual one (as without proxies).
-	if err := c.DeleteSubscription(v.ID); err != nil {
+	// Its own proxies go with the subscription, including the proxy for
+	// the previous main server.
+	if err := confirmSubscriptionDeletion(c, v.ID); err != nil {
 		t.Fatal(err)
 	}
-	if ps := c.Profiles(); len(ps) != 1 || ps[0].Name != "ONE" || ps[0].Source != "" || len(c.Proxies()) != 0 {
+	if ps := c.Profiles(); len(ps) != 0 || len(c.Proxies()) != 0 {
 		t.Fatalf("%+v %+v", c.Profiles(), c.Proxies())
 	}
 }

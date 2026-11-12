@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -96,7 +97,7 @@ func (c *Controller) startLocked(recovering bool) error {
 		names[i] = p.Name
 	}
 	if len(want) == 0 {
-		c.Log.Warn("connecting: no rule and not the default route uses a tunnel, all traffic stays direct")
+		c.Log.Info("connecting without any tunnel servers")
 	} else {
 		c.Log.Info("connecting", "profiles", strings.Join(names, ", "))
 	}
@@ -172,6 +173,7 @@ func (c *Controller) disconnectLocked(release bool) {
 	c.mu.Lock()
 	s := c.sess
 	c.sess, c.startErr = nil, ""
+	c.runReasons = nil
 	c.proxyAwake, c.runRouted = nil, nil
 	c.dnsPause = time.Time{}     // dns
 	live := c.statLive.Swap(nil) // stats
@@ -215,12 +217,13 @@ type Status struct {
 	State   string `json:"state"`
 	Message string `json:"message"`
 	// Main is the main profile (rules without an explicit profile).
-	Main     string           `json:"main"`
-	MainID   string           `json:"mainId"`
-	Since    time.Time        `json:"since"`
-	Tunnels  []tunnels.Status `json:"tunnels"`
-	Stats    *session.Stats   `json:"stats,omitempty"`
-	Warnings []RuleWarning    `json:"warnings"`
+	Main          string                    `json:"main"`
+	MainID        string                    `json:"mainId"`
+	Since         time.Time                 `json:"since"`
+	Tunnels       []tunnels.Status          `json:"tunnels"`
+	TunnelReasons map[string][]TunnelReason `json:"tunnelReasons,omitempty"`
+	Stats         *session.Stats            `json:"stats,omitempty"`
+	Warnings      []RuleWarning             `json:"warnings"`
 	// LoadError: profiles.json or settings.json could not be read.
 	LoadError string `json:"loadError,omitempty"`
 	// NoTunnel: routing is on but no rule (nor the default route) uses a
@@ -318,6 +321,21 @@ func (c *Controller) Status() (st Status) {
 	st.DNS = c.dnsStatusLocked(s) // dns
 	if s != nil {
 		st.Since = c.since
+		awake := c.awakeProxyTargetsLocked()
+		st.TunnelReasons = make(map[string][]TunnelReason)
+		for _, t := range s.Tunnels() {
+			if t.Test {
+				continue
+			}
+			st.Tunnels = append(st.Tunnels, t)
+			reasons := slices.Clone(c.runReasons[t.ID])
+			if awake[t.ID] {
+				reasons = append(reasons, TunnelReason{Role: "proxy", Count: 1})
+			}
+			if len(reasons) > 0 {
+				st.TunnelReasons[t.ID] = reasons
+			}
+		}
 	}
 	switch {
 	case c.starting:
@@ -339,11 +357,6 @@ func (c *Controller) Status() (st Status) {
 	if s.EngineFailed() {
 		st.State, st.Message = "error", c.engineFailedMessage(st.KillSwitch == "blocking")
 		return st
-	}
-	for _, t := range s.Tunnels() {
-		if !t.Test {
-			st.Tunnels = append(st.Tunnels, t)
-		}
 	}
 	st.State = "connected"
 	var downMsgs []string

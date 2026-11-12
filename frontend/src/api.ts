@@ -172,6 +172,13 @@ export interface TunnelStatus {
   test: boolean;
 }
 
+export interface TunnelReason {
+  role: 'primary' | 'main' | 'fallback' | 'main-fallback' | 'proxy';
+  count: number;
+  default?: boolean;
+  group?: string;
+}
+
 export interface RuleWarning {
   index: number;
   rule: string;
@@ -349,6 +356,7 @@ export interface Status {
   mainId: string;
   since: string;
   tunnels: TunnelStatus[];
+  tunnelReasons?: Record<string, TunnelReason[]>;
   stats?: Stats;
   warnings: RuleWarning[];
   loadError?: string;
@@ -676,7 +684,6 @@ interface GUI {
   EditSubscription(i: SubInput): Promise<void>;
   UpdateSubscription(id: string): Promise<MergeStats>;
   RollbackSubscription(id: string): Promise<MergeStats>;
-  DeleteSubscription(id: string): Promise<void>;
   SetSubscriptionProxies(id: string, p: SubProxiesInput | null): Promise<void>;
   GeoInfo(): Promise<GeoInfo>;
   UpdateGeo(force: boolean): Promise<{ changed: boolean; notes: string[] }>;
@@ -847,24 +854,20 @@ export function toLists(r: Rule): Rule {
   return out;
 }
 
-// cleanFallback drops the fallback servers routing skips: the route's own
-// server and repeats. "" is the main server; mainId resolves it ("" when
-// unknown: then "" only equals "").
-export function cleanFallback(fb: string[] | undefined, primary: string | undefined, mainId = ''): string[] {
-  const key = (id: string) => id || mainId;
-  const seen = new Set([key(primary ?? '')]);
+// Save assignments by their literal IDs. The empty ID follows the main
+// server; a named server matching it today may be needed again tomorrow.
+export function cleanFallback(fb: string[] | undefined, primary: string | undefined, _mainId?: string): string[] {
+  const seen = new Set([primary ?? '']);
   return (fb ?? []).filter((id) => {
-    const k = key(id);
-    if (seen.has(k)) return false;
-    seen.add(k);
+    if (seen.has(id)) return false;
+    seen.add(id);
     return true;
   });
 }
 
 // cleanRule drops empty fields before saving. A direct or block rule keeps
 // no server: a stale one would still pin it (it could not be deleted).
-// Fallbacks routing skips go too (shown struck through until then), also
-// those that repeat the main server (mainId) after it changed.
+// Permanent duplicates go too.
 export function cleanRule(r: Rule, mainId: string | undefined): Rule {
   const out: Rule = { ...toLists(r) };
   out.apps = (out.apps ?? []).filter((a) => a.pattern.trim()).map((a) => ({ ...a, pattern: a.pattern.trim() }));

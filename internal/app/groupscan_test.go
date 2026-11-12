@@ -47,17 +47,16 @@ func TestGroupFollowsSubscription(t *testing.T) {
 	if gv, _ = c.groupView(gv.ID, nil); len(gv.Views) != 2 {
 		t.Fatalf("removed servers stayed: %d", len(gv.Views))
 	}
-	// Used as the main target: deleting the subscription keeps a server
-	// so the group is not emptied (here the active server, kept anyway),
-	// and the kept servers become the group's own.
+	// Its only source is removed. A used group keeps its existing members
+	// explicitly, even though the subscription's underlying main is cleared.
 	if err := c.SetMain(gv.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.DeleteSubscription(v.ID); err != nil {
+	if err := confirmSubscriptionDeletion(c, v.ID); err != nil {
 		t.Fatal(err)
 	}
 	gv, _ = c.groupView(gv.ID, nil)
-	if len(gv.Subs) != 0 || len(gv.Members) != 1 || len(gv.Views) != 1 || c.profiles.Find(gv.Members[0]) == nil {
+	if len(gv.Subs) != 0 || len(gv.Members) != 2 || len(gv.Views) != 2 || c.profiles.Find(gv.Members[0]) == nil || c.profiles.Find(gv.Members[1]) == nil {
 		t.Fatalf("%+v", gv)
 	}
 }

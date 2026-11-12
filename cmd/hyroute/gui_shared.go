@@ -142,8 +142,6 @@ func (g *GUI) RollbackSubscription(id string) (app.MergeStats, error) {
 	return g.ctl.RollbackSubscription(id)
 }
 
-func (g *GUI) DeleteSubscription(id string) error { return g.ctl.DeleteSubscription(id) }
-
 // ZapretInfo is the «Обход DPI» page.
 func (g *GUI) ZapretInfo() app.ZapretView { return g.ctl.ZapretInfo() }
 

@@ -178,9 +178,10 @@ type Controller struct {
 	proxies                    []store.LocalProxy
 	proxyMu                    sync.Mutex // guards proxyRuns, proxyFW; taken after mu, never before
 	proxyRuns                  map[string]*proxyRun
-	proxyAwake                 map[string]*proxyUse // proxysleep.go; c.mu, reset per session
-	runRouted                  map[string]bool      // the profiles the rules used when the session last got them (c.mu)
-	proxyFW                    *proxyPorts          // nil: the rules are unknown
+	proxyAwake                 map[string]*proxyUse      // proxysleep.go; c.mu, reset per session
+	runRouted                  map[string]bool           // the profiles the rules used when the session last got them (c.mu)
+	runReasons                 map[string][]TunnelReason // assignment snapshot last applied to the session, c.mu
+	proxyFW                    *proxyPorts               // nil: the rules are unknown
 	// recoverDelay: how long after an engine failure the automatic
 	// reconnect waits (tests change it).
 	recoverDelay time.Duration
@@ -327,15 +328,7 @@ func (c *Controller) routingLocked() (*rules.Set, []hysteria.Profile, []string) 
 		if !p.Enabled {
 			continue
 		}
-		if !used[id] && !groups.IsGroupID(id) && c.proxyAwake[id] == nil && c.runRouted[id] {
-			// It ran for the rules until now: it sleeps once its proxies
-			// are idle, not at once under a connection of theirs.
-			if c.proxyAwake == nil {
-				c.proxyAwake = map[string]*proxyUse{}
-			}
-			c.proxyAwake[id] = &proxyUse{last: time.Now()}
-		}
-		if used[id] || groups.IsGroupID(id) || c.proxyAwake[id] != nil {
+		if used[id] || groups.IsGroupID(id) || c.proxyAwake[id] != nil || c.runRouted[id] {
 			used[id] = true
 		}
 	}
@@ -358,8 +351,21 @@ func (c *Controller) applyRoutingLocked() {
 	if c.sess == nil {
 		return
 	}
-	set, want, _ := c.routingLocked()
-	c.runRouted = c.routedLocked()
+	set, want, usedGroups := c.routingLocked()
+	routed := c.routedLocked()
+	for _, p := range c.proxies {
+		id := c.proxyProfileLocked(p)
+		if p.Enabled && c.runRouted[id] && !routed[id] && c.proxyAwake[id] == nil {
+			// A previously routed server now used only by proxies gets the
+			// usual idle window. Status/preview reads never wake a server.
+			if c.proxyAwake == nil {
+				c.proxyAwake = map[string]*proxyUse{}
+			}
+			c.proxyAwake[id] = &proxyUse{last: time.Now()}
+		}
+	}
+	c.runRouted = routed
+	c.runReasons = c.tunnelReasonsLocked(set.Main, want, usedGroups)
 	c.applyDNSLocked() // dns: before SetRules starts a new server's Hysteria
 	c.sess.SetRules(set, want)
 }

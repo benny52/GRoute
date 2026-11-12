@@ -786,8 +786,8 @@ func (c *Controller) applyFetched(id string, res FetchResult, rollback bool, tag
 		return MergeStats{}, errors.New("подписка не найдена")
 	}
 	list, st := c.mergeKeepingGroupsLocked(source, l.Profiles)
-	next := &store.Profiles{Active: c.profiles.Active, List: list}
-	if next.Find(next.Active) == nil {
+	next := &store.Profiles{Active: c.profiles.Active, AwaitMain: c.profiles.AwaitMain, List: list}
+	if !next.AwaitMain && next.Find(next.Active) == nil {
 		next.Active = ""
 		if len(list) > 0 {
 			next.Active = list[0].ID
@@ -883,54 +883,6 @@ func (c *Controller) proxyRefsLocked(id string) []string {
 		}
 	}
 	return out
-}
-
-// DeleteSubscription removes the subscription. Its profiles that rules or
-// proxies use become manual profiles (so they keep working); the rest go.
-// It does not wait for an update in progress: that one finds the
-// subscription gone (under mu) and stores nothing. subscriptions.json goes
-// first and is put back when the profiles cannot be saved: a subscription
-// never stays without its profiles, snapshots and masked link.
-func (c *Controller) DeleteSubscription(id string) error {
-	source := "sub:" + id
-	c.mu.Lock()
-	subs := slices.DeleteFunc(slices.Clone(c.subs), func(s store.Subscription) bool { return s.ID == id })
-	if err := c.saveSubsLocked(subs); err != nil {
-		c.mu.Unlock()
-		return err
-	}
-	var list []hysteria.Profile
-	pins := c.subDeletePinsLocked(source)
-	had := map[string]bool{} // its servers: kept ones stay in the groups that followed it
-	for _, p := range c.profiles.List {
-		if p.Source != source {
-			list = append(list, p)
-			continue
-		}
-		had[p.ID] = true
-		if c.profileUsedLocked(p.ID) || pins[p.ID] {
-			p.Source, p.Missing = "", false
-			list = append(list, p)
-		}
-	}
-	next := &store.Profiles{Active: c.profiles.Active, List: list}
-	err := c.saveProfilesLocked(next)
-	if err != nil && c.saveSubsLocked(c.subs) == nil {
-		c.mu.Unlock()
-		return err
-	}
-	if err == nil {
-		c.dropGroupSubLocked(id, had)
-	}
-	// Gone from subscriptions.json: when its profiles could not be saved
-	// either, they stay as those of a deleted subscription.
-	c.subs = subs
-	c.updateNamesLocked() // a renamed subscription names its servers
-	c.mu.Unlock()
-	c.Store.DeleteSnapshots(id)
-	c.Redactor.SetGroup("sub:" + id)
-	c.changed()
-	return err
 }
 
 // RunScheduler updates enabled subscriptions: "startup" ones once now

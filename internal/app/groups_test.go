@@ -516,7 +516,7 @@ func TestSubscriptionNeverEmptiesUsedGroup(t *testing.T) {
 	})
 	t.Run("delete", func(t *testing.T) {
 		c, v, g := setup(t, true, false)
-		if err := c.DeleteSubscription(v.ID); err != nil {
+		if err := confirmSubscriptionDeletion(c, v.ID); err != nil {
 			t.Fatal(err)
 		}
 		if existing(c, g) != 3 || c.Profiles()[0].Source != "" {
@@ -525,7 +525,7 @@ func TestSubscriptionNeverEmptiesUsedGroup(t *testing.T) {
 	})
 	t.Run("unused", func(t *testing.T) {
 		c, v, g := setup(t, false, false)
-		if err := c.DeleteSubscription(v.ID); err != nil {
+		if err := confirmSubscriptionDeletion(c, v.ID); err != nil {
 			t.Fatal(err)
 		}
 		if existing(c, g) != 0 || len(c.Profiles()) != 1 {
@@ -534,7 +534,7 @@ func TestSubscriptionNeverEmptiesUsedGroup(t *testing.T) {
 	})
 	t.Run("manual member", func(t *testing.T) {
 		c, v, g := setup(t, true, true)
-		if err := c.DeleteSubscription(v.ID); err != nil {
+		if err := confirmSubscriptionDeletion(c, v.ID); err != nil {
 			t.Fatal(err)
 		}
 		if existing(c, g) != 1 || len(c.Profiles()) != 1 {
@@ -733,7 +733,7 @@ func TestGroupsJSONBroken(t *testing.T) {
 	if ms, err := c.UpdateSubscription(v.ID); err != nil || ms.MissingKept != 1 {
 		t.Fatalf("%+v %v", ms, err)
 	}
-	if err := c.DeleteSubscription(v.ID); err != nil || len(c.Profiles()) != 2 {
+	if err := confirmSubscriptionDeletion(c, v.ID); err == nil || len(c.Profiles()) != 2 || len(c.Subscriptions()) != 1 {
 		t.Fatalf("%v %+v", err, c.Profiles())
 	}
 	if !bytes.Equal(broken, fileBytes(t, c, "groups.json")) {

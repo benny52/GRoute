@@ -7,6 +7,7 @@
     api,
     errText,
     plural,
+    isGroupId,
     optionsOf,
     type CheckResult,
     type Settings,
@@ -19,7 +20,7 @@
   // Setup reads and writes the same settings as the pages, each save built
   // on a fresh copy (its revision), so it never undoes a change made
   // elsewhere meanwhile.
-  import { ui, hide, settle, hideUserPath, serverLabel, mainTarget, mainText, setupStep, setSetupStep, finishSetup } from '../state.svelte';
+  import { ui, hide, hideUserPath, serverLabel, mainTarget, mainText, profileName, setupStep, setSetupStep, finishSetup } from '../state.svelte';
   import Icon from './Icon.svelte';
   import TargetOptions from './TargetOptions.svelte';
   import RouteWizard from './RouteWizard.svelte';
@@ -159,50 +160,47 @@
   let check = $state<CheckResult | null>(null);
   let checking = $state(false);
   let checkedId = '';
+  let checkSequence = 0;
   let details = $state(false);
-  // groups: the main may be a server group: its servers are probed
-  // instead (a group has no single server to connect to).
+  // The check starts on the main target. Picking another target only
+  // changes this diagnostic; a group is checked by probing its members.
   const main = $derived(mainTarget());
+  let selectedCheckId = $state('');
+  const checkId = $derived(
+    selectedCheckId && (ui.profiles.some((p) => p.id === selectedCheckId) || ui.groups.some((g) => g.id === selectedCheckId))
+      ? selectedCheckId : (main?.id || ui.profiles[0]?.id || ui.groups[0]?.id || '')
+  );
+  const checkUnloaded = $derived(!!main?.unloaded && checkId === main.id);
   let groupCheck = $state<GroupView | null>(null);
   const groupUp = $derived(groupCheck?.memberViews.filter((m) => !m.missing && !m.probeError && m.latencyMs > 0) ?? []);
   const checkBad = $derived(check ? !check.ok : groupCheck ? groupUp.length === 0 : false);
 
-  async function runCheck() {
-    const m = mainTarget();
-    if (!m || m.unloaded) return;
+  async function runCheck(id: string) {
+    if (!id || checkUnloaded) return;
+    const sequence = ++checkSequence;
     checking = true;
     check = null;
     groupCheck = null;
     error = '';
     details = false;
-    checkedId = m.id;
+    checkedId = id;
     try {
-      if (m.group) {
-        const g = await api.ProbeGroup(m.id);
-        if (checkedId === m.id) groupCheck = g;
+      if (isGroupId(id)) {
+        const g = await api.ProbeGroup(id);
+        if (sequence === checkSequence && checkId === id) groupCheck = g;
       } else {
-        const r = await api.CheckProfile(m.id);
-        if (checkedId === m.id) check = r;
+        const r = await api.CheckProfile(id);
+        if (sequence === checkSequence && checkId === id) check = r;
       }
     } catch (e) {
-      error = errText(e);
-    }
-    checking = false;
-  }
-
-  async function pickMain(id: string) {
-    try {
-      await api.SetMain(id);
-      ui.profiles = await api.Profiles();
-      ui.status = await api.Status(); // mainTarget reads the main from it
-      runCheck();
-    } catch (e) {
-      error = errText(e);
+      if (sequence === checkSequence && checkId === id) error = errText(e);
+    } finally {
+      if (sequence === checkSequence) checking = false;
     }
   }
 
   $effect(() => {
-    if (step === 'check' && !check && !groupCheck && !checking && !error && main && !main.unloaded) runCheck();
+    if (step === 'check' && checkId && !checkUnloaded && checkedId !== checkId) runCheck(checkId);
   });
 
   function speed(ms: number): string {
@@ -434,18 +432,17 @@
       <h1>Проверим, что сервер работает</h1>
       {#if ui.profiles.length > 1 || ui.groups.length > 0 || main?.group}
         <p class="lead">
-          У вас {ui.profiles.length} {plural(ui.profiles.length, 'сервер', 'сервера', 'серверов')}. Выберите основной: через него пойдёт трафик VPN.
-          Обычно лучше всего работает ближайший к вам. Поменять его можно в любой момент на главной.
+          Выберите сервер или группу для проверки соединения. Основной сервер для VPN выбирается на главной.
         </p>
-        <select class="big-select" value={main?.id ?? ''} onchange={(e) => settle(e, (el) => pickMain(el.value), () => mainTarget()?.id ?? '')} disabled={checking}>
+        <select class="big-select" aria-label="Сервер для проверки" value={checkId} onchange={(e) => (selectedCheckId = e.currentTarget.value)} disabled={checking}>
           {#if main?.unloaded}<option value={main.id} disabled>основная группа не загружена</option>{/if}
-          <TargetOptions current={main?.unloaded ? '' : main?.id} />
+          <TargetOptions current={checkUnloaded ? '' : checkId} />
         </select>
       {:else}
         <p class="lead">HyRoute ненадолго подключится к серверу и проверит, что через него открывается интернет.</p>
       {/if}
 
-      {#if main?.unloaded}
+      {#if checkUnloaded}
         <div class="verdict bad">
           <Icon name="alert" size={22} />
           <div>
@@ -455,8 +452,7 @@
         </div>
       {:else if checking}
         <div class="verdict wait">
-          <span class="spin"></span>{main?.group ? `Проверяю серверы группы «${main.name}»…` : `Подключаюсь к серверу${main ? ` «${main.name}»` : ''}…`} Это может
-          занять до 30 секунд.
+          <span class="spin"></span>{isGroupId(checkId) ? `Проверяю серверы группы «${profileName(checkId)}»…` : `Подключаюсь к серверу «${profileName(checkId)}»…`}
         </div>
       {:else if groupCheck}
         {#if groupUp.length}
@@ -474,7 +470,7 @@
           <div class="verdict bad">
             <Icon name="alert" size={22} />
             <div>
-              <b>Ни один сервер группы «{main?.name}» не ответил</b>
+              <b>Ни один сервер группы «{hide(groupCheck.name)}» не ответил</b>
               <p>Проверьте, что интернет работает без VPN, или выберите выше один сервер: его проверка покажет, что не так.</p>
             </div>
           </div>
@@ -489,7 +485,7 @@
           <Icon name="check" size={22} stroke={2.6} />
           <div>
             <b>Сервер работает</b>
-            {#if check.externalIP}<p>Через VPN сайты будут видеть адрес {hide(check.externalIP)}, а не ваш.</p>{/if}
+            {#if check.externalIP}<p>При проверке через этот сервер сайт увидел адрес {hide(check.externalIP)}.</p>{/if}
             {#if check.latencyMs}<p>Задержка {check.latencyMs} мс — {speed(check.latencyMs)}.</p>{/if}
           </div>
         </div>
@@ -520,7 +516,7 @@
           </ul>
         {/if}
       {/if}
-      {#if (check || groupCheck) && !checking}<div class="row"><button onclick={runCheck}><Icon name="refresh" size={16} />Проверить ещё раз</button></div>{/if}
+      {#if (check || groupCheck || error) && !checking && checkId && !checkUnloaded}<div class="row"><button onclick={() => runCheck(checkId)}><Icon name="refresh" size={16} />Проверить ещё раз</button></div>{/if}
     {:else if step === 'launch'}
       <h1>Запуск и защита</h1>
       <p class="lead">Последние настройки. Если не уверены — оставьте как есть.</p>
@@ -581,7 +577,7 @@
     {:else if step === 'done'}
       <h1>Всё готово!</h1>
       <div class="summary">
-        <div><span class="muted">Сервер</span><b>{mainText() || 'не добавлен'}</b></div>
+        <div><span class="muted">Основной сервер</span><b>{mainText() || 'Выберите на главной'}</b></div>
         <div><span class="muted">Через VPN</span><b>{modeTitle}</b></div>
         {#if auto && !ui.mac}<div><span class="muted">Запуск с Windows</span><b>{wantAutostart && auto.allowed ? 'да' : 'нет'}</b></div>{/if}
       </div>

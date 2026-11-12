@@ -3,6 +3,7 @@
   import { api, errText, fmtDateTime, onEvent, plural, type Subscription, type SubPreview, type MergeStats } from '../api';
   import { hide, settle, ui } from '../state.svelte';
   import Help from './Help.svelte';
+  import AssignmentReview from './AssignmentReview.svelte';
   import { ackSubAlert, subAlerts } from '../state.svelte'; // subinfo
   import type { SubAlert } from '../api';
   import SubInfoBar from './SubInfoBar.svelte';
@@ -24,6 +25,7 @@
   let error = $state('');
   let okMsg = $state('');
   let showNames = $state(false);
+  let removing = $state<Subscription | null>(null);
 
   const intervals = [
     { v: 'manual', l: 'Вручную' },
@@ -300,9 +302,9 @@
     }
   }
 
-  async function remove(s: Subscription) {
-    if (!confirm(`Удалить подписку «${hide(s.name)}»? Профили, которые используют правила, останутся как ручные, остальные будут удалены.`)) return;
-    await step('del', () => api.DeleteSubscription(s.id));
+  async function afterRemove() {
+    removing = null;
+    okMsg = 'Подписка удалена.';
     await load();
     onchange();
   }
@@ -423,7 +425,7 @@
           <button onclick={() => (pf?.id === s.id ? (pf = null) : openProxies(s))} title="Свой локальный прокси (SOCKS5 и HTTP) для каждого сервера подписки">
             {s.proxies ? `Прокси: ${s.proxyCount}` : 'Прокси для серверов'}
           </button>
-          <button class="danger" onclick={() => remove(s)}>Удалить</button>
+          <button class="danger" disabled={busy !== ''} onclick={() => (removing = s)}>Удалить</button>
         </div>
         {#if s.proxies && s.proxyCount > 0}
           <div class="meta small">
@@ -487,6 +489,12 @@
     {/each}
   </section>
 </div>
+
+{#if removing}
+  <AssignmentReview request={{ operation: 'deleteSubscription', subscriptionId: removing.id }}
+    title={`Удалить подписку «${hide(removing.name)}»?`} confirmLabel="Удалить подписку"
+    onclose={() => (removing = null)} onapplied={afterRemove} />
+{/if}
 
 <style>
   .layout { display: grid; gap: 16px; max-width: 1000px; }

@@ -47,6 +47,7 @@ type ProfileSummary struct {
 	// a subscription's server over a manual one, else the first in the
 	// list. DuplicateSub: the kept server's subscription name, so that the
 	// manual copy can be offered for deletion.
+	DuplicateID  string `json:"duplicateId,omitempty"`
 	DuplicateOf  string `json:"duplicateOf,omitempty"`
 	DuplicateSub string `json:"duplicateSub,omitempty"`
 }
@@ -160,25 +161,46 @@ func explicitRefsIn(cfg *rules.Config, id string) []string {
 	return out
 }
 
+// A destructive transfer requires equal effective connection settings,
+// including local CA, obfuscation, transport and other options a URI can omit.
+func transferKey(p hysteria.Profile) hysteria.Profile {
+	p.Name, p.ID, p.Source, p.Missing = "", "", "", false
+	p.Ports = hysteria.NormalizePorts(p.Ports)
+	p.Normalize()
+	return p
+}
+
+func (c *Controller) subscriptionSourcesLocked() map[string]bool {
+	sources := make(map[string]bool, len(c.subs))
+	for _, sub := range c.subs {
+		sources["sub:"+sub.ID] = true
+	}
+	return sources
+}
+
 func (c *Controller) Profiles() []ProfileSummary {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	defer c.memoRunningGroupsLocked()()
 	out := []ProfileSummary{}
-	kept := map[string]*hysteria.Profile{} // connKey -> the server kept
+	sources := c.subscriptionSourcesLocked()
+	kept := map[hysteria.Profile]*hysteria.Profile{}
 	for i := range c.profiles.List {
 		p := &c.profiles.List[i]
-		k := connKey(*p)
-		if o := kept[k]; o == nil || o.Source == "" && p.Source != "" {
+		k := transferKey(*p)
+		// Keep legacy subscription-labelled copies visible even after their source
+		// disappeared. Only a current subscription offers a transfer destination.
+		if o := kept[k]; o == nil || (o.Source == "" && p.Source != "") || (!sources[o.Source] && sources[p.Source]) {
 			kept[k] = p
 		}
 	}
 	for i := range c.profiles.List {
 		p := &c.profiles.List[i]
 		s := c.summaryLocked(p)
-		if o := kept[connKey(*p)]; o != p {
+		if o := kept[transferKey(*p)]; o != p {
+			s.DuplicateID = o.ID
 			s.DuplicateOf = o.Name
-			if o.Source != "" {
+			if sources[o.Source] {
 				s.DuplicateSub = c.sourceNameLocked(o.Source)
 			}
 		}
@@ -266,7 +288,7 @@ func (c *Controller) ImportURIs(text string) (ImportResult, error) {
 	}
 	next := cloneProfiles(c.profiles)
 	next.List = append(next.List, added...)
-	if next.Active == "" && len(added) > 0 {
+	if !next.AwaitMain && next.Active == "" && len(added) > 0 {
 		next.Active = added[0].ID
 	}
 	err := c.saveProfilesLocked(next)
@@ -401,7 +423,7 @@ func (c *Controller) SaveProfile(p hysteria.Profile) (ProfileSummary, error) {
 		c.mu.Unlock()
 		return ProfileSummary{}, fmt.Errorf("профиль %s не найден", p.ID)
 	}
-	if next.Active == "" {
+	if !next.AwaitMain && next.Active == "" {
 		next.Active = p.ID
 	}
 	err = c.saveProfilesLocked(next)
@@ -491,6 +513,7 @@ func (c *Controller) SetMain(id string) error {
 	}
 	next := cloneProfiles(c.profiles)
 	next.Active = id
+	next.AwaitMain = false
 	err := c.saveProfilesLocked(next)
 	if err == nil {
 		err = c.clearMainGroupLocked()
@@ -536,7 +559,9 @@ func (c *Controller) ExportURI(id string) (string, error) {
 }
 
 func cloneProfiles(p *store.Profiles) *store.Profiles {
-	return &store.Profiles{Active: p.Active, List: append([]hysteria.Profile(nil), p.List...)}
+	out := *p
+	out.List = append([]hysteria.Profile(nil), p.List...)
+	return &out
 }
 
 func newID() string {

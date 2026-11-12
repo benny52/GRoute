@@ -203,8 +203,9 @@
   }
 
   const main = $derived(mainTarget());
-  // The fallbacks routing uses: struck-through ones go on save.
-  const fallback = $derived(cleanFallback(r.fallback, r.profile, main?.id));
+  // The chips retain literal assignments. The route explanation describes
+  // only the servers a new connection could try with today's main.
+  const fallback = $derived(cleanFallback((r.fallback ?? []).map((id) => id || main?.id || '').filter(Boolean), r.profile || main?.id));
   const empty = $derived(r.apps!.length === 0 && r.domains!.length === 0 && pp.ports.length === 0);
   const ppText = $derived(portsText({ protocol: r.protocol, ports: pp.ports.join(',') }));
   const widened = $derived(hadWho && !r.apps!.length && !r.domains!.length && pp.ports.length > 0);
@@ -485,22 +486,29 @@
     </div>
     {#if r.action === 'tunnel'}
       <div class="row server">
-        <span class="muted">Сервер</span>
+        <span class="muted">Приоритетный сервер</span>
         <select
+          aria-label="Приоритетный сервер"
           class="grow"
           value={r.profile}
           onchange={(e) => {
             r.profile = (e.currentTarget as HTMLSelectElement).value;
             // The rule's own server is no fallback for itself.
-            r.fallback = cleanFallback(r.fallback, r.profile, main?.id);
+            r.fallback = cleanFallback(r.fallback, r.profile);
           }}
         >
-          <option value="">Основной{main ? ` — ${mainText(main)}` : ' (не выбран)'}</option>
+          <option value="">Основной сервер — {main ? mainText(main) : 'не выбран'}</option>
           <TargetOptions current={r.profile} />
         </select>
       </div>
+      <div class="hint">
+        {#if !r.profile && !main}Ожидает основной сервер. {/if}Основной сервер выбирается на главной. Выбор по имени закрепляет сервер или группу за этим правилом.
+      </div>
       <div class="server">
         <FallbackPicker value={r.fallback!} primary={r.profile ?? ''} onchange={(v) => (r.fallback = v)} />
+        {#if !r.profile && !r.fallback?.length && (rule.profile || rule.fallback?.length)}
+          <p class="muted small" role="status">После сохранения правило будет использовать основной сервер с главной. Позже его можно переназначить через «Групповое изменение».</p>
+        {/if}
       </div>
       <div class="hint">
         {#if fallback.length}

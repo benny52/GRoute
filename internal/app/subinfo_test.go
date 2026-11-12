@@ -476,7 +476,7 @@ func TestSubscriptionInfoLifecycle(t *testing.T) {
 	if st := c.Status(); len(st.SubAlerts) != 1 || st.SubAlerts[0].Level != "out" {
 		t.Fatalf("%+v", st.SubAlerts)
 	}
-	if err := c.DeleteSubscription(v.ID); err != nil {
+	if err := confirmSubscriptionDeletion(c, v.ID); err != nil {
 		t.Fatal(err)
 	}
 	if st := c.Status(); len(st.SubAlerts) != 0 {

@@ -21,6 +21,15 @@ import (
 
 const subURL = "https://panel.example/sub/SECRETTOKEN123?key=anothersecret99"
 
+func confirmSubscriptionDeletion(c *Controller, id string) error {
+	req := AssignmentRequest{Operation: "deleteSubscription", SubscriptionID: id}
+	preview, err := c.PreviewAssignments(req)
+	if err != nil {
+		return err
+	}
+	return c.ApplyAssignments(req, preview.Token)
+}
+
 func TestSubscriptionLifecycle(t *testing.T) {
 	c, _ := newCtl(t)
 	body := "hy2://a@de1.example:443#DE%20%231\nhy2://a@de2.example:443#DE%20%232\ntrojan://x@h:1\n"
@@ -108,12 +117,13 @@ func TestSubscriptionLifecycle(t *testing.T) {
 		t.Fatalf("reload: %q", got)
 	}
 
-	// Deleting keeps the used profile as a manual one.
-	if err := c.DeleteSubscription(v.ID); err != nil {
+	// The rule follows the main server after its subscription is removed.
+	if err := confirmSubscriptionDeletion(c, v.ID); err != nil {
 		t.Fatal(err)
 	}
 	ps = c.Profiles()
-	if len(ps) != 2 || ps[0].Source != "" || ps[1].Source != "" {
+	st = c.Settings()
+	if len(ps) != 0 || len(st.Rules) != 1 || st.Rules[0].Name != "yt" || st.Rules[0].Action != rules.Tunnel || st.Rules[0].Profile != "" {
 		t.Fatalf("%+v", ps)
 	}
 }
@@ -177,10 +187,10 @@ func TestSubscriptionKeepsProxyServer(t *testing.T) {
 	if ps := c.Profiles(); len(ps) != 2 || ps[1].ID != two || ps[1].Missing {
 		t.Fatalf("came back under another ID: %+v", ps)
 	}
-	if err := c.DeleteSubscription(v.ID); err != nil {
+	if err := confirmSubscriptionDeletion(c, v.ID); err != nil {
 		t.Fatal(err)
 	}
-	if ps := c.Profiles(); len(ps) != 2 || ps[1].ID != two || ps[1].Source != "" {
+	if ps := c.Profiles(); len(ps) != 1 || ps[0].ID != two || ps[0].Source != "" {
 		t.Fatalf("%+v", ps)
 	}
 }
@@ -630,7 +640,7 @@ func TestSubscriptionRollbackAfterRenamedRepeat(t *testing.T) {
 
 // While settings.json or proxies.json is not loaded, the servers their
 // rules and proxies name are unknown: an update keeps every server gone
-// from the subscription, and a deletion keeps them all as manual ones.
+// from the subscription, and a deletion has to wait for repair.
 func TestSubscriptionKeepsServersWhileRefsUnknown(t *testing.T) {
 	for _, broken := range []string{"settings", "proxies"} {
 		t.Run(broken, func(t *testing.T) {
@@ -650,11 +660,11 @@ func TestSubscriptionKeepsServersWhileRefsUnknown(t *testing.T) {
 			if ms, err := c.UpdateSubscription(v.ID); err != nil || ms.MissingKept != 1 || ms.Removed != 0 {
 				t.Fatalf("%+v %v", ms, err)
 			}
-			if err := c.DeleteSubscription(v.ID); err != nil {
-				t.Fatal(err)
+			if err := confirmSubscriptionDeletion(c, v.ID); err == nil {
+				t.Fatal("deletion with unreadable references")
 			}
 			ps := c.Profiles()
-			if len(ps) != 2 || ps[1].ID != two || ps[0].Source != "" || ps[1].Source != "" {
+			if len(ps) != 2 || ps[1].ID != two || ps[0].Source != "sub:"+v.ID || ps[1].Source != "sub:"+v.ID || len(c.Subscriptions()) != 1 {
 				t.Fatalf("%+v", ps)
 			}
 		})
@@ -674,7 +684,7 @@ func TestDeleteSubscriptionSaveErrorChangesNothing(t *testing.T) {
 	c.mu.Lock()
 	c.subsBroken = errors.New("broken")
 	c.mu.Unlock()
-	if err := c.DeleteSubscription(v.ID); err == nil {
+	if err := confirmSubscriptionDeletion(c, v.ID); err == nil {
 		t.Fatal("want error")
 	}
 	c.mu.Lock()
@@ -695,7 +705,7 @@ func TestDeleteSubscriptionSaveErrorChangesNothing(t *testing.T) {
 	c.mu.Lock()
 	c.profilesBroken = errors.New("broken")
 	c.mu.Unlock()
-	if err := c.DeleteSubscription(v.ID); err == nil {
+	if err := confirmSubscriptionDeletion(c, v.ID); err == nil {
 		t.Fatal("want error")
 	}
 	if l, err := c.Store.LoadSubscriptions(); err != nil || len(l) != 1 || len(c.Subscriptions()) != 1 {

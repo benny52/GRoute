@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, errText, fmtBytes, fmtDuration, cleanSettings, strategyLabel, type GroupView, type RulesetsView, type Settings, type SystemInfo, type TunnelStatus } from '../api';
+  import { api, errText, fmtBytes, fmtDuration, cleanSettings, strategyLabel, plural, type GroupView, type RulesetsView, type Settings, type SystemInfo, type TunnelStatus, type TunnelReason } from '../api';
   import { ui, hide, settle, hideUserPath, mainTarget, profileName } from '../state.svelte';
   import { startRestore } from '../state.svelte'; // backup
   import Icon from './Icon.svelte';
@@ -110,6 +110,7 @@
   const st = $derived(ui.status);
   const online = $derived(st != null && st.state !== 'disconnected' && !(st.state === 'error' && !st.stats));
   const main = $derived(mainTarget());
+  const waitingForMain = $derived(!main && ui.profiles.length === 0 && st?.warnings?.some((w) => w.kind === 'no-main'));
   const everything = $derived(settings?.defaultAction === 'tunnel');
   const selected = $derived(settings?.defaultAction === 'direct');
   const ruleCount = $derived(settings?.rules?.filter((r) => r.enabled !== false).length ?? 0);
@@ -117,7 +118,7 @@
   const tone = $derived.by(() => {
     if (!st || st.state === 'disconnected') return 'off';
     if (st.state === 'error' || st.state === 'tunnel-down') return 'bad';
-    if (st.state === 'starting' || st.state === 'connecting' || st.noTunnel) return 'wait';
+    if (st.state === 'starting' || st.state === 'connecting' || st.noTunnel || waitingForMain) return 'wait';
     return 'ok';
   });
 
@@ -135,6 +136,7 @@
       case 'error':
         return 'Ошибка';
     }
+    if (waitingForMain) return 'Ожидает основной сервер';
     return st.noTunnel ? 'Включено, но VPN не используется' : 'Подключено';
   });
 
@@ -142,10 +144,12 @@
     if (!st) return '';
     if (st.state === 'disconnected') {
       if (st.message) return st.message;
+      if (waitingForMain) return 'Ожидает основной сервер. Добавьте сервер и выберите его на главной.';
       return ui.profiles.length ? 'Нажмите кнопку, чтобы включить маршрутизацию.' : 'Сначала добавьте сервер.';
     }
     if (st.noTunnel) return 'Правил «через VPN» нет, и всё остальное идёт напрямую. Выберите ниже «Весь трафик» или добавьте правила.';
     if (st.state === 'connected') {
+      if (waitingForMain) return 'Новые соединения по унаследованным VPN-правилам отклоняются. Добавьте и выберите основной сервер.';
       return everything ? 'Весь трафик идёт через VPN, кроме исключений в правилах.' : 'Через VPN идут только программы и сайты из правил.';
     }
     // dns: names through VPN do not resolve either (DNS by the rules; not
@@ -263,6 +267,14 @@
   }
 
   const tunnelText: Record<string, string> = { connected: 'работает', connecting: 'подключается', failed: 'ошибка', stopped: 'остановлен' };
+  function reasonText(r: TunnelReason): string {
+    const role = { primary: 'Приоритетный сервер', fallback: 'Запасной сервер', main: 'Основной сервер', 'main-fallback': 'Основной сервер как запасной', proxy: 'Локальный прокси' }[r.role];
+    let text = role;
+    if (r.default) text += ' для «Всё остальное»';
+    else if (r.role === 'main') text += ` для ${r.count} ${plural(r.count, 'правила', 'правил', 'правил')}`;
+    else if (r.role !== 'proxy') text += ` в ${r.count} ${plural(r.count, 'правиле', 'правилах', 'правилах')}`;
+    return r.group ? `Группа «${hide(r.group)}» · ${text}` : text;
+  }
   const since = $derived(st?.since && !st.since.startsWith('0001') ? Date.now() - new Date(st.since).getTime() : 0);
 
   // netmodes: the network rule of this network, and why routing is off.
@@ -425,7 +437,7 @@
         </div>
         <p class="muted small explain">
           {#if everything}
-            Всё идёт через основной сервер. В правилах можно указать исключения: что пускать напрямую или через другой сервер.
+            Если правило не подошло, действует VPN-маршрут «Всё остальное». Его приоритетный сервер — {settings?.defaultProfile ? profileName(settings.defaultProfile) : 'основной сервер с главной'}.
           {:else if selected}
             Через VPN идут только программы и сайты из правил, остальное — напрямую, как без VPN.
           {:else if settings}
@@ -440,6 +452,7 @@
       <section class="card">
         <h2>Основной сервер</h2>
         <select class="main-select" value={main?.id ?? ''} onchange={(e) => settle(e, (el) => pickMain(el.value), () => mainTarget()?.id ?? '')}>
+          {#if !main}<option value="" disabled>Выберите основной сервер</option>{/if}
           {#if main?.unloaded}<option value={main.id} disabled>основная группа не загружена</option>{/if}
           <TargetOptions current={main?.unloaded ? '' : main?.id} />
         </select>
@@ -448,7 +461,7 @@
         {:else if groupLine}
           <p class="small sub">{hide(groupLine)}</p>
         {/if}
-        <p class="muted small explain">Через него идёт «весь трафик» и правила, где сервер не выбран явно.</p>
+        <p class="muted small explain">Его используют VPN-правила и маршрут «Всё остальное», в которых выбран «Основной сервер».</p>
         <div class="row">
           {#if main?.group}
             {#if !main.unloaded}
@@ -482,6 +495,7 @@
               <span class="dot {tunnelTone(t)}"></span>
               <div class="grow">
                 <div class="ellipsis"><b>{ui.profiles.some((p) => p.id === t.id) ? profileName(t.id) : hide(t.name)}</b> <span class="muted small">{tunnelText[t.state] ?? t.state}</span></div>
+                {#each st.tunnelReasons?.[t.id] ?? [] as reason}<div class="muted small">{reasonText(reason)}</div>{/each}
                 {#if t.message && t.state !== 'connected'}<div class="small bad-text">{hide(t.message)}</div>{/if}
               </div>
               {#if t.rejected}<span class="badge" title="Соединений отклонено, пока сервер был недоступен">отклонено {t.rejected}</span>{/if}

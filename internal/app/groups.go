@@ -191,31 +191,6 @@ func (c *Controller) groupHasLocked(g *groups.Group, id string) bool {
 	return false
 }
 
-// dropGroupSubLocked takes deleted subscription id out of the groups that
-// follow it; its servers that were kept (manual servers now: a rule names
-// one, or a used group would be emptied) become their own members.
-func (c *Controller) dropGroupSubLocked(id string, had map[string]bool) {
-	if c.groupsBroken != nil || !slices.ContainsFunc(c.groupsFile.Groups, func(g groups.Group) bool { return slices.Contains(g.Subs, id) }) {
-		return
-	}
-	next := c.groupsFile.Clone()
-	for i := range next.Groups {
-		g := &next.Groups[i]
-		if !slices.Contains(g.Subs, id) {
-			continue
-		}
-		g.Subs = slices.DeleteFunc(g.Subs, func(s string) bool { return s == id })
-		for _, p := range c.profiles.List {
-			if had[p.ID] && len(g.Members) < groups.MaxMembers && !slices.Contains(g.Members, p.ID) {
-				g.Members = append(g.Members, p.ID)
-			}
-		}
-	}
-	if err := c.saveGroupsLocked(next); err != nil {
-		c.Log.Warn("deleted subscription not removed from groups.json", "err", err)
-	}
-}
-
 // groupNamesLocked adds the group names to the names map (profileName).
 func (c *Controller) groupNamesLocked(m map[string]string) {
 	if c.groupsFile == nil {
@@ -775,18 +750,6 @@ func (c *Controller) mergeKeepingGroupsLocked(source string, fresh []hysteria.Pr
 		list, st = mergeSubscription(c.profiles.List, source, fresh, func(id string) bool { return c.profileUsedLocked(id) || pins[id] }, newID)
 	}
 	return list, st
-}
-
-// subDeletePinsLocked: the servers of subscription source that deleting it
-// keeps as manual ones so that no used group is emptied.
-func (c *Controller) subDeletePinsLocked(source string) map[string]bool {
-	var result []hysteria.Profile
-	for _, p := range c.profiles.List {
-		if p.Source != source || c.profileUsedLocked(p.ID) {
-			result = append(result, p)
-		}
-	}
-	return c.groupPinsLocked(result)
 }
 
 // ---- rules and Status ----

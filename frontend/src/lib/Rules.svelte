@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, errText, toLists, cleanSettings, cleanFallback, isGroupId, portsText, isEditToken, plural, tokenStale, editGone, newRuleID, type Settings, type Rule, type LintIssue, type RulesetsView } from '../api';
-  import { ui, hide, profileName, serverLabel, mainTarget, mainText } from '../state.svelte';
+  import { ui, hide, profileName, serverLabel, mainTarget } from '../state.svelte';
   import Icon from './Icon.svelte';
   import TargetOptions from './TargetOptions.svelte';
+  import BulkAssignments from './BulkAssignments.svelte';
+  import { mainOption } from './assignments';
   import RuleEditor from './RuleEditor.svelte';
   import FallbackPicker from './FallbackPicker.svelte';
   import Explain from './Explain.svelte';
@@ -41,6 +43,7 @@
   let asText = $state(false);
   let importing = $state(false); // «Импорт»: rules of another program
   let wizard = $state(false);
+  let bulk = $state(false);
   let tidying = $state(false); // «Навести порядок»
   // The list's view, the window's own (not settings): a search over names,
   // sites, programs and routes, and rows in one line. dense: the user's
@@ -161,7 +164,7 @@
   // a network rule) also reloads; in edit mode the profile list's revision
   // does (the edited profile was edited elsewhere, switched to or deleted).
   $effect(() => {
-    if (!s || pending || editing || asText || importing || wizard || tidying || dragFrom !== null || reloading) return;
+    if (!s || pending || editing || asText || importing || wizard || bulk || tidying || dragFrom !== null || reloading) return;
     const r = ui.status?.ruleset;
     if (editId) {
       if (!r || r.rev <= editRev || r.rev <= triedEditAt) return;
@@ -377,15 +380,15 @@
   function routeLabel(r: { action: string; profile?: string; fallback?: string[] }): string {
     if (r.action === 'direct') return 'Напрямую';
     if (r.action === 'block') return 'Заблокировать';
-    const name = r.profile ? (isGroupId(r.profile) ? `${profileName(r.profile)} (группа)` : profileName(r.profile)) : mainText() || 'Основной сервер';
-    // Fallbacks routing skips (struck through in the editor) do not count.
+    const name = r.profile ? (isGroupId(r.profile) ? `${profileName(r.profile)} (группа)` : profileName(r.profile))
+      : mainTarget() ? mainOption() : 'Ожидает основной сервер';
     const n = cleanFallback(r.fallback, r.profile, mainTarget()?.id).length;
     return n ? `${name} +${n} запасн.` : name;
   }
 
   function problem(r: Rule): string {
     if (r.action !== 'tunnel' || r.enabled === false) return '';
-    if (!r.profile) return mainTarget() ? '' : 'Основной сервер не выбран: соединения будут отклоняться';
+    if (!r.profile) return mainTarget() ? '' : 'Ожидает основной сервер';
     if (isGroupId(r.profile)) {
       if (ui.status?.groupsNote) return 'Группы не загружены (groups.json): соединения будут отклоняться';
       const g = ui.groups.find((x) => x.id === r.profile);
@@ -419,6 +422,7 @@
       />
     {/if}
     {#if ui.expert}<button onclick={() => (asText = true)} disabled={!s} title="Много правил сразу: весь список текстом или добавить пачкой"><Icon name="log" size={16} />Текстом</button>{/if}
+    <button onclick={() => (bulk = true)} disabled={!s || pending > 0}>Групповое изменение</button>
     <button
       onclick={() => (wizard = true)}
       disabled={!s || !!editId}
@@ -592,10 +596,13 @@
           <button class:on={s.defaultAction === 'block'} onclick={() => setDefault('block')}>Блок</button>
         </div>
         {#if s.defaultAction === 'tunnel'}
-          <select value={s.defaultProfile ?? ''} onchange={(e) => setDefault('tunnel', (e.currentTarget as HTMLSelectElement).value)}>
-            <option value="">Основной{main ? ` — ${mainText(main)}` : ''}</option>
-            <TargetOptions current={s.defaultProfile} />
-          </select>
+          <label>Приоритетный сервер
+            <select value={s.defaultProfile ?? ''} onchange={(e) => setDefault('tunnel', (e.currentTarget as HTMLSelectElement).value)}>
+              <option value="">{mainOption()}</option>
+              <TargetOptions current={s.defaultProfile} />
+            </select>
+          </label>
+          {#if !main && !s.defaultProfile}<span class="muted small">Ожидает основной сервер</span>{/if}
         {/if}
       </div>
       {#if s.defaultAction === 'tunnel'}
@@ -608,6 +615,10 @@
     <Explain current={() => (s ? cleanSettings(s, main?.id) : null)} />
   {/if}
 </div>
+
+{#if bulk}
+  <BulkAssignments currentId={editId} onclose={() => (bulk = false)} onapplied={() => { bulk = false; void load(); }} />
+{/if}
 
 {#if editing}
   <RuleEditor

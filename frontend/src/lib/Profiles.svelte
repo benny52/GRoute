@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, errText, fmtBytes, type ProfileSummary, type Profile, type ImportResult } from '../api';
+  import AssignmentReview from './AssignmentReview.svelte';
+  import ServerAssignments from './ServerAssignments.svelte';
   import { ui, hide } from '../state.svelte';
   import Icon from './Icon.svelte';
   import ProfileEditor from './ProfileEditor.svelte';
@@ -41,6 +43,8 @@
   let editing = $state<Profile | null>(null);
   let editingSource = $state(''); // the subscription name of the edited server
   let checking = $state<ProfileSummary | null>(null);
+  let usage = $state<ProfileSummary | null>(null);
+  let transferring = $state<(ProfileSummary & { duplicateId?: string }) | null>(null);
 
   async function load() {
     try {
@@ -154,15 +158,11 @@
   }
 
   function remove(p: ProfileSummary) {
+    if (p.duplicateOf && p.duplicateSub && !p.source) {
+      transferring = p;
+      return;
+    }
     if (confirm(`Удалить сервер «${hide(p.name)}»?`)) run(() => api.DeleteProfile(p.id));
-  }
-
-  // A manual server that a subscription also brings: the subscription's
-  // copy stays up to date, this one can go. Rules and proxies that use it
-  // are named by the refusal (switch them to the subscription's copy).
-  function removeCopy(p: ProfileSummary) {
-    const q = `Удалить ручную копию «${hide(p.name)}»?\n\nТот же сервер есть в подписке «${hide(p.duplicateSub ?? '')}» как «${hide(p.duplicateOf ?? '')}» и обновляется вместе с ней.`;
-    if (confirm(q)) run(() => api.DeleteProfile(p.id), 'Копия удалена');
   }
 
   function tunnel(id: string) {
@@ -200,8 +200,8 @@
 
   <Help id="servers" title="Что здесь">
     <p>
-      Сервер — это компьютер вашего VPN-сервиса, через который идёт трафик. Здесь все ваши серверы. <b>Звёздочка</b> отмечает основной: через
-      него идёт VPN, если в правиле не выбран другой сервер. Щёлкните по звёздочке, чтобы сделать сервер основным.
+      Здесь все серверы вашего VPN-сервиса. <b>Звёздочка</b> отмечает основной сервер, выбранный на главной.
+      Его используют правила с назначением «Основной сервер».
     </p>
     <ul>
       <li><b>«Проверить»</b> покажет, работает ли сервер и насколько он быстрый (задержка: чем меньше, тем лучше).</li>
@@ -248,9 +248,9 @@
     {#each list as p, i (p.id)}
       {@const t = tunnel(p.id)}
       <div class="srv card" class:main={p.main} class:missing={p.missing}>
-        <button class="icon star" class:on={p.main} onclick={() => run(() => api.SetMain(p.id))} title={p.main ? 'Основной сервер' : 'Сделать основным'}>
+        {#if p.main}<span class="star" role="img" aria-label="Основной сервер" title="Основной сервер выбран на главной">
           <Icon name="star" size={18} />
-        </button>
+        </span>{/if}
         <div class="grow info">
           <div class="name ellipsis">{hide(p.name)}</div>
           <div class="meta">
@@ -259,16 +259,14 @@
             {#if p.missing}<span class="badge warn-b" title="Сервер пропал из подписки, но его используют правила">нет в подписке</span>{/if}
             {#if p.duplicateOf && p.duplicateSub && !p.source}
               <span class="badge warn-b" title="Тот же адрес, пароль и настройки, что у «{hide(p.duplicateOf)}» из подписки «{hide(p.duplicateSub)}»: та копия обновляется вместе с подпиской">есть в подписке «{hide(p.duplicateSub)}»</span>
-              <button class="link small" onclick={() => removeCopy(p)}>Удалить копию</button>
+              <button class="link small" onclick={() => (transferring = p)}>Перенести назначения и удалить копию</button>
             {:else if p.duplicateOf}<span class="badge warn-b" title="Тот же адрес, пароль и настройки, что у «{hide(p.duplicateOf)}»: копию можно удалить">дубль «{hide(p.duplicateOf)}»</span>{/if}
             {#if p.protocol === 'vless'}<span class="badge" title="VLESS через Xray">VLESS · {p.transport}</span>{/if}
             {#if p.flow}<span class="badge" title={p.flow}>Vision</span>{/if}
             {#if p.obfs}<span class="badge">{p.obfs}</span>{/if}
             {#if p.pinned}<span class="badge" title="Сертификат проверяется по отпечатку">pin</span>{:else if p.insecure}<span class="badge warn-b" title="Сертификат не проверяется">insecure</span>{/if}
           </div>
-          <div class="muted small ellipsis">
-            {#if p.usedBy.length}Используют: {p.usedBy.map((u) => hide(u)).join(', ')}{:else}Не используется правилами{/if}
-          </div>
+          <button class="link small" onclick={() => (usage = p)}>Где используется</button>
         </div>
         {#if t}
           <div class="state" title={hide(t.message)}>
@@ -307,6 +305,14 @@
   <CheckProfile id={checking.id} name={checking.name} onclose={() => (checking = null)} />
 {/if}
 
+{#if usage}<ServerAssignments profile={usage} onclose={() => (usage = null)} />{/if}
+{#if transferring}
+  <AssignmentReview request={{ operation: 'transfer', source: transferring.id, target: transferring.duplicateId }}
+    title={`Перенести назначения «${hide(transferring.name)}» на сервер из подписки «${hide(transferring.duplicateSub)}»?`}
+    confirmLabel="Перенести назначения и удалить копию" onclose={() => (transferring = null)}
+    onapplied={() => { transferring = null; info = 'Назначения перенесены. Ручная копия удалена.'; void after(); }} />
+{/if}
+
 {#if editing}
   <ProfileEditor
     profile={editing}
@@ -330,9 +336,8 @@
   .srv.main { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
   .srv.missing { border-style: dashed; }
   .skipped { margin: 4px 0 0; padding-left: 18px; }
-  .star { color: var(--faint); }
-  .star.on { color: var(--warn); }
-  .star.on :global(svg) { fill: currentColor; }
+  .star { color: var(--warn); }
+  .star :global(svg) { fill: currentColor; }
   .info { display: grid; gap: 3px; }
   .name { font-weight: 650; font-size: 14.5px; }
   .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); }

@@ -486,7 +486,7 @@ type cfgState struct {
 // snapshotLocked copies the configuration (c.mu held).
 func (c *Controller) snapshotLocked() cfgState {
 	s := cfgState{
-		Profiles: store.Profiles{Active: c.profiles.Active, List: slices.Clone(c.profiles.List)},
+		Profiles: *cloneProfiles(c.profiles),
 		Subs:     slices.Clone(c.subs),
 		Proxies:  slices.Clone(c.proxies),
 		Prefs:    c.prefs,

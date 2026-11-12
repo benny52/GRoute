@@ -136,7 +136,7 @@
 <div class="groups">
   <div class="row top">
     <p class="muted grow sub">
-      Группа сама выбирает сервер: самый быстрый, первый работающий, по кругу. Её можно указать в правилах, прокси и как основной сервер (★). Пока
+      Группа сама выбирает сервер: самый быстрый, первый работающий, по кругу. Её можно указать в правилах и прокси или выбрать как основной сервер на главной (★). Пока
       группа используется, работают все её серверы.
     </p>
     <button class="primary" onclick={create} disabled={ui.profiles.length === 0 || locked} title={ui.profiles.length === 0 ? 'Сначала добавьте сервер' : ''}
@@ -170,9 +170,9 @@
   {#each info?.groups ?? [] as g (g.id)}
     <section class="card grp" class:main={g.main}>
       <div class="row head">
-        <button class="icon star" class:on={g.main} disabled={locked || g.main} onclick={() => run(() => api.SetMain(g.id))} title={g.main ? 'Основная группа' : 'Сделать основной'}>
+        {#if g.main}<span class="star" role="img" aria-label="Основная группа" title="Основная группа выбрана на главной">
           <Icon name="star" size={18} />
-        </button>
+        </span>{/if}
         <div class="grow info">
           <div class="name-line">
             <span class="name ellipsis">{hide(g.name)}</span>
@@ -274,9 +274,8 @@
   .info { display: grid; gap: 3px; min-width: 0; }
   .name-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
   .name { font-weight: 650; font-size: 14.5px; }
-  .star { color: var(--faint); }
-  .star.on { color: var(--warn); }
-  .star.on :global(svg) { fill: currentColor; }
+  .star { color: var(--warn); }
+  .star :global(svg) { fill: currentColor; }
   .acts { display: flex; }
   .danger { color: var(--block); }
   .members { display: flex; flex-wrap: wrap; gap: 6px; }

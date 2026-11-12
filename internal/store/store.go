@@ -52,15 +52,21 @@ func Open(dir string) (*Store, error) {
 			return nil, err
 		}
 	}
-	return &Store{Dir: dir}, nil
+	s := &Store{Dir: dir}
+	if err := s.recoverAssignments(); err != nil {
+		return nil, fmt.Errorf("восстановление назначений: %w", err)
+	}
+	return s, nil
 }
 
 func (s *Store) path(name string) string { return filepath.Join(s.Dir, name) }
 
 // Profiles is the saved profile list.
 type Profiles struct {
-	Active string             `json:"active"`
-	List   []hysteria.Profile `json:"list"`
+	// AwaitMain preserves an intentionally empty main after its subscription was removed.
+	AwaitMain bool               `json:"awaitMain,omitempty"`
+	Active    string             `json:"active"`
+	List      []hysteria.Profile `json:"list"`
 }
 
 // Find returns the profile with id, or nil.
@@ -88,8 +94,9 @@ type secrets struct {
 }
 
 type storedProfiles struct {
-	Active string          `json:"active"`
-	List   []storedProfile `json:"list"`
+	AwaitMain bool            `json:"awaitMain,omitempty"`
+	Active    string          `json:"active"`
+	List      []storedProfile `json:"list"`
 }
 
 func (s *Store) LoadProfiles() (*Profiles, error) {
@@ -106,7 +113,7 @@ func (s *Store) LoadProfiles() (*Profiles, error) {
 	if err := json.Unmarshal(b, &sp); err != nil {
 		return nil, fmt.Errorf("profiles.json: %w", err)
 	}
-	out := &Profiles{Active: sp.Active}
+	out := &Profiles{Active: sp.Active, AwaitMain: sp.AwaitMain}
 	for _, p := range sp.List {
 		if p.Sealed != "" {
 			raw, err := base64.StdEncoding.DecodeString(p.Sealed)
@@ -130,7 +137,7 @@ func (s *Store) LoadProfiles() (*Profiles, error) {
 func (s *Store) SaveProfiles(p *Profiles) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sp := storedProfiles{Active: p.Active, List: []storedProfile{}}
+	sp := storedProfiles{Active: p.Active, AwaitMain: p.AwaitMain, List: []storedProfile{}}
 	for _, pr := range p.List {
 		raw, _ := json.Marshal(secrets{Auth: pr.Auth, Obfs: pr.Obfs.Password, VLESS: pr.VLESS.ID})
 		sealed, err := seal(raw)

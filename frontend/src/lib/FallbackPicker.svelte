@@ -13,36 +13,39 @@
   // the same name from different subscriptions differ by the
   // subscription's name.
   const label = (id: string) => {
-    if (!id) return `Основной${main ? ` — ${mainText(main)}` : ''}`;
+    if (!id) return `Основной сервер — ${main ? mainText(main) : 'не выбран'}`;
     if (isGroupId(id)) return `«${profileName(id)}» (группа)`;
     const p = ui.profiles.find((x) => x.id === id);
     if (!p) return 'удалённый сервер';
     return `${hide(p.name)}${p.sourceName ? ` · ${hide(p.sourceName)}` : ''}${p.missing ? ' — нет в подписке' : ''}`;
   };
-  // Servers resolved: "" is the main one, so "Основной" and the main
-  // server by name are the same server.
+  // Compare saved assignments by ID, and effective routes by today's main.
   const key = (id: string) => id || main?.id || '';
-  const own = $derived(key(primary));
-  const taken = (id: string) => key(id) === own || value.some((v) => key(v) === key(id));
+  const taken = (id: string) => id === primary || value.includes(id);
   // A copy of another server (the very same connection: duplicateOf)
   // would only repeat it as a reserve: the kept one is offered instead.
   const servers = $derived(ui.profiles.filter((p) => !p.duplicateOf && !taken(p.id)));
   const groups = $derived(ui.groups.filter((g) => !taken(g.id)));
   const offerMain = $derived(!taken(''));
-  // Entries routing skips (the route's own server or a repeat), e.g. after
-  // the main server changed: shown as unused rather than as a reserve, and
-  // dropped when the route is saved (cleanSettings).
-  const idle = (i: number) => key(value[i]) === own || value.slice(0, i).some((v) => key(v) === key(value[i]));
+  function skipped(i: number): string {
+    const id = value[i];
+    if (id === primary || value.slice(0, i).includes(id)) return 'Повтор назначения. Уберётся при сохранении.';
+    if (id === '' && !main) return 'Ожидает основной сервер';
+    if (key(id) === key(primary) || value.slice(0, i).some((v) => key(v) === key(id))) {
+      return 'Сейчас совпадает с предыдущим сервером. Назначение сохранится при смене основного.';
+    }
+    return '';
+  }
 </script>
 
 <div class="fb" class:compact>
-  {#if !compact}<span class="muted">Запасные</span>{/if}
+  {#if !compact}<span class="muted">Запасные серверы</span>{/if}
   <div class="list">
     {#each value as id, i (i + ':' + id)}
       <span
         class="chip"
-        class:idle={idle(i)}
-        title={idle(i) ? 'Не используется: это сервер маршрута или повтор. Уберётся при сохранении.' : 'Используется, если недоступны серверы левее'}
+        class:idle={!!skipped(i)}
+        title={skipped(i) || 'Используется, если недоступны серверы левее'}
       >
         <span class="n">{i + 1}</span>
         <span class="ellipsis">{label(id)}</span>
@@ -51,6 +54,7 @@
     {/each}
     {#if offerMain || servers.length || groups.length}
       <select
+        aria-label="Добавить запасной сервер"
         value="__add"
         onchange={(e) => {
           const v = (e.currentTarget as HTMLSelectElement).value;

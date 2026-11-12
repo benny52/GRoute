@@ -13,6 +13,7 @@
   import AppPicker from './AppPicker.svelte';
   import GeoPicker from './GeoPicker.svelte';
   import TargetOptions from './TargetOptions.svelte';
+  import FallbackPicker from './FallbackPicker.svelte';
 
   // onkeep: the setup's way past this step that leaves the rules as they are.
   let { onback, ondone, onkeep }: { onback: () => void; ondone: (summary: string) => void; onkeep?: () => void } = $props();
@@ -29,11 +30,7 @@
   let blocks = $state<string[]>([]);
   // The server of each group that goes through the VPN ('' = main).
   let server = $state<Record<string, string>>({});
-  // The reserve is one spare server: every fallback runs all the time,
-  // next to the route's own server (switching is instant), so all of them
-  // would be one tunnel per server of a subscription.
-  let reserve = $state(true);
-  let spare = $state('');
+  let fallbacks = $state<Record<string, string[]>>({});
   let replace = $state(false);
   let settings = $state<Settings | null>(null);
   let error = $state('');
@@ -47,14 +44,8 @@
         // «Весь остальной интернет» starts on the server it has now, and
         // the reserve as it is set for it (off when it has none).
         if (s.defaultAction === 'tunnel') {
-          const known = (id: string) => ui.profiles.some((p) => p.id === id) || ui.groups.some((g) => g.id === id);
-          if (s.defaultProfile && known(s.defaultProfile)) server.rest ??= s.defaultProfile;
-          const fb = (s.defaultFallback ?? []).filter(known);
-          reserve = fb.length > 0;
-          // [main] is the reserve of a route on the spare itself.
-          const mainId = mainTarget()?.id;
-          const first = fb.find((id) => id !== mainId) ?? (s.defaultProfile && s.defaultProfile !== mainId && known(s.defaultProfile) ? s.defaultProfile : '');
-          if (first) spare = first;
+          server.rest ??= s.defaultProfile ?? '';
+          fallbacks.rest ??= s.defaultFallback ?? [];
         }
       })
       .catch((e) => (error = errText(e)));
@@ -223,15 +214,17 @@
     ...(base === 'all' ? [{ key: 'rest', title: 'Весь остальной интернет', rules: [] }] : []),
   ]);
 
-  // The spare: the one chosen, else the first server but the main one. A
-  // server group can be the spare too (groups).
-  const others = $derived([...ui.profiles.map((p) => p.id), ...ui.groups.map((g) => g.id)].filter((id) => id !== main?.id));
-  const spareId = $derived(others.includes(spare) ? spare : (others[0] ?? ''));
-
-  // A route on the spare itself falls back to the main server.
-  function reserveOf(profile: string): string[] {
-    if (!reserve || !spareId) return [];
-    return cleanFallback([profile === spareId ? (main?.id ?? '') : spareId], profile, main?.id);
+  // New items start with the wizard's single suggested spare. Once
+  // edited, their literal assignments survive changes to the main server.
+  function reserveOf(key: string): string[] {
+    const profile = server[key] ?? '';
+    if (fallbacks[key]) return cleanFallback(fallbacks[key], profile);
+    const available = [...ui.profiles, ...ui.groups];
+    const saved = settings?.defaultAction === 'tunnel' ? settings.defaultFallback ?? [] : undefined;
+    if (saved?.length === 0) return [];
+    const spare = saved?.find((id) => id !== main?.id && available.some((p) => p.id === id))
+      ?? available.find((p) => p.id !== main?.id)?.id;
+    return spare ? cleanFallback([profile === spare ? '' : spare], profile) : [];
   }
 
   function built(): Rule[] {
@@ -239,7 +232,7 @@
       g.rules.map((r) => {
         if (r.action !== 'tunnel') return r;
         const profile = server[g.key] ?? '';
-        return { ...r, profile, fallback: reserveOf(profile) };
+        return { ...r, profile, fallback: reserveOf(g.key) };
       }),
     );
   }
@@ -247,7 +240,7 @@
   const restAction: Action = $derived(base === 'all' ? 'tunnel' : 'direct');
 
   function serverName(id: string): string {
-    return id ? targetText(id) : main ? mainText(main) : 'основной сервер';
+    return id ? targetText(id) : main ? `Основной сервер — ${mainText(main)}` : 'Ожидает основной сервер';
   }
 
   // What a rule takes, in words: a template's hint, else its items.
@@ -265,7 +258,7 @@
     { id: 'apps', label: 'Программы' },
     { id: 'sites', label: 'Сайты' },
     { id: 'block', label: 'Блокировка' },
-    ...(ui.profiles.length > 1 || ui.groups.length > 0 ? [{ id: 'servers', label: 'Серверы' }] : []),
+    ...(vpnGroups.length ? [{ id: 'servers', label: 'Серверы' }] : []),
     { id: 'sum', label: 'Итог' },
   ]);
   let step = $state('intro');
@@ -298,7 +291,7 @@
   }
 
   // What a rule does, whatever its ID and field order: the same key, the
-  // same rule. The main server picked by name is the same as «Основной».
+  // same rule. A literal server ID stays distinct from inheritance.
   function ruleKey(r: Rule): string {
     const sorted = (v: unknown): unknown =>
       Array.isArray(v)
@@ -306,7 +299,7 @@
         : v && typeof v === 'object'
           ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])]))
           : v;
-    const c = cleanRule({ ...r, profile: main && r.profile === main.id ? '' : r.profile }, main?.id);
+    const c = cleanRule(r, main?.id);
     delete c.id;
     return JSON.stringify(sorted(c));
   }
@@ -335,7 +328,7 @@
       next.rules = replace ? built() : onTop(built(), cur.rules ?? []);
       next.defaultAction = restAction;
       next.defaultProfile = restAction === 'tunnel' ? (server.rest ?? '') : '';
-      next.defaultFallback = restAction === 'tunnel' ? reserveOf(server.rest ?? '') : [];
+      next.defaultFallback = restAction === 'tunnel' ? reserveOf('rest') : [];
       // rulesets: the active rule profile, the one this window opened with
       // (its token): Go refuses the save if another one was switched to
       // meanwhile (the tray, the CLI, a network rule).
@@ -508,41 +501,31 @@
     {:else if step === 'servers'}
       <h1>Через какие серверы?</h1>
       <p class="lead">
-        У вас {ui.profiles.length} {plural(ui.profiles.length, 'сервер', 'сервера', 'серверов')}. Для каждого пункта можно выбрать свой: например,
-        нейросети через США, а YouTube через ближайший. Если не уверены — оставьте «Основной».
+        Основной сервер выбирается на главной. Оставьте «Основной сервер», и правило будет следовать этому выбору.
+        Чтобы закрепить приоритетный сервер за правилом, выберите его по имени.
+        Запасные серверы подключаются заранее. Если приоритетный сервер недоступен, новое соединение пойдёт через первый доступный запасной.
       </p>
       {#if vpnGroups.length}
         <div class="items">
           {#each vpnGroups as g (g.key)}
-            <div class="item">
-              <span class="grow ellipsis"><b>{g.title}</b></span>
-              <select value={server[g.key] ?? ''} onchange={(e) => (server[g.key] = (e.currentTarget as HTMLSelectElement).value)}>
-                <option value="">Основной{main ? ` — ${mainText(main)}` : ''}</option>
-                <TargetOptions current={server[g.key] ?? ''} />
-              </select>
+            <div class="item route-servers">
+              <b>{g.title}</b>
+              <label>Приоритетный сервер
+                <select value={server[g.key] ?? ''} onchange={(e) => {
+                  const profile = e.currentTarget.value;
+                  server[g.key] = profile;
+                  if (fallbacks[g.key]) fallbacks[g.key] = cleanFallback(fallbacks[g.key], profile);
+                }}>
+                  <option value="">Основной сервер — {main ? mainText(main) : 'не выбран'}</option>
+                  <TargetOptions current={server[g.key] ?? ''} />
+                </select>
+              </label>
+              <FallbackPicker primary={server[g.key] ?? ''} value={reserveOf(g.key)} onchange={(v) => (fallbacks[g.key] = v)} />
             </div>
           {/each}
         </div>
       {:else}
         <p class="muted">Через VPN ничего не идёт, выбирать нечего.</p>
-      {/if}
-      <label class="opt">
-        <input type="checkbox" bind:checked={reserve} />
-        <span><b>Подстраховка: если сервер не работает, пускать через запасной</b>
-          <span>
-            Запасной сервер подключается вместе с основным и работает всё время, пока включён VPN: так на него можно переключиться мгновенно.
-            Без подстраховки соединения через неработающий сервер не пройдут. Напрямую, мимо VPN, они не уйдут в любом случае.
-          </span></span
-        >
-      </label>
-      {#if reserve}
-        <div class="item">
-          <span class="grow ellipsis"><b>Запасной сервер</b></span>
-          <select value={spareId} onchange={(e) => (spare = (e.currentTarget as HTMLSelectElement).value)}>
-            <TargetOptions exclude={(id) => id === main?.id} />
-          </select>
-        </div>
-        <p class="muted small">Для пунктов, которые сами идут через запасной сервер, подстраховкой будет основной.</p>
       {/if}
     {:else if step === 'sum'}
       <h1>Проверим, что получилось</h1>
@@ -557,21 +540,23 @@
             <span class="grow">
               <b>{r.name}</b>
               <span class="muted small">{ruleText(r)}</span>
+              {#if r.action === 'tunnel' && r.fallback?.length}
+                <span class="muted small rule-fallback">Запасные серверы — {r.fallback.map(serverName).join(' → ')}</span>
+              {/if}
             </span>
-            <span class="pill {r.action}">{r.action === 'direct' ? 'Напрямую' : r.action === 'block' ? 'Заблокировать' : `Через ${serverName(r.profile ?? '')}`}</span>
+            <span class="pill {r.action}">{r.action === 'direct' ? 'Напрямую' : r.action === 'block' ? 'Заблокировать' : serverName(r.profile ?? '')}</span>
           </li>
         {/each}
         <li class="rest">
           <span class="n">*</span>
-          <span class="grow"
-            ><b>Всё остальное</b>
-            <span class="muted small"
-              >то, что не подошло ни под одно правило выше{restAction === 'tunnel' && reserveOf(server.rest ?? '').length
-                ? ` · запасной сервер — ${serverName(reserveOf(server.rest ?? '')[0])}`
-                : ''}</span
-            ></span
-          >
-          <span class="pill {restAction}">{restAction === 'tunnel' ? `Через ${serverName(server.rest ?? '')}` : 'Напрямую'}</span>
+          <span class="grow">
+            <b>Всё остальное</b>
+            <span class="muted small">То, что не подошло ни под одно правило выше</span>
+            {#if restAction === 'tunnel' && reserveOf('rest').length}
+              <span class="muted small rule-fallback">Запасные серверы — {reserveOf('rest').map(serverName).join(' → ')}</span>
+            {/if}
+          </span>
+          <span class="pill {restAction}">{restAction === 'tunnel' ? serverName(server.rest ?? '') : 'Напрямую'}</span>
         </li>
       </ol>
       {#if nothing}
@@ -663,16 +648,15 @@
   .item > :global(svg) { color: var(--muted); flex: none; }
   .item select { max-width: 280px; }
 
-  .opt { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); cursor: pointer; }
-  .opt input { margin-top: 3px; flex: none; width: 17px; height: 17px; }
-  .opt > span { display: grid; gap: 3px; }
-  .opt > span > span { color: var(--muted); font-size: 13px; }
+  .route-servers { display: grid; gap: 8px; }
+  .route-servers label { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); }
 
   .rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
   .rules li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); }
   .rules li.rest { border-style: dashed; }
   .rules .grow { display: grid; gap: 2px; min-width: 0; }
   .rules .grow .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rules .grow .rule-fallback { white-space: normal; overflow-wrap: anywhere; }
   .n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: 700; background: var(--surface-2); color: var(--muted); flex: none; }
 
   .nav { display: flex; align-items: center; gap: 8px; padding: 14px 28px 18px; border-top: 1px solid var(--border); background: var(--surface); }

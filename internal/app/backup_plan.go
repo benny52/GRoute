@@ -51,20 +51,21 @@ var restoreWrites = []string{"subscriptions.json", "profiles.json", "groups.json
 	"networks.json", "dns.json", "prefs.json"}
 
 type restorePlan struct {
-	next        cfgState
-	writes      []string // in restoreWrites order
-	keepBroken  []string // written files that are broken now: a copy is kept first
-	sections    []string // keys applied, table order
-	removedSubs []string // current subscription IDs absent from next.Subs
-	refreshSubs []string // enabled subscriptions to update afterwards
-	redact      map[string][]string
-	appearance  *BackupAppearance
-	ksChange    int // -1 off, 0 same, +1 on
-	rules       rulesWrite
-	counts      struct{ servers, rules int }
-	lines       []BackupMsg
-	warnings    []BackupMsg
-	err         string
+	beforeInstall func() error // optional durable commit point for server assignment operations
+	next          cfgState
+	writes        []string // in restoreWrites order
+	keepBroken    []string // written files that are broken now: a copy is kept first
+	sections      []string // keys applied, table order
+	removedSubs   []string // current subscription IDs absent from next.Subs
+	refreshSubs   []string // enabled subscriptions to update afterwards
+	redact        map[string][]string
+	appearance    *BackupAppearance
+	ksChange      int // -1 off, 0 same, +1 on
+	rules         rulesWrite
+	counts        struct{ servers, rules int }
+	lines         []BackupMsg
+	warnings      []BackupMsg
+	err           string
 }
 
 // rulesWrite is how the rules step writes (backup_commit.go).
@@ -313,7 +314,7 @@ func planRestore(cur cfgState, p *backup.Payload, ch BackupChoice, env planEnv) 
 		return pl
 	}
 	pl.next = cur
-	pl.next.Profiles = store.Profiles{Active: cur.Profiles.Active, List: slices.Clone(cur.Profiles.List)}
+	pl.next.Profiles = *cloneProfiles(&cur.Profiles)
 	pl.next.Subs = slices.Clone(cur.Subs)
 	pl.next.Proxies = slices.Clone(cur.Proxies)
 	pl.next.Groups = cur.Groups.Clone()

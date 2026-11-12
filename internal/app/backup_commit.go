@@ -369,6 +369,11 @@ func (c *Controller) commitRestoreLocked(pl *restorePlan, before map[string]stor
 		}
 	}
 
+	if pl.beforeInstall != nil {
+		if err := pl.beforeInstall(); err != nil {
+			return rollback(err)
+		}
+	}
 	// Install: memory follows the files (no I/O).
 	for _, f := range pl.writes {
 		if p := c.brokenField(f); p != nil {
@@ -380,7 +385,7 @@ func (c *Controller) commitRestoreLocked(pl *restorePlan, before map[string]stor
 		c.subs = slices.Clone(next.Subs)
 	}
 	if has("profiles.json") {
-		c.profiles = &store.Profiles{Active: next.Profiles.Active, List: slices.Clone(next.Profiles.List)}
+		c.profiles = cloneProfiles(&next.Profiles)
 		delete(c.loadNotes, "groups.json") // its grp- server notes were about the old list
 	}
 	if has("groups.json") {
