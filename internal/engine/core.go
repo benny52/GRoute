@@ -51,7 +51,9 @@ func noteRejected(t Tunnel) {
 }
 
 type Options struct {
-	RelayPort uint16
+	// Windows portable clients leave another application's WinDivert service alone.
+	PreserveForeignDriver bool
+	RelayPort             uint16
 	// BlockQUIC drops UDP/443 whose route depends on a still-unknown domain,
 	// so browsers fall back to TCP where SNI is visible.
 	BlockQUIC bool

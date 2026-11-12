@@ -72,13 +72,20 @@ func main() {
 		return
 	}
 
-	if !windows.GetCurrentProcessToken().IsElevated() {
+	portable := isPortableBuild()
+	elevated := windows.GetCurrentProcessToken().IsElevated()
+	if !elevated && !portable {
 		messageBox("HyRoute", "HyRoute нужны права администратора (драйвер WinDivert). Запустите программу от имени администратора.")
 		os.Exit(1)
 	}
 	// Started at sign-in by the kill switch check: without a block to show
 	// HyRoute ends here, before anything with an effect (the instance
 	// claim would bring a running copy's window up).
+	if portable && (*ksCheck || *atLogon || *updEvent != "" || *updFrom != "" || *updFailed != "" || *movedFrom != "" || *waitPID != 0 || *reconnect) {
+		// Neither HyRoute's scheduled tasks nor its updater are entry
+		// points to the portable client. Never apply a restore on startup.
+		return
+	}
 	if !signInCheck(*ksCheck, killswitch.Leftover) {
 		os.Exit(0)
 	}
@@ -91,22 +98,39 @@ func main() {
 	// A second start only brings the running copy's window up: nothing
 	// below may run twice. The instance mutex belongs to this thread.
 	runtime.LockOSThread()
-	inst, handedOver := claimInstance(instanceID)
+	exe, err := os.Executable()
+	if err != nil {
+		fatalBox(err)
+	}
+	paths, err := pathsForBuild(exe, portable, elevated)
+	if err != nil {
+		fatalBox(err)
+	}
+	inst, handedOver := claimInstance(paths.instance)
 	if handedOver {
 		os.Exit(0)
 	}
 	// cli: hyroutectl sees HyRoute starting from here on.
-	cs := initCLI()
-	exe, _ := os.Executable()
+	var cs *cliState
+	if portable {
+		if inst == nil {
+			fatalBox(errors.New("не удалось занять блокировку GRoute. Закройте ранее открытый GRoute через меню значка в трее и повторите запуск"))
+		}
+		fwrule.UseGRouteNames()
+	} else {
+		cs = initCLI()
+	}
 	if *atLogon {
 		// Before the packet engine and hysteria.exe start: a task from an
 		// earlier version starts HyRoute at background priority.
 		autostart.AtLogon(exe)
 	}
 	dir := filepath.Dir(exe)
-	update.CleanAside(dir)
-	if *updEvent == "" {
-		recoverInterruptedUpdate(exe, *atLogon)
+	if !portable {
+		update.CleanAside(dir)
+		if *updEvent == "" {
+			recoverInterruptedUpdate(exe, *atLogon)
+		}
 	}
 	// From a folder programs without administrator rights may write, the
 	// file is pinned before anything else runs: this process starts it
@@ -118,10 +142,10 @@ func main() {
 	if !protectedLocation(dir) {
 		_, pinErr = update.PinFile(exe)
 	}
-	dataDir, err := store.DefaultDir()
-	if err != nil {
-		fatalBox(err)
+	if portable && elevated && pinErr != nil {
+		fatalBox(pinErr)
 	}
+	dataDir := paths.data
 	crashLog(dataDir)
 	st, err := store.Open(dataDir)
 	if err != nil {
@@ -131,13 +155,21 @@ func main() {
 	// administrators can write, never from the program folder itself.
 	// A file the program folder lacks is downloaded from the URL pinned in
 	// deps.json (same hash check).
-	runtimeDir := core.DefaultDir("runtime")
+	sharedRuntime := filepath.Join(paths.components, "runtime")
+	runtimeDir := sharedRuntime
+	protect := core.ProtectDir
+	if portable && !elevated {
+		protect = func(dir string) error { return os.MkdirAll(dir, 0o700) }
+	}
 	var staged runtimefiles.Result
 	files, err := runtimefiles.FromDeps(buildfiles.Deps)
 	if err == nil {
 		dlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		get := runtimefiles.HTTPGetter(dlCtx, &http.Client{Timeout: 4 * time.Minute}, "HyRoute/"+version)
-		runtimeDir, staged, err = stageRuntime(dir, runtimeDir, files, get, core.ProtectDir)
+		if portable {
+			get = nil // the portable archive contains the complete pinned runtime
+		}
+		runtimeDir, staged, err = stageRuntime(dir, runtimeDir, files, get, protect)
 		cancel()
 	}
 	if err != nil {
@@ -150,7 +182,9 @@ func main() {
 	if _, err := webviewDataDir(); err != nil {
 		fatalBox(err)
 	}
-	dropOldWebviewDir()
+	if !portable {
+		dropOldWebviewDir()
+	}
 
 	level := slog.LevelInfo
 	if *verbose {
@@ -159,6 +193,9 @@ func main() {
 	// Configs with passwords a run that ended mid-start left behind.
 	hysteria.CleanRunDir(filepath.Join(dataDir, "run"), time.Minute)
 	ctl := app.New(st, func(cfg session.Config) (app.Session, error) {
+		if portable && !elevated {
+			return nil, errors.New("для подключения закройте GRoute через «Выход» в трее и запустите GRoute.exe от имени администратора")
+		}
 		// The staged copies run with admin rights, and HyRoute may run for
 		// weeks after Stage checked them: each session checks them again.
 		if err := runtimefiles.Verify(runtimeDir, files); err != nil {
@@ -174,10 +211,11 @@ func main() {
 		}
 		return s, nil
 	}, session.Config{
-		Dir:    runtimeDir,
-		Exe:    exe,
-		RunDir: filepath.Join(dataDir, "run"),
-		Stub:   *stub,
+		Dir:                   runtimeDir,
+		Exe:                   exe,
+		RunDir:                filepath.Join(dataDir, "run"),
+		Stub:                  *stub,
+		PreserveForeignDriver: portable,
 	}, level)
 	// The engine log also goes to logs\hyroute.log (size-rotated) unless
 	// the user keeps logs in memory only. The folder is set once the
@@ -188,7 +226,9 @@ func main() {
 	// anything fetches), the Windows DNS cache is flushed through dnsapi
 	// (Load may flush already), and Explain reads the local namespaces.
 	ctl.InstallOwnDial()
-	ctl.FlushDNS = sysdns.FlushCache
+	if !portable {
+		ctl.FlushDNS = sysdns.FlushCache
+	}
 	ctl.LocalSuffixes = func() []string {
 		i, _ := sysdns.Snapshot()
 		return i.Suffixes
@@ -209,10 +249,10 @@ func main() {
 	for _, d := range core.MovedAside() {
 		ctl.Log.Warn("a HyRoute folder under ProgramData was not made by HyRoute (another program made it, or takeown gave it to a user): it was renamed and made anew; the renamed folder is not used and can be deleted", "renamed", d)
 	}
-	if runtimeDir != core.DefaultDir("runtime") {
+	if runtimeDir != sharedRuntime {
 		ctl.Log.Warn("the shared copies of hysteria.exe and WinDivert are in use by a HyRoute of another version (another Windows user): this one runs its own", "runtime", runtimeDir)
 	}
-	if !protectedLocation(dir) {
+	if !portable && !protectedLocation(dir) {
 		ctl.Log.Warn("HyRoute runs from a folder other programs can write to; move it to Program Files", "dir", dir)
 	}
 	if loadErr != nil {
@@ -222,7 +262,7 @@ func main() {
 	ctl.Version = version
 	ctl.Device = deviceInfo
 	coreMgr := &core.Manager{
-		Dir:     core.DefaultDir("core"),
+		Dir:     filepath.Join(paths.components, "core"),
 		Bundled: filepath.Join(runtimeDir, "hysteria.exe"),
 		Client:  &release.Client{UserAgent: "HyRoute/" + version},
 		Version: hysteria.ExeVersion,
@@ -232,7 +272,7 @@ func main() {
 	// take the configs of the user's servers first (TestXray).
 	xrayMgr := &core.Manager{
 		Kind:    core.Xray,
-		Dir:     core.DefaultDir("xray"),
+		Dir:     filepath.Join(paths.components, "xray"),
 		Bundled: filepath.Join(runtimeDir, "xray.exe"),
 		Client:  coreMgr.Client,
 		Version: hysteria.XrayVersion,
@@ -241,10 +281,12 @@ func main() {
 	ctl.Base.Xray = xrayMgr.Path
 	// The kill switch lets HyRoute, Hysteria and Xray through, so they
 	// can reconnect while the internet is closed.
-	ctl.KillSwitch = &killswitch.Switch{Self: exe, Apps: func() []string {
-		return append(append([]string{exe}, coreMgr.Paths()...), xrayMgr.Paths()...)
-	}}
-	ctl.InitKillSwitch()
+	if !portable {
+		ctl.KillSwitch = &killswitch.Switch{Self: exe, Apps: func() []string {
+			return append(append([]string{exe}, coreMgr.Paths()...), xrayMgr.Paths()...)
+		}}
+		ctl.InitKillSwitch()
+	}
 	// A block left from before is what a start at sign-in has to show:
 	// the autostart task stands in for the kill switch check.
 	blocked := ctl.Status().KillSwitch == "blocking"
@@ -258,8 +300,8 @@ func main() {
 	// programs often flag it); it is downloaded from the release pinned in
 	// deps.json and verified when the bypass is first turned on, and runs
 	// from the protected runtime folder.
-	if zfiles, err := runtimefiles.ZapretFromDeps(buildfiles.Deps); err == nil {
-		ctl.ZapretLists = core.DefaultDir("zapret")
+	if zfiles, err := runtimefiles.ZapretFromDeps(buildfiles.Deps); err == nil && !portable {
+		ctl.ZapretLists = filepath.Join(paths.components, "zapret")
 		ctl.ZapretPrepare = func(ctx context.Context) (string, error) {
 			if err := core.ProtectDir(ctl.ZapretLists); err != nil {
 				return "", err
@@ -276,10 +318,12 @@ func main() {
 		}
 	}
 	ctl.ProxyFirewall = func(tcp, udp []int) error { return fwrule.SetProxyPorts(exe, tcp, udp) }
-	ctl.LegacyProxyUDP = fwrule.LegacyProxyUDP
-	ctl.KeepV12ProxyUDP() // before the window can show a proxy
-	ctl.Updater = &app.Updater{Repo: updateRepo, Dir: core.DefaultDir("updates"), Core: coreMgr, Xray: xrayMgr, Client: coreMgr.Client}
-	cleanUpdates(ctl.Updater.Dir)
+	if !portable {
+		ctl.LegacyProxyUDP = fwrule.LegacyProxyUDP
+		ctl.KeepV12ProxyUDP() // before the window can show a proxy
+		ctl.Updater = &app.Updater{Repo: updateRepo, Dir: filepath.Join(paths.components, "updates"), Core: coreMgr, Xray: xrayMgr, Client: coreMgr.Client}
+		cleanUpdates(ctl.Updater.Dir)
+	}
 
 	life, endLife := context.WithCancel(context.Background())
 	defer endLife()
@@ -290,7 +334,6 @@ func main() {
 	// Set before any goroutine below can report a change.
 	ctl.CoreVersion = func() string { return coreMgr.Info().Version }
 	ctl.OnChange = gui.emitStatus
-	ctl.StartZapret() // «Обход DPI», when it is on
 	// Pages holding a copy of the settings reload (Status carries the
 	// revision too, for a missed event).
 	ctl.OnSettings = gui.emitSettings
@@ -304,11 +347,14 @@ func main() {
 	ctl.OnStartDecided = gate.markDecided
 	schedCtx, stopSched := context.WithCancel(context.Background())
 	defer stopSched()
-	go ctl.RunScheduler(schedCtx)
-	go ctl.RunUpdateChecks(schedCtx)
-	go ctl.RunGeoUpdates(schedCtx)
+	if !portable {
+		ctl.StartZapret()
+		go ctl.RunScheduler(schedCtx)
+		go ctl.RunUpdateChecks(schedCtx)
+		go ctl.RunGeoUpdates(schedCtx)
+		go gui.syncKillSwitchCheck()
+	}
 	go ctl.RunStats(schedCtx) // stats
-	go gui.syncKillSwitchCheck()
 
 	// What connects at start follows the launch reason: an update, a
 	// rollback or a move restores the state before it (--reconnect: it was
@@ -323,7 +369,11 @@ func main() {
 			restore()
 		}()
 	}
-	go ctl.RunNetModes(schedCtx, plan.mode)
+	if portable {
+		gate.markDecided() // portable routing always starts disconnected
+	} else {
+		go ctl.RunNetModes(schedCtx, plan.mode)
+	}
 	switch {
 	case *movedFrom != "":
 		gui.notice = "HyRoute перенесён в " + dir + " и добавлен в меню «Пуск». Старую папку " + *movedFrom + " можно удалить."
@@ -363,8 +413,10 @@ func main() {
 		// does not wait for one (the updater never starts HyRoute so).
 		gui.uiUp.Store(true)
 	}
-	gui.startCLI()          // cli: the control pipe for hyroutectl
-	go gui.syncBrowserExt() // browser: an installed extension follows this HyRoute
+	if !portable {
+		gui.startCLI()          // cli: the control pipe for hyroutectl
+		go gui.syncBrowserExt() // browser: an installed extension follows this HyRoute
+	}
 	gui.startTray()
 	// A second start shows the window (opening it if it is closed).
 	inst.serve(gui.showWindow)
@@ -395,6 +447,13 @@ func main() {
 // than the user's other programs, so the folder is the user's own, and
 // WebView2 creates it itself: HyRoute never touches it.
 func webviewDataDir() (string, error) {
+	if isPortableBuild() {
+		exe, err := os.Executable()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(filepath.Dir(exe), "Data", "WebView2"), nil
+	}
 	// Before Explorer starts (sign-in) the limited token is the same user
 	// under UAC and Administrator protection.
 	for _, open := range []func() (windows.Token, error){shellToken, store.LimitedToken} {

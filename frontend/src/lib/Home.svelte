@@ -341,7 +341,7 @@
     <div class="note warn">Kill switch не включился: {hide(st.killSwitchError)}</div>
   {/if}
 
-  {#if sys && !sys.protectedLocation && inMoveTarget}
+  {#if sys && !ui.portable && !sys.protectedLocation && inMoveTarget}
     <section class="card unsafe">
       <Icon name="alert" size={22} />
       <div class="grow">
@@ -353,7 +353,7 @@
         </p>
       </div>
     </section>
-  {:else if sys && !sys.protectedLocation}
+  {:else if sys && !ui.portable && !sys.protectedLocation}
     <section class="card unsafe">
       <Icon name="alert" size={22} />
       <div class="grow">

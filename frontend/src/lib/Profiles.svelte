@@ -286,6 +286,7 @@
     {/each}
   </div>
 
+  {#if !ui.portable}
   <section class="card own">
     <Icon name="server" size={22} />
     <div class="grow">
@@ -298,6 +299,7 @@
     </div>
     <button onclick={openPanel} disabled={panelBusy}>{panelBusy ? 'Запуск…' : 'Открыть панель'}</button>
   </section>
+  {/if}
   {/if}
 </div>
 

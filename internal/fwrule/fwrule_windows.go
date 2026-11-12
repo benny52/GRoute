@@ -16,7 +16,15 @@ import (
 
 // Name is what the user sees in "Windows Defender Firewall with Advanced
 // Security".
-const Name = "HyRoute relay (TCP)"
+var Name = "HyRoute relay (TCP)"
+
+// UseGRouteNames selects the portable client's own firewall rules. Called
+// once during main startup, before any goroutine can read a rule name.
+func UseGRouteNames() {
+	Name = "GRoute relay (TCP)"
+	ProxyName = "GRoute local proxies (TCP)"
+	ProxyUDPName = "GRoute local proxies (UDP)"
+}
 
 const createNoWindow = 0x08000000
 

@@ -248,6 +248,7 @@
     <Backup undoOnly />
   {/if}
 
+  {#if !ui.portable}
   <section class="card">
     <h2><Icon name="download" size={17} /> Обновления</h2>
     {#if updates}
@@ -391,8 +392,9 @@
   <BrowserExtension />
 
   {#if ui.expert}<CLISettings />{/if}
+  {/if}
 
-  {#if routing}
+  {#if routing && !ui.portable}
     <section class="card">
       <h2><Icon name="shield" size={17} /> Kill switch</h2>
       <label class="check"><input type="checkbox" checked={routing.killSwitch ?? false} onchange={(e) => settle(e, (el) => saveRouting({ killSwitch: el.checked }), () => routing?.killSwitch ?? false)} />
@@ -508,7 +510,7 @@
     {#if ui.expert}
     <details class="card adv">
       <summary><Icon name="settings" size={17} /> Система: драйвер, брандмауэр, файлы</summary>
-      {#if !ui.mac}
+      {#if !ui.mac && !ui.portable}
       <h3>Драйвер WinDivert</h3>
       <p>{info.driver}{status?.stats?.driverVersion ? ` · версия ${status.stats.driverVersion}` : ''}</p>
       {#if info.legacy.length}

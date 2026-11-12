@@ -306,8 +306,8 @@ func (g *GUI) trayReady(gen uint64) {
 	if _, off := g.trayIconPaths(); off != "" {
 		systray.SetIconFromFilePath(off)
 	}
-	systray.SetTooltip("HyRoute")
-	open := systray.AddMenuItem("Открыть HyRoute", "")
+	systray.SetTooltip(windowsProductName())
+	open := systray.AddMenuItem("Открыть "+windowsProductName(), "")
 	systray.AddSeparator()
 	status := systray.AddMenuItem("Отключено", "")
 	status.Disable()
@@ -397,7 +397,7 @@ func (g *GUI) updateTray() {
 	} else if iconOff != "" {
 		systray.SetIconFromFilePath(iconOff)
 	}
-	systray.SetTooltip("HyRoute — " + text)
+	systray.SetTooltip(windowsProductName() + " — " + text)
 	g.tray.status.SetTitle(text)
 	if on {
 		g.tray.toggle.SetTitle("Отключить")

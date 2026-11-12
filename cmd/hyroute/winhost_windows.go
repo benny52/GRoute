@@ -194,6 +194,13 @@ func (h *winHost) attach(peer *uirpc.Peer) {
 // the window's own («window.» …).
 func (h *winHost) answer(method string, args []json.RawMessage) (any, error) {
 	if !strings.HasPrefix(method, "window.") {
+		if isPortableBuild() {
+			switch method {
+			case "SetAutostart", "MoveToProgramFiles", "SetCLIMode", "SetBrowserExtOn", "InstallBrowserExt", "RemoveBrowserExt",
+				"OpenBrowserExtensions", "ReleaseKillSwitch", "RemoveFirewallRule", "DeleteStaleDriverService", "OpenServerPanel", "ApplyAppUpdate":
+				return nil, errors.New("Эта функция недоступна в портативной сборке GRoute")
+			}
+		}
 		return h.g.dispatch(method, args)
 	}
 	switch method {

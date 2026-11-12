@@ -97,6 +97,9 @@ var checkMu sync.Mutex
 // other programs could replace (see planAutostart). Task Scheduler is slow
 // to ask: callers run it in the background.
 func (g *GUI) syncKillSwitchCheck() {
+	if isPortableBuild() {
+		return
+	}
 	checkMu.Lock()
 	defer checkMu.Unlock()
 	exe, err := os.Executable()

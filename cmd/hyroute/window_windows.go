@@ -142,7 +142,7 @@ func runWindow(pipes, state, geom string) {
 		fatalBox(err)
 	}
 	err = wails.Run(&options.App{
-		Title:            "HyRoute",
+		Title:            windowsProductName(),
 		WindowStartState: startState,
 		// Placed first, then shown: no jump from the middle of the screen.
 		StartHidden:      haveGeom && startState == options.Normal,

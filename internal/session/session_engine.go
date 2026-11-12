@@ -98,10 +98,11 @@ func Start(cfg Config) (_ *Session, err error) {
 		},
 		Groups: cfg.Groups,
 		Options: engine.Options{
-			BlockQUIC:          cfg.Settings.QUICBlocked(),
-			BlockIPv6Tunnel:    cfg.Settings.IPv6TunnelBlocked(),
-			TCPOnly:            cfg.TCPOnly,
-			ResetUnknownDomain: cfg.ResetUnknownDomain,
+			PreserveForeignDriver: cfg.PreserveForeignDriver,
+			BlockQUIC:             cfg.Settings.QUICBlocked(),
+			BlockIPv6Tunnel:       cfg.Settings.IPv6TunnelBlocked(),
+			TCPOnly:               cfg.TCPOnly,
+			ResetUnknownDomain:    cfg.ResetUnknownDomain,
 		},
 	})
 	s.eng = eng

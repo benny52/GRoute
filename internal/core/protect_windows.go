@@ -233,9 +233,15 @@ func splitToken() bool {
 // Windows, not from the ProgramData variable: the user's own variables
 // (HKCU\Environment) reach this elevated process too.
 func DefaultDir(sub string) string {
+	return filepath.Join(ProductDir("HyRoute"), sub)
+}
+
+// ProductDir locates a client's protected components under the system's
+// ProgramData, independently of the environment of the launching account.
+func ProductDir(product string) string {
 	pd, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
 	if err != nil || pd == "" {
 		pd = `C:\ProgramData`
 	}
-	return filepath.Join(pd, "HyRoute", sub)
+	return filepath.Join(pd, product)
 }

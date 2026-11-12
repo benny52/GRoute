@@ -26,6 +26,7 @@ export const ui = $state({
   // (autostart task, kill switch, WinDivert, firewall, hyroutectl, the
   // browser extension) are hidden.
   mac: false,
+  portable: false,
   privacy: get('privacy') === '1',
   profiles: [] as ProfileSummary[],
   status: null as Status | null,

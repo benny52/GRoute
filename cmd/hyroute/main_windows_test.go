@@ -96,6 +96,37 @@ func TestWebviewDataDir(t *testing.T) {
 	}
 }
 
+func TestPortablePaths(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := filepath.Join(filepath.Dir(exe), "Data")
+	for _, admin := range []bool{false, true} {
+		p, err := pathsForBuild(exe, true, admin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantComponents := filepath.Join(data, "Components")
+		if admin {
+			wantComponents = filepath.Join(filepath.Dir(core.DefaultDir("")), "GRoute")
+		}
+		if p.data != data || p.components != wantComponents || p.instance == instanceID {
+			t.Fatalf("elevated=%v, unexpected paths or instance: %+v", admin, p)
+		}
+	}
+	if _, err := pathsForBuild("GRoute.exe", true, false); err == nil {
+		t.Fatal("relative path could take settings from the current directory")
+	}
+	before := portableBuild
+	t.Cleanup(func() { portableBuild = before })
+	portableBuild = "true"
+	dir, err := webviewDataDir()
+	if err != nil || dir != filepath.Join(data, "WebView2") {
+		t.Fatalf("portable window uses %q (%v)", dir, err)
+	}
+}
+
 // A process whose number is the updater's but that was created after the
 // swap began (the number was taken again, say after a restart of Windows)
 // is not the updater: the interrupted update is recovered.

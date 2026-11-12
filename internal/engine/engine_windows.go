@@ -24,6 +24,7 @@ import (
 	"github.com/lardan099/hyroute/internal/packet"
 	"github.com/lardan099/hyroute/internal/procinfo"
 	"github.com/lardan099/hyroute/internal/sysdns"
+	"github.com/lardan099/hyroute/internal/update"
 )
 
 type Config struct {
@@ -336,13 +337,54 @@ func (e *Engine) openFirst(open func() (*divert.Handle, error)) (*divert.Handle,
 	return h, err
 }
 
+// portableDriver checks the existing machine-wide service before starting a
+// portable session. A stopped foreign service would load someone else's .sys.
+func portableDriver(d *divert.DriverInfo, err error, trusted string, start func(string) error) (uint64, error) {
+	if err != nil {
+		return 0, fmt.Errorf("не удалось проверить службу WinDivert перед подключением: %w", err)
+	}
+	if !d.Exists || d.Ours {
+		return 0, nil
+	}
+	if !d.Running {
+		release, err := update.PinPlainFile(d.ImagePath)
+		if err != nil {
+			return 0, fmt.Errorf("не удалось закрепить файл существующего драйвера WinDivert: %w", err)
+		}
+		defer release()
+		want, err := update.FileSHA256(trusted)
+		if err != nil {
+			return 0, err
+		}
+		got, err := update.FileSHA256(d.ImagePath)
+		if err != nil {
+			return 0, err
+		}
+		if got != want {
+			return 0, errors.New("у остановленной службы WinDivert другой SHA-256 драйвера. GRoute оставил службу без изменений")
+		}
+		if err := start(d.ImagePath); err != nil {
+			return 0, fmt.Errorf("не удалось запустить проверенный существующий драйвер WinDivert: %w", err)
+		}
+	}
+	// A running driver is checked through the first handle (CheckVersion).
+	// If it disappeared before the open, do not let the DLL start another.
+	return divert.FlagNoInstall, nil
+}
+
 // Start loads WinDivert and opens the handles.
 func (e *Engine) Start() error {
 	if err := divert.Load(e.cfg.DLLDir); err != nil {
 		return err
 	}
 	sys := filepath.Join(e.cfg.DLLDir, "WinDivert64.sys")
-	if d, err := divert.InspectDriver(sys); err == nil && d.Exists && !d.Ours && !d.Running {
+	d, err := divert.InspectDriver(sys)
+	var driverFlags uint64
+	if e.cfg.Options.PreserveForeignDriver {
+		if driverFlags, err = portableDriver(d, err, sys, divert.StartExistingDriver); err != nil {
+			return err
+		}
+	} else if err == nil && d.Exists && !d.Ours && !d.Running {
 		// A stopped service pointing elsewhere (an older HyRoute folder,
 		// an uninstalled program) would load that .sys file, which may sit
 		// in a user-writable folder. Remove the entry: WinDivert.dll then
@@ -353,8 +395,9 @@ func (e *Engine) Start() error {
 		} else {
 			e.log.Info("WinDivert service pointed to another driver file; replaced by the verified copy", "old", d.ImagePath, "new", sys)
 		}
+		d, err = divert.InspectDriver(sys)
 	}
-	if d, err := divert.InspectDriver(sys); err == nil {
+	if err == nil {
 		e.driver = d
 		if d.Exists && !d.Ours {
 			e.log.Warn("WinDivert driver service belongs to another program; its driver will be used",
@@ -369,7 +412,7 @@ func (e *Engine) Start() error {
 	}
 
 	sock, err := e.openFirst(func() (*divert.Handle, error) {
-		return divert.Open(divert.SocketFilter, divert.LayerSocket, PrioSocket, divert.FlagSniff|divert.FlagRecvOnly)
+		return divert.Open(divert.SocketFilter, divert.LayerSocket, PrioSocket, divert.FlagSniff|divert.FlagRecvOnly|driverFlags)
 	})
 	if err != nil {
 		return e.openError(err)

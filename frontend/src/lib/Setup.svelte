@@ -39,7 +39,11 @@
 
   let sys = $state<SystemInfo | null>(null);
   // «Установка» only for a copy outside Program Files.
-  const steps = $derived(all.filter((s) => s.id !== 'install' || (sys != null && !sys.protectedLocation)));
+  const steps = $derived(all.filter((s) => {
+    if (s.id === 'launch') return !ui.portable;
+    if (s.id === 'install') return !ui.portable && sys != null && !sys.protectedLocation;
+    return true;
+  }));
   let step = $state(all.some((s) => s.id === setupStep()) ? setupStep() : 'hello');
   const at = $derived(Math.max(0, steps.findIndex((s) => s.id === step)));
   let error = $state('');
@@ -349,7 +353,7 @@
     {#if step === 'hello'}
       <h1>Добро пожаловать!</h1>
       <p class="lead">
-        HyRoute — VPN, в котором вы сами выбираете, что через него пускать: отдельные сервисы и программы или весь интернет. Всё остальное
+        {ui.portable ? 'GRoute Portable' : 'HyRoute'} — VPN, в котором вы сами выбираете, что через него пускать: отдельные сервисы и программы или весь интернет. Всё остальное
         работает напрямую, как без VPN.
       </p>
       <p>

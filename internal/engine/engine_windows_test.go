@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +26,46 @@ import (
 
 func testEngine() *Engine {
 	return New(Config{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Options: Options{RelayPort: 50123}})
+}
+
+func TestPortableDriver(t *testing.T) {
+	for _, d := range []divert.DriverInfo{{}, {Exists: true, Ours: true}} {
+		if flags, err := portableDriver(&d, nil, "", nil); flags != 0 || err != nil {
+			t.Fatalf("bundled driver: flags=%d, err=%v", flags, err)
+		}
+	}
+	if flags, err := portableDriver(&divert.DriverInfo{Exists: true, Running: true}, nil, "", nil); flags != divert.FlagNoInstall || err != nil {
+		t.Fatalf("already loaded driver: flags=%d, err=%v", flags, err)
+	}
+	if _, err := portableDriver(nil, windows.ERROR_ACCESS_DENIED, "", nil); !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		t.Fatalf("failed inspection should prevent connect: %v", err)
+	}
+
+	trusted := filepath.Join(t.TempDir(), "bundled.sys")
+	existing := filepath.Join(t.TempDir(), "existing.sys")
+	for _, path := range []string{existing, trusted} {
+		if err := os.WriteFile(path, []byte("pinned driver"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := &divert.DriverInfo{Exists: true, ImagePath: existing}
+	started := false
+	flags, err := portableDriver(d, nil, trusted, func(path string) error {
+		started = true
+		if path != existing || os.WriteFile(path, []byte("changed"), 0o600) == nil {
+			t.Fatal("started an unverified or writable driver")
+		}
+		return nil
+	})
+	if !started || err != nil || flags != divert.FlagNoInstall {
+		t.Fatalf("identical stopped driver: started=%v flags=%d err=%v", started, flags, err)
+	}
+	if err := os.WriteFile(existing, []byte("different"), 0o600); err != nil {
+		t.Fatal("driver still pinned after start:", err)
+	}
+	if _, err := portableDriver(d, nil, trusted, nil); err == nil {
+		t.Fatal("accepted a different stopped driver")
+	}
 }
 
 func addrs(ss ...string) []netip.Addr {

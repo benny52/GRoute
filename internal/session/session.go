@@ -66,6 +66,9 @@ func RunnerFactory(cfg Config) tunnels.Factory {
 type Config struct {
 	// Dir holds WinDivert.dll, WinDivert64.sys, hysteria.exe and xray.exe.
 	Dir string
+	// PreserveForeignDriver prevents the portable client from taking over
+	// another application's WinDivert service on an explicit Connect.
+	PreserveForeignDriver bool
 	// Exe is the program the relay firewall rule allows.
 	Exe string
 	// Hysteria returns the hysteria.exe to launch (read at every profile

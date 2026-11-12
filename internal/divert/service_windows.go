@@ -72,6 +72,33 @@ func DeleteStaleService() error {
 	return s.Delete()
 }
 
+// StartExistingDriver starts only the existing service whose ImagePath the
+// caller has pinned and verified. WinDivertOpen can now use NO_INSTALL:
+// its service-installation path must never replace a foreign service.
+func StartExistingDriver(path string) error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService("WinDivert")
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	cfg, err := s.Config()
+	if err != nil {
+		return err
+	}
+	if cfg.ServiceType != windows.SERVICE_KERNEL_DRIVER || !strings.EqualFold(normalizeImagePath(cfg.BinaryPathName), path) {
+		return errors.New("служба WinDivert изменилась после проверки файла драйвера")
+	}
+	if err := s.Start(); !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+		return err
+	}
+	return nil
+}
+
 func normalizeImagePath(p string) string {
 	p = strings.Trim(p, `"`)
 	for _, pre := range []string{`\??\`, `\\?\`} {

@@ -126,7 +126,10 @@
   }
 
   onMount(() => {
-    api.Platform().then((p) => (ui.mac = p === 'macos')).catch(() => {}); // macos
+    api.Platform().then((p) => {
+      ui.mac = p === 'macos';
+      ui.portable = p === 'windows-portable';
+    }).catch(() => {});
     applyTheme();
     refresh();
     refreshProfiles();
@@ -261,7 +264,7 @@
   <aside>
     <div class="brand">
       <span class="logo"><Icon name="shield" size={18} stroke={2.2} /></span>
-      HyRoute
+      {ui.portable ? 'GRoute Portable' : 'HyRoute'}
     </div>
     <nav>
       {#each shown as p (p.id)}

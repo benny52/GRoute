@@ -14,7 +14,7 @@ import (
 // and domain networks only, never public Wi-Fi; and only from the subnets
 // of this PC, not from the internet over a global IPv6 address or a public
 // IPv4 one). v1.2.0 used the same names.
-const (
+var (
 	ProxyName    = "HyRoute local proxies (TCP)"
 	ProxyUDPName = "HyRoute local proxies (UDP)"
 )

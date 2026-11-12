@@ -124,6 +124,9 @@ func (g *GUI) emitStatus() {
 // ---- start with Windows ----
 
 func (g *GUI) Autostart() AutostartInfo {
+	if isPortableBuild() {
+		return AutostartInfo{}
+	}
 	exe, _ := os.Executable()
 	in := AutostartInfo{Allowed: protectedLocation(g.dllDir)}
 	cmd, err := autostart.Command()
@@ -363,6 +366,18 @@ func windowsVersion() string {
 	return fmt.Sprintf("%d.%d.%d", maj, min, b)
 }
 
+func windowsProductName() string {
+	if isPortableBuild() {
+		return "GRoute Portable"
+	}
+	return "HyRoute"
+}
+
 // Platform tells the page which system it runs on (macos: the page hides
 // what only Windows has).
-func (g *GUI) Platform() string { return "windows" }
+func (g *GUI) Platform() string {
+	if isPortableBuild() {
+		return "windows-portable"
+	}
+	return "windows"
+}
