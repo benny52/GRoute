@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -318,6 +319,50 @@ func TestExplainQUICWiring(t *testing.T) {
 	st.BlockQUIC = nil
 	if is := c.LintRules(st); len(is) != 1 || is[0].Severity != "warn" {
 		t.Fatalf("lint: %+v", is)
+	}
+}
+
+func TestLocalNetworksExportRoundTrip(t *testing.T) {
+	off := false
+	for _, rule := range []rules.Rule{
+		{Name: "Офис", LocalNetworks: true, Action: rules.Tunnel, Domains: []string{"10.8.0.0/24"}},
+		{Name: "Локальные сети", LocalNetworks: true, Action: rules.Direct, Enabled: &off},
+	} {
+		cfg := rules.Config{Rules: []rules.Rule{rule}, DefaultAction: rules.Direct}
+		parsed := parseRulesText(formatRulesText(cfg, nil), nil)
+		if len(parsed.Errors) != 0 || len(parsed.Rules) != 1 {
+			t.Fatalf("round trip: %+v", parsed)
+		}
+		b, err := formatRulesJSON(cfg, targetLookup(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded := parseRulesJSON(b, true, nil)
+		if len(decoded.Errors) != 0 || len(decoded.Rules) != 1 || !decoded.Rules[0].LocalNetworks || decoded.Rules[0].On() != rule.On() {
+			t.Fatalf("JSON round trip: %+v", decoded)
+		}
+		got := parsed.Rules[0]
+		if !got.LocalNetworks || got.On() != rule.On() || !slices.Equal(got.Domains, rule.Domains) || got.Name != rule.Name {
+			t.Fatalf("round trip: %+v", got)
+		}
+	}
+}
+
+func TestExplainPrivateNetwork(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows capture path")
+	}
+	c, _ := newCtl(t)
+	st := c.Settings()
+	st.DefaultAction = rules.Tunnel
+	st.Rules = nil
+	q := ExplainQuery{Target: "10.8.0.9", Proto: "tcp", Port: 443}
+	if ex := c.Explain(q, &st); ex.Winner.Action != rules.Direct || ex.Winner.Name != "Маршрут Windows" {
+		t.Fatalf("outside configured networks: %+v", ex.Winner)
+	}
+	st.Rules = []rules.Rule{{Name: "Офис", LocalNetworks: true, Domains: []string{"10.8.0.0/24"}, Action: rules.Tunnel, Profile: "office"}}
+	if ex := c.Explain(q, &st); ex.Winner.Name != "Офис" || ex.Winner.Profile != "office" {
+		t.Fatalf("explicit network: %+v", ex.Winner)
 	}
 }
 

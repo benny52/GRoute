@@ -2,19 +2,22 @@
   // "Проверить адрес": which rule would take a site or program and where it
   // would go. Useful when a site goes the wrong way.
   import { onMount } from 'svelte';
-  import { api, errText, dnsRuleLabel, type DNSExplain, type Explanation, type Settings } from '../api';
+  import { api, errText, dnsRuleLabel, type DNSExplain, type Explanation, type Flow, type Settings } from '../api';
   import { ui, profileName, hide } from '../state.svelte';
   import Icon from './Icon.svelte';
+  import RouteDiagram from './RouteDiagram.svelte';
 
   // initial (conn-rules): prefilled from a connection and run at once, with
   // a note above the answer; onclose: a close button (in a dialog).
   let {
     current,
     initial,
+    rulesetName,
     onclose,
   }: {
     current: () => Settings | null;
-    initial?: { app: string; target: string; proto: string; port?: number; note: string };
+    rulesetName?: string;
+    initial?: { app: string; target: string; proto: string; port?: number; note: string; observed?: Flow };
     onclose?: () => void;
   } = $props();
 
@@ -35,7 +38,7 @@
     if (init) run();
   });
   // The answer with the query it is for: the fields may have changed since.
-  let ex = $state<(Explanation & { q: { app: string; target: string; proto: string } }) | null>(null);
+  let ex = $state<(Explanation & { q: { app: string; target: string; proto: string; ruleset: string } }) | null>(null);
   let error = $state('');
   let seq = 0;
 
@@ -49,23 +52,16 @@
       return;
     }
     const q = { app, target, proto };
+    const ruleset = rulesetName || ui.status?.ruleset?.name || '';
     const my = ++seq;
     error = '';
     try {
       // A slow answer (the name may wait for DNS) must not replace a newer one.
       const res = await api.Explain({ ...q, port: Number(p) || 0 }, current());
-      if (my === seq) ex = { ...res, q };
+      if (my === seq) ex = { ...res, q: { ...q, ruleset } };
     } catch (e) {
       if (my === seq) error = errText(e);
     }
-  }
-
-  // The result line: what was checked (the port Go actually used).
-  function queryText(e: NonNullable<typeof ex>): string {
-    const what = hide(e.q.target.trim()) || e.q.app.trim();
-    const udp = e.q.proto === 'udp' ? ', UDP' : '';
-    if (!what) return e.port ? `Соединения на порт ${e.port}${udp}` : `Соединения${udp}`;
-    return `${what}${e.port ? `, порт ${e.port}` : ''}${udp}`;
   }
 
   // dns: how the name resolves with the DNS settings. With a program and a
@@ -94,13 +90,6 @@
     return `${p}: как обычно, через DNS-сервер сети.`;
   }
 
-  function routeText(a: string, profile: string, group?: boolean, via?: string): string {
-    if (a === 'direct') return 'напрямую';
-    if (a === 'block') return 'будет заблокировано';
-    // A group: its member of the moment (connected failover and latency).
-    if (group) return `через группу «${profileName(profile)}»${via ? ` — сейчас через «${hide(via)}»` : ''}`;
-    return profile ? `через ${profileName(profile)}` : 'через основной сервер (не выбран — соединение отклонится)';
-  }
 </script>
 
 <details class="card check" bind:open={expanded}>
@@ -121,7 +110,7 @@
   </p>
   <div class="row">
     <input class="grow site" placeholder="Сайт или IP: youtube.com, ссылка, 1.2.3.4" aria-label="Сайт или IP"
-      readonly={masked} value={masked ? hide(target) : target} onfocus={() => (revealed = true)}
+      readonly={masked} value={masked && target ? 'Адрес скрыт' : target} onfocus={() => (revealed = true)}
       oninput={(e) => (target = e.currentTarget.value)} onkeydown={(e) => e.key === 'Enter' && run()} />
     <input class="grow prog" placeholder="Программа (необязательно): chrome" bind:value={app} onkeydown={(e) => e.key === 'Enter' && run()} />
     <input class="port" placeholder="Порт" inputmode="numeric" aria-label="Порт (необязательно)" bind:value={port} onkeydown={(e) => e.key === 'Enter' && run()} />
@@ -133,13 +122,8 @@
   </div>
   {#if error}<div class="note error">{hide(error)}</div>{/if}
   {#if init?.note}<div class="note info small">{init.note}</div>{/if}
+  <RouteDiagram answer={ex} flow={init?.observed} />
   {#if ex}
-    <div class="result route-{ex.winner.action}">
-      {queryText(ex)} → {routeText(ex.winner.action, ex.winner.profile, ex.group, ex.via)}
-    </div>
-    <div class="muted small">
-      {#if ex.winner.index === -2}QUIC с неизвестным сайтом блокируется («Блокировать QUIC с неизвестным сайтом»).{:else if ex.winner.index < 0}Ни одно правило не подошло, сработало «Всё остальное».{:else}Сработало правило «{hide(ex.winner.name)}»: {hide(ex.winner.reason)}.{/if}
-    </div>
     {#if ex.dns}
       {#if ex.dns.system}
         <div class="muted small">{dnsText(ex.dns, 'DNS, если программа спрашивает DNS сама')}</div>
@@ -155,7 +139,7 @@
         {#each ex.steps as st}
           <li class:win={st.winner}>
             <span class="mark">{st.winner ? '★' : st.matched ? '✓' : '·'}</span>
-            <b>{st.index === -2 ? 'Блокировка QUIC' : st.index < 0 ? 'Всё остальное' : hide(st.name)}</b> <span class="muted">— {hide(st.reason)}</span>
+            <b>{st.index === -1 ? 'Всё остальное' : hide(st.name)}</b> <span class="muted">— {hide(st.reason)}</span>
           </li>
         {/each}
       </ol>
@@ -168,7 +152,7 @@
   .check summary { cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 600; list-style: none; }
   .check summary::-webkit-details-marker { display: none; }
   .check[open] summary { margin-bottom: 8px; }
-  .result { font-weight: 650; font-size: 15px; margin: 12px 0 2px; }
+  .check { container-type: inline-size; }
   .port { width: 80px; flex: none; }
   /* In a narrow window the port and protocol wrap instead of the fields
      shrinking under their placeholders. */

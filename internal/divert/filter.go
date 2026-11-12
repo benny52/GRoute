@@ -35,7 +35,10 @@ const MaxServerIPs = 100
 
 // FilterOptions describes the main NETWORK handle (H1).
 type FilterOptions struct {
-	RelayPort uint16
+	// InspectLAN allows Core to apply the current ruleset to RFC 1918 IPv4
+	// traffic. Loopback and link-local exclusions remain unconditional.
+	InspectLAN bool
+	RelayPort  uint16
 	// ServerIPs are the Hysteria server addresses (all resolved records).
 	ServerIPs []netip.Addr
 	// TCPOnly restricts capture to TCP (PoC); UDP comes in step 3.
@@ -62,6 +65,9 @@ type FilterOptions struct {
 func MainFilter(o FilterOptions) string {
 	var excl, servers []string
 	for _, p := range ExcludedV4 {
+		if o.InspectLAN && p.Addr().IsPrivate() {
+			continue
+		}
 		excl = append(excl, outsideRange("ipv6", "ip.DstAddr", p))
 	}
 	for _, p := range ExcludedV6 {

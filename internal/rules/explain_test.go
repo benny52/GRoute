@@ -2,9 +2,29 @@ package rules
 
 import (
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestExplainRouteChain(t *testing.T) {
+	cfg := Config{DefaultAction: Tunnel, DefaultFallback: []string{"backup"}, Rules: []Rule{
+		{Name: "По программе", Apps: []AppMatch{{Pattern: "sample.exe"}}, Action: Tunnel, Profile: "fixed", Fallback: []string{"b", "", "b", "fixed"}},
+		{Name: "Блок", Domains: []string{"blocked.example"}, Action: Block},
+	}}
+	ex := Explain(cfg, "main", Query{App: "sample.exe", Proto: 6})
+	if ex.UsesMain || ex.Winner.Profile != "fixed" || !slices.Equal(ex.Fallback, []string{"b", "main"}) {
+		t.Fatal(ex)
+	}
+	ex = Explain(cfg, "", Query{Domain: "none.example", Proto: 6})
+	if !ex.UsesMain || ex.Winner.Profile != "" || !slices.Equal(ex.Fallback, []string{"backup"}) {
+		t.Fatal(ex)
+	}
+	ex = Explain(cfg, "main", Query{Domain: "blocked.example", Proto: 6})
+	if ex.Winner.Action != Block || ex.UsesMain || len(ex.Fallback) != 0 {
+		t.Fatal(ex)
+	}
+}
 
 func TestExplain(t *testing.T) {
 	off := false

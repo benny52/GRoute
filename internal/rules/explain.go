@@ -55,8 +55,11 @@ const StepQUICBlock = -2
 
 // Explanation is the full trace.
 type Explanation struct {
-	Steps  []Step `json:"steps"`
-	Winner Step   `json:"winner"`
+	// Assignments of the winning VPN rule, with fallbacks resolved as for a new flow.
+	UsesMain bool     `json:"usesMain,omitempty"`
+	Fallback []string `json:"fallback,omitempty"`
+	Steps    []Step   `json:"steps"`
+	Winner   Step     `json:"winner"`
 	// Notes list caveats (unknown path, inheritance, ambiguous names).
 	Notes []string `json:"notes"`
 	// PortRules: an enabled rule has ports.
@@ -235,7 +238,7 @@ func Explain(c Config, main string, q Query) Explanation {
 		case q.Proto == 17:
 			ex.Steps, ex.Winner = trace("")
 			nameless = true
-			ex.Notes = append(ex.Notes, "У адреса несколько имён в DNS-кэше ("+all+"), и правила для них расходятся. В UDP имя сайта не видно, поэтому HyRoute решает без имени: доменные правила не срабатывают. "+
+			ex.Notes = append(ex.Notes, "У адреса несколько имён в DNS-кэше ("+all+"), и правила для них расходятся. В UDP имя сайта не видно, поэтому GRoute решает без имени: доменные правила не срабатывают. "+
 				"QUIC (UDP 443) при «Блокировать QUIC с неизвестным сайтом» отбрасывается, и браузер переходит на TCP.")
 		default:
 			// As the engine decides when SNI/Host gives no name; with a name
@@ -244,7 +247,7 @@ func Explain(c Config, main string, q Query) Explanation {
 			if len(byName) > 10 {
 				byName = append(byName[:10], "…")
 			}
-			ex.Notes = append(ex.Notes, "У адреса несколько имён в DNS-кэше ("+all+"), и правила для них расходятся. Показан результат без имени: так HyRoute решает, если имени сайта нет в SNI/Host. "+
+			ex.Notes = append(ex.Notes, "У адреса несколько имён в DNS-кэше ("+all+"), и правила для них расходятся. Показан результат без имени: так GRoute решает, если имени сайта нет в SNI/Host. "+
 				"Для HTTPS и HTTP он возьмёт точное имя и решит по нему: "+strings.Join(byName, "; ")+".")
 		}
 	}
@@ -262,6 +265,14 @@ func Explain(c Config, main string, q Query) Explanation {
 			ex.Notes = append(ex.Notes, "Правила «и дочерние» проверяют и родительские процессы; здесь цепочка родителей неизвестна.")
 			break
 		}
+	}
+	if ex.Winner.Action == Tunnel {
+		primary, fb := c.DefaultProfile, c.DefaultFallback
+		if i := ex.Winner.Index; i >= 0 {
+			primary, fb = c.Rules[i].Profile, c.Rules[i].Fallback
+		}
+		ex.UsesMain = primary == ""
+		ex.Fallback = (&Set{Main: main}).resolveFallback(ex.Winner.Profile, fb)
 	}
 	if ex.Notes == nil {
 		ex.Notes = []string{}

@@ -57,6 +57,7 @@ func TestMainFilterSemantics(t *testing.T) {
 	bin := wdfilter(t)
 	const relay = 50123
 	opts := FilterOptions{RelayPort: relay, ServerIPs: []netip.Addr{netip.MustParseAddr("203.0.113.10"), netip.MustParseAddr("2001:db8::10")}}
+	lan := FilterOptions{RelayPort: relay, InspectLAN: true, ServerIPs: []netip.Addr{netip.MustParseAddr("10.1.2.3")}}
 	tcp := func(src, dst string) []byte {
 		return packet.BuildTCP(netip.MustParseAddrPort(src), netip.MustParseAddrPort(dst), packet.FlagSYN, 1, 0, nil)
 	}
@@ -91,6 +92,12 @@ func TestMainFilterSemantics(t *testing.T) {
 		{"udp v4", opts, udp(L4, "8.8.8.8:53"), true, false, "1"},
 		{"udp excluded in tcp-only", FilterOptions{RelayPort: relay, TCPOnly: true}, udp(L4, "8.8.8.8:53"), true, false, "0"},
 		{"10/8", opts, tcp(L4, "10.1.2.3:443"), true, false, "0"},
+		{"inspect LAN TCP", lan, tcp(L4, "192.168.1.88:445"), true, false, "1"},
+		{"inspect office UDP", lan, udp(L4, "10.8.0.9:443"), true, false, "1"},
+		{"inspect LAN fragment", lan, frag4(udp(L4, "172.31.255.42:443"), 1480, false), true, false, "1"},
+		{"private VPN endpoint", lan, tcp(L4, "10.1.2.3:443"), true, false, "0"},
+		{"local host on LAN address", lan, tcp(L4, "192.168.1.5:443"), true, true, "0"},
+		{"link-local service", lan, udp(L4, "169.254.2.3:67"), true, false, "0"},
 		{"172.16/12", opts, tcp(L4, "172.31.255.255:443"), true, false, "0"},
 		{"172.32 is public", opts, tcp(L4, "172.32.0.1:443"), true, false, "1"},
 		{"192.168/16", opts, tcp(L4, "192.168.1.1:80"), true, false, "0"},

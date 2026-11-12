@@ -373,9 +373,7 @@ func parseRulesJSON(b []byte, replace bool, ts []target) RulesTextResult {
 		}
 		// Checked alone, as a line of rules text is (a disabled rule too,
 		// without warnings: it matches nothing yet).
-		rc := r
-		rc.Name, rc.Enabled = "-", nil
-		set, err := rules.Compile(rules.Config{Rules: []rules.Rule{rc}})
+		set, err := checkImportedRule(r)
 		if err != nil {
 			msg := err.Error()
 			if _, after, ok := strings.Cut(msg, ": "); ok {

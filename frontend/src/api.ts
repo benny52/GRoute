@@ -11,6 +11,7 @@ export interface AppMatch {
 }
 
 export interface Rule {
+  localNetworks?: boolean;
   id?: string;
   name: string;
   enabled?: boolean;
@@ -285,6 +286,8 @@ export interface ExplainStep {
 }
 
 export interface Explanation {
+  usesMain?: boolean;
+  fallback?: string[];
   steps: ExplainStep[];
   winner: ExplainStep;
   notes: string[];

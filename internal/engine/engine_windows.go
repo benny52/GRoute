@@ -506,6 +506,11 @@ next:
 			continue
 		}
 		for _, p := range fixed {
+			// H1 receives private IPv4 traffic so the active ruleset can change
+			// how it is routed without swapping the kernel handle.
+			if p.Addr().Is4() && p.Addr().IsPrivate() {
+				continue
+			}
 			if p.Contains(ip) {
 				continue next
 			}
@@ -518,10 +523,11 @@ next:
 
 func (e *Engine) filter(serverIPs []netip.Addr) string {
 	return divert.MainFilter(divert.FilterOptions{
-		RelayPort: e.Opt.RelayPort,
-		ServerIPs: serverIPs,
-		TCPOnly:   e.Opt.TCPOnly,
-		DNS:       e.dnsCapture, // dns
+		InspectLAN: true,
+		RelayPort:  e.Opt.RelayPort,
+		ServerIPs:  serverIPs,
+		TCPOnly:    e.Opt.TCPOnly,
+		DNS:        e.dnsCapture, // dns
 	})
 }
 

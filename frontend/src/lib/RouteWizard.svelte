@@ -4,7 +4,8 @@
   // «Пошагово» button on the Rules page. The user chooses everything; the
   // steps only put it into rules in a working order.
   import { onMount } from 'svelte';
-  import { api, errText, plural, cleanSettings, cleanFallback, cleanRule, type Action, type Rule, type Settings, type RunningApp } from '../api';
+  import { api, errText, plural, cleanSettings, cleanFallback, cleanRule, newRuleID, type Action, type Rule, type Settings, type RunningApp } from '../api';
+  import { defaultNetworks, readNetworks, wizardNetworkRule } from './localNetworks';
   import { ui, hide, mainTarget, mainText, targetText } from '../state.svelte';
   import { templates, ruleFromTemplate, tplHint, type Template } from './templates';
   import { itemLabel, isSpecial, isAddress, shortLabel, loadGeo } from '../geo.svelte';
@@ -28,6 +29,10 @@
   let apps = $state<{ pattern: string; label: string; way: Way }[]>([]);
   let sites = $state<{ item: string; way: Way }[]>([]);
   let blocks = $state<string[]>([]);
+  let lanID = $state(newRuleID());
+  let lanWay = $state<Way>('direct');
+  let lanInput = $state(defaultNetworks.join('\n'));
+  const lan = $derived(readNetworks(lanInput));
   // The server of each group that goes through the VPN ('' = main).
   let server = $state<Record<string, string>>({});
   let fallbacks = $state<Record<string, string[]>>({});
@@ -41,6 +46,14 @@
     api.Settings()
       .then((s) => {
         settings = s;
+        const previous = s.rules?.find((r) => r.localNetworks) ?? s.rules?.find(wizardNetworkRule);
+        if (previous?.id) lanID = previous.id;
+        if (previous?.localNetworks) {
+          lanWay = previous.action === 'tunnel' ? 'tunnel' : 'direct';
+          lanInput = (previous.enabled === false ? [] : previous.domains ?? []).join('\n');
+          server.lan = previous.profile ?? '';
+          fallbacks.lan = previous.fallback ?? [];
+        }
         // «Весь остальной интернет» starts on the server it has now, and
         // the reserve as it is set for it (off when it has none).
         if (s.defaultAction === 'tunnel') {
@@ -183,7 +196,10 @@
   // holds whole shared networks where Russian banks' sites live too, and
   // a rule matches by the address or the name.
   const groups = $derived.by((): Group[] => {
-    const g: Group[] = [{ key: '', title: 'Домашняя сеть', rules: fromTemplates([tpl('lan')]) }];
+    const g: Group[] = [{
+      key: 'lan', title: 'Локальные сети',
+      rules: [{ id: lanID, name: 'Локальные сети', localNetworks: true, domains: lan.cidrs, action: lanWay, enabled: lan.cidrs.length > 0 }],
+    }];
     for (const w of ['tunnel', 'direct'] as Way[]) {
       const ss = sites.filter((x) => x.way === w);
       if (ss.length) g.push({ key: 'sites-' + w, title: `Мои сайты ${tunnelWord(w)}`, rules: [{ name: `Мои сайты ${tunnelWord(w)}`, apps: [], domains: ss.map((x) => x.item), action: w, profile: '' }] });
@@ -210,7 +226,7 @@
   // The groups that go through the VPN, and «всё остальное» when it does:
   // the server step lists them.
   const vpnGroups = $derived([
-    ...groups.filter((g) => g.rules.some((r) => r.action === 'tunnel')),
+    ...groups.filter((g) => g.rules.some((r) => r.action === 'tunnel' && r.enabled !== false)),
     ...(base === 'all' ? [{ key: 'rest', title: 'Весь остальной интернет', rules: [] }] : []),
   ]);
 
@@ -221,7 +237,7 @@
   function built(): Rule[] {
     return groups.flatMap((g) =>
       g.rules.map((r) => {
-        if (r.action !== 'tunnel') return r;
+        if (r.action !== 'tunnel' || r.enabled === false) return r;
         const profile = server[g.key] ?? '';
         return { ...r, profile, fallback: reserveOf(g.key) };
       }),
@@ -245,6 +261,7 @@
 
   // What a rule takes, in words: a template's hint, else its items.
   function ruleText(r: Rule): string {
+    if (r.localNetworks) return r.domains?.length ? r.domains.join(', ') : 'Подсети не заданы · правило выключено';
     const t = [...templates, aiSites].find((x) => x.name === r.name && x.hint);
     if (t) return tplHint(t).replace(/ → .*$/, '');
     return [...(r.apps ?? []).map((a) => appLabel(a.pattern)), ...(r.domains ?? []).map((d) => (itemLabel(d)?.geo ? `«${itemLabel(d)!.text}»` : hide(shortLabel(d))))].join(', ');
@@ -254,6 +271,7 @@
   const steps = $derived([
     { id: 'intro', label: 'Как это устроено' },
     { id: 'base', label: 'Основа' },
+    { id: 'lan', label: 'Локальные сети' },
     { id: 'lists', label: base === 'all' ? 'Что напрямую' : 'Сервисы' },
     { id: 'apps', label: 'Программы' },
     { id: 'sites', label: 'Сайты' },
@@ -278,11 +296,12 @@
   }
 
   // picked is shared by both bases: only the tiles of the one chosen count.
-  const nothing = $derived(base === 'only' && !tiles.some((t) => picked.includes(t.id)) && !apps.some((a) => a.way === 'tunnel') && !sites.some((s) => s.way === 'tunnel'));
+  const nothing = $derived(base === 'only' && !vpnGroups.length);
 
   function summary(): string {
-    if (base === 'all') return 'весь интернет' + (groups.some((g) => g.rules.some((r) => r.action === 'direct') && g.key !== '') ? ', кроме выбранного' : '');
+    if (base === 'all') return 'весь интернет' + (groups.some((g) => g.rules.some((r) => r.action === 'direct' && r.enabled !== false)) ? ', кроме выбранного' : '');
     const names = services.filter((t) => picked.includes(t.id)).map((t) => t.title);
+    if (lanWay === 'tunnel' && lan.cidrs.length) names.unshift('локальные сети');
     const n = apps.filter((a) => a.way === 'tunnel').length;
     const m = sites.filter((s) => s.way === 'tunnel').length;
     if (n) names.push(`${n} ${plural(n, 'программа', 'программы', 'программ')}`);
@@ -310,7 +329,11 @@
   // «Локальная сеть».
   function onTop(added: Rule[], old: Rule[]): Rule[] {
     const rest = [...old];
+    const previous = old.findIndex((r) => r.id === lanID && wizardNetworkRule(r));
+    const i = previous >= 0 ? previous : old.findIndex((r) => !r.id && wizardNetworkRule(r));
+    if (i >= 0) rest.splice(i, 1);
     const top = added.map((r) => {
+      if (r.localNetworks) return r;
       const k = ruleKey(r);
       const i = rest.findIndex((x) => ruleKey(x) === k);
       return i < 0 ? r : rest.splice(i, 1)[0];
@@ -393,6 +416,23 @@
           </span>
         </button>
       </div>
+    {:else if step === 'lan'}
+      <h1>Как направлять трафик в локальные сети?</h1>
+      <p class="lead">Укажите подсети для этого профиля правил.</p>
+      <div class="choices">
+        <button class="choice" class:on={lanWay === 'direct'} aria-pressed={lanWay === 'direct'} onclick={() => (lanWay = 'direct')}>
+          <span class="radio"></span><span class="ctext"><span class="ctitle">Напрямую</span><span>Windows выберет маршрут. Домашний принтер будет доступен по LAN, рабочий сервер — через OpenVPN, если для него есть маршрут.</span></span>
+        </button>
+        <button class="choice" class:on={lanWay === 'tunnel'} aria-pressed={lanWay === 'tunnel'} onclick={() => (lanWay = 'tunnel')}>
+          <span class="radio"></span><span class="ctext"><span class="ctitle">Через VPN</span><span>Подключаться к этим подсетям через сервер GRoute. Его можно выбрать на шаге «Серверы».</span></span>
+        </button>
+      </div>
+      <label class="cidrs">Подсети IPv4, по одной на строке
+        <textarea rows="4" bind:value={lanInput} aria-invalid={!!lan.error} spellcheck="false" placeholder="10.20.0.0/16"></textarea>
+      </label>
+      {#if lan.error}<p class="error" role="alert">{lan.error}</p>
+      {:else if lan.overlaps.length}<p class="muted small">Пересекаются {lan.overlaps.join('; ')}. Оба диапазона получат выбранное действие.</p>
+      {:else if !lan.cidrs.length}<p class="muted small">Список пуст. Правило для локальных сетей будет выключено.</p>{/if}
     {:else if step === 'lists'}
       {#if base === 'all'}
         <h1>Что оставить напрямую?</h1>
@@ -421,11 +461,7 @@
           </div>
         {/if}
       {/each}
-      <p class="muted small">
-        Домашняя сеть (роутер, принтер, NAS) всегда идёт напрямую, это GRoute добавит сам.{base === 'only'
-          ? ' Нужного сервиса нет? Его можно добавить на шаге «Сайты» — там есть поиск по готовым спискам.'
-          : ''}
-      </p>
+      {#if base === 'only'}<p class="muted small">Нужного сервиса нет? Его можно добавить на шаге «Сайты» — там есть поиск по готовым спискам.</p>{/if}
     {:else if step === 'apps'}
       <h1>{base === 'all' ? 'Пустить какие-то программы мимо VPN?' : 'Пустить через VPN целые программы?'}</h1>
       <p class="lead">
@@ -547,7 +583,7 @@
                 <span class="muted small rule-fallback">Запасные серверы — {r.fallback.map(serverName).join(' → ')}</span>
               {/if}
             </span>
-            <span class="pill {r.action}">{r.action === 'direct' ? 'Напрямую' : r.action === 'block' ? 'Заблокировать' : serverName(r.profile ?? '')}</span>
+            <span class="pill {r.action}">{r.enabled === false ? 'Выключено' : r.action === 'direct' ? 'Напрямую' : r.action === 'block' ? 'Заблокировать' : serverName(r.profile ?? '')}</span>
           </li>
         {/each}
         <li class="rest">
@@ -594,7 +630,7 @@
     {#if step === 'sum'}
       <button class="primary big" onclick={save} disabled={busy || !settings}>{busy ? 'Сохраняю…' : 'Сохранить правила'}<Icon name="check" size={16} /></button>
     {:else}
-      <button class="primary big" onclick={next} disabled={step === 'base' && !base}>Дальше<Icon name="arrow" size={16} /></button>
+      <button class="primary big" onclick={next} disabled={(step === 'base' && !base) || (step === 'lan' && (!!lan.error || !settings))}>Дальше<Icon name="arrow" size={16} /></button>
     {/if}
   </div>
 </div>
@@ -627,6 +663,8 @@
   .way.block b { color: var(--block); }
 
   .choices { display: grid; gap: 10px; }
+  .cidrs { display: grid; gap: 6px; margin-top: 16px; }
+  .cidrs textarea { width: 100%; box-sizing: border-box; resize: vertical; font-family: var(--mono, monospace); }
   .choice { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; text-align: left; white-space: normal; justify-content: flex-start; background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius); }
   .choice.small-choice { padding: 10px 14px; }
   .choice:hover:not(:disabled) { background: var(--surface); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }

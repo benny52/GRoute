@@ -167,7 +167,7 @@ func parseRulesText(text string, ts []target) RulesTextResult {
 		}
 		o, oerrs := parseLineOptions(opts)
 		lhs = strings.TrimSpace(lhs)
-		if lhs == "*" && !o.portOpt {
+		if lhs == "*" && !o.portOpt && !o.localNetworks {
 			if section != nil {
 				fail(n, "«* -> …» (всё остальное) пишется вне блока программы, после [*]; с портом — правило для этой программы: * -> vpn | udp 443")
 				continue
@@ -191,7 +191,7 @@ func parseRulesText(text string, ts []target) RulesTextResult {
 		if len(oerrs) > 0 {
 			continue
 		}
-		r := rules.Rule{Action: act, Profile: profile, Fallback: fallback}
+		r := rules.Rule{Action: act, Profile: profile, Fallback: fallback, LocalNetworks: o.localNetworks}
 		if name, rest, ok := quotedName(lhs); ok {
 			r.Name, lhs = name, rest
 		} else if name, rest, found, msg := unquotedName(lhs); msg != "" {
@@ -211,7 +211,8 @@ func parseRulesText(text string, ts []target) RulesTextResult {
 			r.Apps = append(r.Apps, a)
 		}
 		items, quoted := splitQuoted(lhs)
-		if strings.TrimSpace(lhs) == "*" && len(r.Ports) > 0 {
+		emptyNetworks := o.localNetworks && o.off && strings.TrimSpace(lhs) == "*" && len(r.Apps) == 0 && len(r.Ports) == 0 && r.Protocol == ""
+		if strings.TrimSpace(lhs) == "*" && (len(r.Ports) > 0 || emptyNetworks) {
 			items, quoted = nil, nil // a rule with ports only
 		}
 		if msg := unpairedQuote(items, quoted); msg != "" {
@@ -272,7 +273,7 @@ func parseRulesText(text string, ts []target) RulesTextResult {
 		}
 		// A line whose items were refused is not left as a rule with
 		// ports only: that would widen it to every program and site.
-		if len(r.Apps) == 0 && len(r.Domains) == 0 && (len(r.Ports) == 0 || len(res.Errors) > errsBefore) {
+		if !emptyNetworks && len(r.Apps) == 0 && len(r.Domains) == 0 && (len(r.Ports) == 0 || len(res.Errors) > errsBefore) {
 			if len(res.Errors) == errsBefore { // not when its items were refused
 				fail(n, "не указано, что направлять")
 			}
@@ -281,9 +282,7 @@ func parseRulesText(text string, ts []target) RulesTextResult {
 		// Messages start with the rule name, cut below; a quoted name may
 		// have ": " in it. A line with "выкл" is checked as well (Compile
 		// skips disabled rules), without warnings: it matches nothing yet.
-		rc := r
-		rc.Name, rc.Enabled = "-", nil
-		set, err := rules.Compile(rules.Config{Rules: []rules.Rule{rc}})
+		set, err := checkImportedRule(r)
 		if err != nil {
 			msg := err.Error()
 			if _, after, ok := strings.Cut(msg, ": "); ok {
@@ -903,7 +902,7 @@ func writeRuleLines(b *strings.Builder, rs []rules.Rule, ts []target) {
 		if line == "*" && (name == "" || len(r.Ports) > 0) {
 			line = "app:*" // "* ->" alone is everything else, "* -> … | порт" a rule with ports only
 		}
-		if line == "" && len(r.Ports) > 0 {
+		if line == "" && (len(r.Ports) > 0 || r.LocalNetworks && !r.On()) {
 			line = "*" // no items, but ports: a rule with ports only
 		}
 		if name != "" {
@@ -911,6 +910,9 @@ func writeRuleLines(b *strings.Builder, rs []rules.Rule, ts []target) {
 		}
 		line += " -> " + targetWords(r.Action, r.Profile, r.Fallback, ts)
 		var opts []string
+		if r.LocalNetworks {
+			opts = append(opts, "локальные сети")
+		}
 		if o := ruleOptionText(r.Protocol, r.Ports); o != "" {
 			opts = append(opts, o)
 		}
@@ -1012,6 +1014,18 @@ func nameText(n string) string {
 // text a replace was made from (RulesTextView); appending needs none.
 func (c *Controller) ApplyRulesText(text string, replace bool, g EditGuard) (SaveResult, RulesTextResult, error) {
 	return c.ApplyRulesTextAs(text, "auto", replace, g) // cli: rules JSON too
+}
+
+// An empty, disabled local-network list is a saved wizard preference.
+// Validate other disabled rules as enabled so their errors are visible on import.
+func checkImportedRule(r rules.Rule) (*rules.Set, error) {
+	r.Name = "-"
+	noCriteria := len(r.AllApps()) == 0 && len(r.AllDomains()) == 0 && len(r.Ports) == 0 && r.Protocol == ""
+	emptyNetworks := r.LocalNetworks && !r.On() && noCriteria && (r.Action == rules.Direct || r.Action == rules.Tunnel)
+	if !emptyNetworks {
+		r.Enabled = nil
+	}
+	return rules.Compile(rules.Config{Rules: []rules.Rule{r}})
 }
 
 // RulesTextView is the rules as text with the revision it was read at,

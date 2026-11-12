@@ -54,9 +54,11 @@ func (a *Action) UnmarshalText(b []byte) error {
 
 // Rule is the persisted rule (settings JSON).
 type Rule struct {
-	ID      string `json:"id,omitempty"`
-	Name    string `json:"name"`
-	Enabled *bool  `json:"enabled,omitempty"` // nil = enabled
+	// LocalNetworks identifies the wizard's explicit IPv4 subnet policy.
+	LocalNetworks bool   `json:"localNetworks,omitempty"`
+	ID            string `json:"id,omitempty"`
+	Name          string `json:"name"`
+	Enabled       *bool  `json:"enabled,omitempty"` // nil = enabled
 	// Apps and Domains: the rule matches a connection of any listed
 	// application to any listed domain (an empty list = any). App and
 	// Domain are the older single-item form, still accepted.
@@ -264,10 +266,11 @@ func (r *compiled) matchIP(ip netip.Addr) bool {
 
 // Set is an immutable compiled rule set.
 type Set struct {
-	rules       []compiled
-	def         Action
-	defProfile  string
-	defFallback []string
+	privateRoutes []netip.Prefix
+	rules         []compiled
+	def           Action
+	defProfile    string
+	defFallback   []string
 	// Main is the server or group ID used by Tunnel rules without a
 	// profile (the main target).
 	Main string
@@ -329,12 +332,41 @@ func compileWith(c Config, g Geo) (*Set, error) {
 		if err != nil {
 			return nil, err
 		}
+		if r.LocalNetworks {
+			// Never lift the private-IP bypass for unrelated processes or ports.
+			if len(r.AllApps()) != 0 || len(r.Ports) != 0 || (r.Protocol != "" && r.Protocol != "any") {
+				return nil, fmt.Errorf("%s: правило локальных сетей принимает только подсети IPv4", ruleName(i, r))
+			}
+			if len(r.AllDomains()) == 0 {
+				return nil, fmt.Errorf("%s: укажите хотя бы одну подсеть IPv4 или выключите правило", ruleName(i, r))
+			}
+			for _, item := range r.AllDomains() {
+				p, err := netip.ParsePrefix(item)
+				if err != nil || !p.Addr().Is4() || p != p.Masked() {
+					return nil, fmt.Errorf("%s: некорректная подсеть IPv4 %q", ruleName(i, r), item)
+				}
+				if r.Action != Direct {
+					s.privateRoutes = append(s.privateRoutes, p)
+				}
+			}
+		}
 		for _, w := range cr.warns {
 			s.Warnings = append(s.Warnings, cr.name+": "+w)
 		}
 		s.rules = append(s.rules, cr)
 	}
 	return s, nil
+}
+
+// RoutesPrivateIPv4 reports whether a private IPv4 destination is subject to
+// ordinary rule evaluation instead of the historical blanket LAN bypass.
+func (s *Set) RoutesPrivateIPv4(ip netip.Addr) bool {
+	for _, p := range s.privateRoutes {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // ruleName is the display name ("правило N" when unnamed). An unnamed rule

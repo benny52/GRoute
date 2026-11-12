@@ -173,6 +173,11 @@ type Core struct {
 	Groups *groups.Runtime
 	Stats
 
+	// Once a private IPv4 flow used the rules, fragments can belong to
+	// an older flow even after a ruleset swap. Legacy setups never need
+	// the fragment lookup.
+	routedLAN atomic.Bool
+
 	mu       sync.Mutex
 	tcp      map[nat.FlowKey]*tcpFlow
 	udp      map[nat.FlowKey]*udpFlow
@@ -345,6 +350,12 @@ func (c *Core) usable(profile string, udp bool) bool {
 }
 
 func (c *Core) excluded(a netip.Addr) bool {
+	if a.Is4() && a.IsPrivate() && c.Rules.Load().RoutesPrivateIPv4(a) {
+		if !c.routedLAN.Load() {
+			c.routedLAN.Store(true)
+		}
+		return false
+	}
 	return !c.Opt.NoDefaultExclusions && DefaultExclusions(a)
 }
 
@@ -663,10 +674,6 @@ func (c *Core) udpOut(p *packet.Packet, addr *divert.Address) {
 // udpRoute is udpOut after the DNS check (dns re-enters it from a
 // goroutine for a query it passes on).
 func (c *Core) udpRoute(p *packet.Packet, addr *divert.Address) {
-	if c.excluded(p.DstIP()) {
-		c.injectDirect(p, addr)
-		return
-	}
 	key := nat.FlowKey{Src: p.Src(), Dst: p.Dst()}
 	now := time.Now()
 	c.mu.Lock()
@@ -676,6 +683,10 @@ func (c *Core) udpRoute(p *packet.Packet, addr *divert.Address) {
 	}
 	c.mu.Unlock()
 	if uf == nil {
+		if c.excluded(p.DstIP()) {
+			c.injectDirect(p, addr)
+			return
+		}
 		c.newFlow(p, addr, packet.ProtoUDP, key)
 		return
 	}

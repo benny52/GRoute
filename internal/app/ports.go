@@ -100,11 +100,12 @@ func inspectPort(tport uint16, scheme string) uint16 {
 
 // lineOpts are the options of a rules text line (after "|").
 type lineOpts struct {
-	proto   string   // "", "tcp", "udp"
-	ports   []string // canonical; nil = none
-	portOpt bool     // a port option was written (even a bad one)
-	off     bool
-	nochild bool
+	localNetworks bool
+	proto         string   // "", "tcp", "udp"
+	ports         []string // canonical; nil = none
+	portOpt       bool     // a port option was written (even a bad one)
+	off           bool
+	nochild       bool
 }
 
 // portKeywords start a port option, longest first: "порты 80, 443".
@@ -129,6 +130,8 @@ func parseLineOptions(opts string) (o lineOpts, errs []string) {
 			setProto(low)
 		case "выкл", "off", "disabled":
 			o.off = true
+		case "локальные сети":
+			o.localNetworks = true
 		case "без дочерних", "nochild", "nochildren":
 			o.nochild = true
 		case "порт", "порты", "port", "ports":

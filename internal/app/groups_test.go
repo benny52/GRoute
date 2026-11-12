@@ -835,7 +835,7 @@ func TestExplainGroup(t *testing.T) {
 	g := saveGroup(t, c, "Авто", groups.Failover, de1, de2)
 	setRules(t, c, rules.Direct, "", curlRule(g))
 	q := ExplainQuery{App: "curl.exe", Target: "1.2.3.4"}
-	if ex := c.Explain(q, nil); !ex.Group || ex.ProfileName != "Авто" || ex.Via != "" || !slices.Contains(ex.Notes, "HyRoute не подключён: сервер группы выберется при подключении.") {
+	if ex := c.Explain(q, nil); !ex.Group || ex.ProfileName != "Авто" || ex.Via != "" || !slices.Contains(ex.Notes, "GRoute отключён. Сервер группы будет выбран при подключении.") {
 		t.Fatalf("%+v", ex)
 	}
 	if err := c.Connect(); err != nil {

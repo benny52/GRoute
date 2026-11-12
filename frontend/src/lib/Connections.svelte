@@ -38,7 +38,7 @@
   // адрес» open from it as dialogs.
   let menu = $state<{ flow: Flow; anchor: { x: number; y: number }; el: HTMLElement | null } | null>(null);
   let draft = $state<{ rule: Rule; facts: ConnFacts; ruleset: string; udp: boolean } | null>(null);
-  let explainQ = $state<{ app: string; target: string; proto: string; port: number; note: string } | null>(null);
+  let explainQ = $state<{ app: string; target: string; proto: string; port: number; note: string; observed: Flow } | null>(null);
   // Roving tabindex: one tab stop for the table (the selected row, else the
   // first); the arrows move between rows.
   let tbody = $state<HTMLElement>();
@@ -391,7 +391,7 @@
       onedit={(rule, facts, ruleset) => (draft = { rule, facts, ruleset, udp: facts.proto.toLowerCase() === 'udp' })}
       onexplain={(q) => {
         explainRet = menu?.el ?? null;
-        explainQ = q;
+        if (menu) explainQ = { ...q, observed: menu.flow };
       }}
     />
   {/key}

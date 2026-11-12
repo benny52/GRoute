@@ -83,9 +83,9 @@ func TestServerExclusions(t *testing.T) {
 		"::ffff:203.0.113.9", // 4in6
 		"203.0.113.10",       // duplicate
 		"fe80::1%12",         // link-local: excluded by a fixed range
-		"192.168.1.1",        // private: excluded by a fixed range
+		"192.168.1.1",        // a private VPN endpoint still needs an explicit exclusion
 	), netip.Addr{})
-	want := addrs("203.0.113.9", "203.0.113.10", "2001:db8::10")
+	want := addrs("192.168.1.1", "203.0.113.9", "203.0.113.10", "2001:db8::10")
 	if got := serverExclusions(in); !slices.Equal(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}

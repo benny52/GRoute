@@ -360,6 +360,19 @@ func (t *Table) Len() int {
 	return len(t.byFlow)
 }
 
+// HasFlowBetween identifies a possible NAT flow for a non-initial
+// fragment, whose IP header supplies addresses but no ports.
+func (t *Table) HasFlowBetween(src, dst netip.Addr) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for key := range t.byFlow {
+		if key.Src.Addr() == src && key.Dst.Addr() == dst {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *Table) removeLocked(e *Entry) {
 	if t.byFlow[e.Flow] == e {
 		delete(t.byFlow, e.Flow)

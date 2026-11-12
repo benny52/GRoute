@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -490,7 +491,7 @@ func (c *Controller) Explain(q ExplainQuery, st *settings.Settings) Explanation 
 			rq.Sites = sess.DNSSites(ip.Unmap())
 		}
 		if len(rq.Sites) == 0 {
-			notes = append(notes, "Для IP без имени в DNS-кэше доменные правила не срабатывают; для HTTPS/HTTP HyRoute увидит домен в SNI/Host.")
+			notes = append(notes, "Для IP без имени в DNS-кэше доменные правила не срабатывают; для HTTPS/HTTP GRoute увидит домен в SNI/Host.")
 		}
 	} else {
 		rq.Domain = target
@@ -507,12 +508,25 @@ func (c *Controller) Explain(q ExplainQuery, st *settings.Settings) Explanation 
 		}
 	}
 	ex := Explanation{Explanation: rules.Explain(cfg, main, rq), Port: int(rq.Port)}
+	if runtime.GOOS == "windows" && rq.IP.Is4() && rq.IP.IsPrivate() {
+		if rq.Port == 53 {
+			notes = append(notes, "Для DNS-запроса к локальному адресу дополнительно действует политика DNS.")
+		} else if ex.Winner.Index < 0 || !cfg.Rules[ex.Winner.Index].LocalNetworks || ex.Winner.Action != rules.Direct {
+			if set, err := rules.Compile(cfg); err == nil && !set.RoutesPrivateIPv4(rq.IP) {
+				step := rules.Step{Index: -3, Name: "Маршрут Windows", Action: rules.Direct, Matched: true, Enabled: true, Winner: true,
+					Reason: "Адрес входит в частную сеть. Для этой подсети не задан перехват. Интерфейс выбирает Windows по таблице маршрутов."}
+				ex.Explanation = rules.Explanation{Winner: step, Steps: []rules.Step{step}, Notes: []string{}}
+			}
+		}
+	}
 	ex.Notes = append(ex.Notes, notes...)
 	if ex.Winner.Action == rules.Tunnel {
 		ex.ProfileName = c.profileName(ex.Winner.Profile)
 		if ex.Winner.Profile == "" {
 			ex.ProfileName = ""
-			ex.Notes = append(ex.Notes, "Основной профиль не выбран: такое соединение будет отклонено.")
+			if len(ex.Fallback) == 0 {
+				ex.Notes = append(ex.Notes, "Основной сервер не выбран. Без запасного новое VPN-соединение будет отклонено.")
+			}
 		}
 		c.explainGroup(&ex, sess)
 	}

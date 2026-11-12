@@ -614,7 +614,7 @@
       {/if}
     </div>
 
-    <Explain current={() => (s ? cleanSettings(s, main?.id) : null)} />
+    <Explain rulesetName={editId ? editName : activeName} current={() => (s ? cleanSettings(s, main?.id) : null)} />
   {/if}
 </div>
 

@@ -937,18 +937,18 @@ func (c *Controller) explainGroup(ex *Explanation, sess Session) {
 	c.mu.Unlock()
 	if g == nil {
 		ex.ProfileName = "удалённая группа"
-		ex.Notes = append(ex.Notes, "Группа не найдена (удалена или groups.json не загружен): такое соединение будет отклонено.")
+		ex.Notes = append(ex.Notes, "Группа не найдена. Проверьте группу и цепочку запасных серверов.")
 		return
 	}
 	ex.ProfileName = cp.Name
 	label := groups.StrategyLabel(cp.Strategy)
 	switch {
 	case sess == nil:
-		ex.Notes = append(ex.Notes, "HyRoute не подключён: сервер группы выберется при подключении.")
+		ex.Notes = append(ex.Notes, "GRoute отключён. Сервер группы будет выбран при подключении.")
 	case cp.Strategy == groups.Failover || cp.Strategy == groups.Latency:
 		p, ok := c.groupsRT.Peek(id, groups.Hint{}, endpointUsable(sess))
 		if !ok {
-			ex.Notes = append(ex.Notes, fmt.Sprintf("Группа «%s» (%s): сейчас нет доступных серверов — соединение будет отклонено.", cp.Name, label))
+			ex.Notes = append(ex.Notes, fmt.Sprintf("Группа «%s» (%s): сейчас нет доступных участников группы.", cp.Name, label))
 			return
 		}
 		ex.Via = c.profileName(p.Member)

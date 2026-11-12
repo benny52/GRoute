@@ -144,8 +144,9 @@ func (c *Core) fragOut(raw []byte, addr *divert.Address) {
 	}
 	// dns: an excluded destination is held when it is a DNS server the
 	// policy intercepts: its fragmented queries must reach the DNS check.
-	hold := f.Routable() && c.excluded(f.Dst) && c.dnsHold(f.Dst)
-	if !f.Routable() || c.excluded(f.Dst) && !hold {
+	excluded := c.excluded(f.Dst)
+	hold := f.Routable() && excluded && c.dnsHold(f.Dst)
+	if !f.Routable() || excluded && !hold && !c.trackedPrivateFragments(&f) {
 		// Protocols the engine does not route (ICMP, ESP, GRE...: their
 		// whole packets are not captured either) go on unchanged.
 		c.Inject(raw, addr)
@@ -213,6 +214,28 @@ func (c *Core) fragOut(raw []byte, addr *divert.Address) {
 	}
 }
 
+// After a ruleset change an older datagram (or its flow) can still be
+// blocked or tunneled. Non-initial fragments have no ports. Only hold
+// those that can belong to such a flow; unrelated LAN fragments pass
+// straight through even when they arrive out of order.
+func (c *Core) trackedPrivateFragments(f *packet.Fragment) bool {
+	if !c.routedLAN.Load() || !f.Dst.Is4() || !f.Dst.IsPrivate() {
+		return false
+	}
+	c.mu.Lock()
+	tracked := c.frags[f.Key()] != nil
+	if !tracked && f.Proto == packet.ProtoUDP {
+		for key, flow := range c.udp {
+			if flow.route != rules.Direct && key.Src.Addr() == f.Src && key.Dst.Addr() == f.Dst {
+				tracked = true
+				break
+			}
+		}
+	}
+	c.mu.Unlock()
+	return tracked || f.Proto == packet.ProtoTCP && c.NAT.HasFlowBetween(f.Src, f.Dst)
+}
+
 // fragLegacy routes a datagram that is not reassembled by its first
 // fragment (TCP, IPv6 extension headers in front of the fragment header).
 func (c *Core) fragLegacy(f *packet.Fragment, fk packet.FragKey, key nat.FlowKey, raw []byte, addr *divert.Address, now time.Time) {
@@ -256,6 +279,9 @@ func (c *Core) fragRoute(proto uint8, key nat.FlowKey) rules.Action {
 	c.mu.Unlock()
 	if proto == packet.ProtoTCP && c.NAT.LookupFlow(key) != nil {
 		return rules.Tunnel // reflected flow
+	}
+	if c.excluded(key.Dst.Addr()) {
+		return rules.Direct
 	}
 	pid, known := c.Conns.Lookup(attrib.Key5{Proto: proto, Local: key.Src, Remote: key.Dst})
 	if !known && c.OwnerFallback != nil {

@@ -6,6 +6,7 @@
   import { api, errText, fmtBytes, plural, statConns, statVPN, type StatCounters, type StatRow, type StatsMode, type StatsReport } from '../api';
   import { ui, hide, profileName, settle } from '../state.svelte';
   import Help from './Help.svelte';
+  import LiveTraffic from './LiveTraffic.svelte';
   import { every } from '../poll';
 
   type Tab = 'apps' | 'servers' | 'groups';
@@ -19,6 +20,7 @@
   ];
 
   let period = $state('today');
+  let showNow = $state(false);
   let report = $state<StatsReport | null>(null);
   let error = $state('');
   let modeError = $state('');
@@ -73,7 +75,7 @@
   }
 
   function tick() {
-    if (inflight || document.hidden) return;
+    if (showNow || inflight || document.hidden) return;
     start();
   }
 
@@ -103,7 +105,7 @@
   });
 
   $effect(() => {
-    if (!live) return;
+    if (!live || showNow) return;
     return every(tick, 5000);
   });
 
@@ -287,9 +289,15 @@
 <div class="page-wrap">
   <header>
     <h1>Статистика</h1>
-    <p class="muted sub">Сколько трафика прошло через GRoute: по программам и серверам.</p>
+    <div class="seg" role="group" aria-label="Вид статистики">
+      <button class:on={!showNow} aria-pressed={!showNow} onclick={() => { showNow = false; tick(); }}>За период</button>
+      <button class:on={showNow} aria-pressed={showNow} onclick={() => (showNow = true)}>Сейчас</button>
+    </div>
   </header>
 
+  {#if showNow}
+  <LiveTraffic />
+  {:else}
   <Help id="stats" title="Что здесь считается">
     <p>
       Сколько трафика прошло через VPN и напрямую: по программам и серверам. Статистика хранится только на этом компьютере и никуда не
@@ -471,11 +479,12 @@
       </p>
     </section>
   {/if}
+  {/if}
 </div>
 
 <style>
   .page-wrap { display: grid; gap: 12px; }
-  .sub { margin: 4px 0 0; }
+  header { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 8px; }
   .toolbar select { min-width: 160px; }
   .search { max-width: 340px; }
   .period { display: flex; flex-wrap: wrap; gap: 4px; }
