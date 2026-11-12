@@ -313,7 +313,7 @@
 {/if}
 
 <style>
-  .layout { display: grid; gap: 14px; max-width: 1000px; }
+  .layout { display: grid; gap: 14px; grid-template-columns: minmax(0,1fr); }
   .sub { margin: 4px 0 0; }
   header { align-items: flex-start; }
   .empty { display: flex; gap: 14px; align-items: flex-start; }

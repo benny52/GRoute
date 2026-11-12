@@ -514,7 +514,7 @@
 {/if}
 
 <style>
-  .layout { display: grid; gap: 16px; max-width: 1000px; }
+  .layout { display: grid; gap: 16px; grid-template-columns: minmax(0,1fr); }
   .sub { margin: 4px 0 0; }
   .small { font-size: 12px; }
   p.small { margin: 0 0 10px; }

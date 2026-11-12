@@ -49,6 +49,49 @@ var (
 // CheckProfile starts the profile (or uses its running Hysteria), then
 // checks TCP through it, the external IP, latency and UDP.
 func (c *Controller) CheckProfile(id string) (CheckResult, error) {
+	return c.checkProfile(context.Background(), id)
+}
+
+// Register the batch before issuing its first check. A cancel arriving
+// ahead of a queued check (or from a previous window) cannot miss it.
+func (c *Controller) BeginCheckBatch() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.checkBatchCancel != nil {
+		c.checkBatchCancel()
+	}
+	c.checkBatchID++
+	c.checkBatchCtx, c.checkBatchCancel = context.WithCancel(context.Background())
+	return c.checkBatchID
+}
+
+func (c *Controller) EndCheckBatch(token uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if token == c.checkBatchID && c.checkBatchCancel != nil {
+		c.checkBatchCancel()
+		c.checkBatchCtx, c.checkBatchCancel = nil, nil
+	}
+}
+
+func (c *Controller) CheckBatchProfile(token uint64, id string) (CheckResult, error) {
+	c.mu.Lock()
+	ctx, current := c.checkBatchCtx, c.checkBatchID
+	c.mu.Unlock()
+	if token != current || ctx == nil {
+		return CheckResult{}, context.Canceled
+	}
+	res, err := c.checkProfile(ctx, id)
+	if ctx.Err() != nil {
+		return CheckResult{}, ctx.Err()
+	}
+	return res, err
+}
+
+func (c *Controller) checkProfile(ctx context.Context, id string) (CheckResult, error) {
+	if err := ctx.Err(); err != nil {
+		return CheckResult{}, err
+	}
 	p, err := c.Profile(id)
 	if err != nil {
 		return CheckResult{}, err
@@ -64,7 +107,7 @@ func (c *Controller) CheckProfile(id string) (CheckResult, error) {
 	if p.IsVLESS() {
 		limit = 45 * time.Second
 	}
-	st, err := waitConnected(ep, limit, core)
+	st, err := waitConnected(ctx, ep, limit, core)
 	step := CheckStep{Name: "Подключение к серверу через " + core, Ms: time.Since(start).Milliseconds()}
 	if err != nil {
 		step.Detail = err.Error()
@@ -79,9 +122,9 @@ func (c *Controller) CheckProfile(id string) (CheckResult, error) {
 	// external IP.
 	// Check dials are Quiet: a check destination that fails must not count
 	// against the server in its groups (a routing endpoint is reused).
-	ctx, cancel := context.WithTimeout(tunnels.Quiet(context.Background()), 15*time.Second)
+	dialCtx, cancel := context.WithTimeout(tunnels.Quiet(ctx), 15*time.Second)
 	t0 := time.Now()
-	conn, err := ep.Dial(ctx, latencyTarget)
+	conn, err := ep.Dial(dialCtx, latencyTarget)
 	cancel()
 	step = CheckStep{Name: "TCP через туннель", Ms: time.Since(t0).Milliseconds()}
 	if err != nil {
@@ -95,7 +138,10 @@ func (c *Controller) CheckProfile(id string) (CheckResult, error) {
 	res.Steps = append(res.Steps, step)
 
 	t0 = time.Now()
-	ip, err := externalIP(ep)
+	ip, err := externalIP(ctx, ep)
+	if ctx.Err() != nil {
+		return res, ctx.Err()
+	}
 	step = CheckStep{Name: "Внешний IP через туннель", Ms: time.Since(t0).Milliseconds()}
 	if err != nil {
 		step.Detail = err.Error()
@@ -110,7 +156,10 @@ func (c *Controller) CheckProfile(id string) (CheckResult, error) {
 		step.Skip, step.Detail = true, "сервер запретил UDP: UDP-правила с этим профилем будут отклоняться"
 	} else {
 		t0 = time.Now()
-		err := udpProbe(ep)
+		err := udpProbe(ctx, ep)
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
 		step.Ms = time.Since(t0).Milliseconds()
 		if err != nil {
 			step.Detail = err.Error()
@@ -152,8 +201,10 @@ func (c *Controller) acquire(p hysteria.Profile) (*tunnels.Endpoint, func()) {
 	return mgr.Acquire(p)
 }
 
-func waitConnected(ep *tunnels.Endpoint, timeout time.Duration, core string) (hysteria.Status, error) {
+func waitConnected(ctx context.Context, ep *tunnels.Endpoint, timeout time.Duration, core string) (hysteria.Status, error) {
 	deadline := time.Now().Add(timeout)
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
 	for {
 		st := ep.Status()
 		switch {
@@ -170,20 +221,30 @@ func waitConnected(ep *tunnels.Endpoint, timeout time.Duration, core string) (hy
 			}
 			return st, fmt.Errorf("Hysteria не подключилась за %d с: сервер не отвечает (порт, obfs-пароль или блокировка UDP)", int(timeout.Seconds()))
 		}
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return st, ctx.Err()
+		case <-tick.C:
+		}
 	}
 }
 
-func externalIP(ep *tunnels.Endpoint) (string, error) {
+func externalIP(ctx context.Context, ep *tunnels.Endpoint) (string, error) {
 	tr := &http.Transport{
-		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+		DialContext: func(transportCtx context.Context, _, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, err
 			}
 			var pn uint16
 			fmt.Sscan(port, &pn)
-			return ep.Dial(tunnels.Quiet(ctx), socks5.Addr{Host: host, Port: pn})
+			// net/http may let a dial outlive its request to reuse the
+			// connection. This probe also ends when the batch is cancelled.
+			dialCtx, cancel := context.WithCancel(transportCtx)
+			defer cancel()
+			stop := context.AfterFunc(ctx, cancel)
+			defer stop()
+			return ep.Dial(tunnels.Quiet(dialCtx), socks5.Addr{Host: host, Port: pn})
 		},
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 		TLSHandshakeTimeout: 10 * time.Second,
@@ -192,7 +253,15 @@ func externalIP(ep *tunnels.Endpoint) (string, error) {
 	cl := &http.Client{Transport: tr, Timeout: 12 * time.Second}
 	var last error
 	for _, u := range ipServices {
-		resp, err := cl.Get(u)
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			last = err
+			continue
+		}
+		resp, err := cl.Do(req)
 		if err != nil {
 			last = err
 			continue
@@ -208,8 +277,8 @@ func externalIP(ep *tunnels.Endpoint) (string, error) {
 	return "", fmt.Errorf("HTTPS через туннель не прошёл: %v", last)
 }
 
-func udpProbe(ep *tunnels.Endpoint) error {
-	ctx, cancel := context.WithTimeout(tunnels.Quiet(context.Background()), 8*time.Second)
+func udpProbe(parent context.Context, ep *tunnels.Endpoint) error {
+	ctx, cancel := context.WithTimeout(tunnels.Quiet(parent), 8*time.Second)
 	defer cancel()
 	a, err := ep.UDPAssociate(ctx)
 	if err != nil {
@@ -244,6 +313,8 @@ func udpProbe(ep *tunnels.Endpoint) error {
 			return fmt.Errorf("отправка не удалась: %v", err)
 		}
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case err := <-done:
 			if err != nil {
 				return fmt.Errorf("ответ не получен: %v", err)

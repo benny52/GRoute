@@ -406,7 +406,7 @@
 {/if}
 
 <style>
-  .layout { display: grid; gap: 14px; max-width: 1000px; }
+  .layout { display: grid; gap: 14px; grid-template-columns: minmax(0,1fr); }
   .sub { margin: 4px 0 0; }
   header { align-items: flex-start; gap: 16px; }
   .big { font-weight: 600; white-space: nowrap; margin-top: 4px; }

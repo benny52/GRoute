@@ -4,7 +4,7 @@
 
   const paths: Record<string, string> = {
     home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z',
-    rules: 'M3 6h11M3 12h7M3 18h11M17 4l4 4-4 4M21 8h-7M17 14l4 4-4 4',
+    rules: 'M4 6h16M4 12h11M4 18h6',
     server: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01',
     rss: 'M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16M5 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
     activity: 'M22 12h-4l-3 9L9 3l-3 9H2',

@@ -24,6 +24,7 @@
   let s = $state<Settings | null>(null);
   let error = $state('');
   let lint = $state<LintIssue[]>([]);
+  let expandedConditions = $state('');
   // token: the rules the editor was opened for; it never follows a reload.
   // orig (conn-rules): the rule as it was when the editor opened (null for a
   // new one): a save finds it again by it (locateRule), wherever the rule
@@ -63,6 +64,7 @@
   }
 
   function setCompact(on: boolean) {
+    expandedConditions = '';
     compact = on;
     try {
       localStorage.setItem('hyroute.rulesCompact', on ? '1' : '0');
@@ -497,6 +499,8 @@
       {/if}
       {#each s.rules as r, i (i + ':' + JSON.stringify(r))}
         {#if found(r)}
+        {@const conditionKey = JSON.stringify([s.ruleset, r.id || [i, r.name]])}
+        {@const isExpanded = dense && expandedConditions === conditionKey}
         {@const pr = problem(r)}
         {@const li = lint.filter((x) => x.index === i)}
         {@const more = Math.max(0, (r.apps?.length ?? 0) - 3) + Math.max(0, (r.domains?.length ?? 0) - 4)}
@@ -539,11 +543,9 @@
             <input type="checkbox" checked={r.enabled !== false} onchange={() => toggle(i)} />
             <span></span>
           </label>
-          <button class="body" onclick={() => openEditor(i, JSON.parse(JSON.stringify(r)), 'Правило')}>
-            <span class="t ellipsis">{title(r)}</span>
-            <span class="what">
-              {#each hitsFirst(r.apps ?? [], (a) => a.pattern).slice(0, 3) as a}<span class="tag" class:hit={!!q && has(a.pattern)}><Icon name="app" size={12} />{appLabel(a.pattern)}</span>{/each}
-              {#each hitsFirst(r.domains ?? [], (d) => d + ' ' + siteLabel(d)).slice(0, 4) as d}
+          {#snippet conditions(full: boolean)}
+              {#each hitsFirst(r.apps ?? [], (a) => a.pattern).slice(0, full ? undefined : 3) as a}<span class="tag" class:hit={!!q && has(a.pattern)}><Icon name="app" size={12} />{appLabel(a.pattern)}</span>{/each}
+              {#each hitsFirst(r.domains ?? [], (d) => d + ' ' + siteLabel(d)).slice(0, full ? undefined : 4) as d}
                 {@const il = itemLabel(d)}
                 <span class="tag" class:hit={!!q && (has(d) || has(siteLabel(d)))} class:geo={il?.geo} class:miss={!!il?.missing} title={il?.geo ? il.tip : hide(il?.tip)}
                   ><Icon name={il?.missing ? 'alert' : il?.geo ? 'database' : 'globe'} size={12} />{il?.geo ? siteLabel(d) : hide(siteLabel(d))}{#if il?.geo}<span
@@ -551,10 +553,24 @@
                     >{/if}</span
                 >
               {/each}
-              {#if more}<span class="tag more">+{more}</span>{/if}
-              {#if portsText(r)}<span class="tag" title={portsText(r)}>{portsText(r, 3)}</span>{/if}
-            </span>
-          </button>
+              {#if more && !full}<span class="tag more">+{more}</span>{/if}
+              {#if portsText(r)}<span class="tag" title={portsText(r)}>{full ? portsText(r) : portsText(r, 3)}</span>{/if}
+          {/snippet}
+          {#if dense}
+            <div class="body">
+              <button class="rule-title t ellipsis" onclick={() => openEditor(i, JSON.parse(JSON.stringify(r)), 'Правило')}>{title(r)}</button>
+              <button class="condition-toggle" aria-label={`${isExpanded ? 'Свернуть' : 'Раскрыть'} условия правила «${title(r)}»`}
+                aria-expanded={isExpanded} onclick={() => expandedConditions = isExpanded ? '' : conditionKey}>
+                <span class="what">{@render conditions(false)}</span>
+                <Icon name={isExpanded ? 'up' : 'down'} size={14} />
+              </button>
+            </div>
+          {:else}
+            <button class="body" onclick={() => openEditor(i, JSON.parse(JSON.stringify(r)), 'Правило')}>
+              <span class="t ellipsis">{title(r)}</span>
+              <span class="what">{@render conditions(false)}</span>
+            </button>
+          {/if}
           <Icon name="arrow" size={16} />
           <span class="pill {r.action}" title={routeLabel(r)}>{routeLabel(r)}</span>
           <div class="acts">
@@ -564,6 +580,9 @@
             >
             <button class="icon danger" onclick={() => remove(i)} title="Удалить"><Icon name="trash" size={16} /></button>
           </div>
+          {#if isExpanded}
+            <div class="expanded-conditions">{@render conditions(true)}</div>
+          {/if}
           {#if pr || li.length}
             <div class="problems">
               {#if pr}<span><Icon name="alert" size={14} /> {pr}</span>{/if}
@@ -774,7 +793,7 @@
 <style>
   .wizard { position: fixed; inset: 0; z-index: 30; background: var(--bg); display: flex; flex-direction: column; animation: fade 0.15s ease-out; }
   .wtop { display: flex; align-items: center; gap: 10px; padding: 14px 24px; font-size: 15px; }
-  .page-wrap { display: grid; gap: 16px; max-width: 1000px; }
+  .page-wrap { display: grid; gap: 16px; min-width: 0; grid-template-columns: minmax(0,1fr); }
   header { align-items: flex-start; gap: 10px; }
   /* The title keeps its width: the buttons go to the next line instead. */
   header > .grow { min-width: 280px; }
@@ -791,11 +810,19 @@
   /* Rows in one line: the name, then as many of its items as fit. */
   .list.dense { gap: 4px; }
   .list.dense .rule { padding: 3px 10px; gap: 8px; }
-  .list.dense .body { flex-direction: row; align-items: center; gap: 10px; padding: 0 4px; overflow: hidden; }
+  .list.dense .body { display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 0 4px; overflow: hidden; }
   .list.dense .t { flex: none; max-width: 46%; }
   .list.dense .what { flex: 1; min-width: 0; flex-wrap: nowrap; overflow: hidden; }
   .list.dense .tag { flex: none; }
-  .list.dense .pill { max-width: 210px; padding: 2px 9px; }
+  .rule .pill { max-width: 32%; }
+  .list.dense .pill { padding: 2px 9px; }
+  .rule-title, .condition-toggle { background: transparent; padding: 2px; }
+  .rule-title { display: block; text-align: left; }
+  .condition-toggle { flex: 1; min-width: 0; justify-content: space-between; }
+  .condition-toggle :global(svg) { flex: none; }
+  .expanded-conditions { flex: 0 0 100%; min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; padding: 8px; border-top: 1px solid var(--border); max-height: 32vh; overflow-y: auto; }
+  .expanded-conditions .tag { max-width: 100%; overflow-wrap: anywhere; }
+  .expanded-conditions .tag :global(svg) { flex: none; }
   .list.dense .problems { padding-left: 86px; }
 
   .rule { display: flex; align-items: center; gap: 10px; padding: 10px 12px; flex-wrap: wrap; }

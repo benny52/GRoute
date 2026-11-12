@@ -271,7 +271,7 @@
 {/if}
 
 <style>
-  .page-wrap { display: grid; gap: 14px; max-width: 1000px; }
+  .page-wrap { display: grid; gap: 14px; grid-template-columns: minmax(0,1fr); }
   header { align-items: flex-start; gap: 12px; }
   .sub { margin: 4px 0 0; }
   code { font-family: var(--mono); font-size: 12px; }

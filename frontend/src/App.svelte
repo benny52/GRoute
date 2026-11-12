@@ -26,6 +26,8 @@
   import BackupRestore from './lib/BackupRestore.svelte'; // backup
   import Zapret from './lib/Zapret.svelte'; // zapret
 
+  const brandIcon = new URL('../../build/windows/icon.png', import.meta.url).href;
+
   // expert: the page is shown only in the full interface; windows: not on macOS.
   const pages: { id: string; label: string; icon: string; expert?: boolean; windows?: boolean }[] = [
     { id: 'home', label: 'Главная', icon: 'home' },
@@ -263,7 +265,7 @@
 <div class="app" inert={setup}>
   <aside>
     <div class="brand">
-      <span class="logo"><Icon name="shield" size={18} stroke={2.2} /></span>
+      <img class="logo" src={brandIcon} alt="" width="30" height="30" />
       {ui.portable ? 'GRoute Portable' : 'GRoute'}
     </div>
     <nav>
@@ -403,16 +405,7 @@
   }
 
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; padding: 4px 8px 16px; letter-spacing: 0.2px; }
-  .logo {
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    display: grid;
-    place-items: center;
-    color: #fff;
-    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #b06cff));
-  }
-  :global(:root[data-accent='rainbow']) .logo { background: linear-gradient(135deg, #ff4d4d, #ffb84d, #4dd97a, #4db8ff, #a64dff); }
+  .logo { flex: none; }
 
   nav { display: flex; flex-direction: column; gap: 2px; }
 

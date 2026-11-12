@@ -20,7 +20,8 @@
   ];
 
   let period = $state('today');
-  let showNow = $state(false);
+  let view = $state<'map' | 'table' | 'history'>('map');
+  const showNow = $derived(view !== 'history');
   let report = $state<StatsReport | null>(null);
   let error = $state('');
   let modeError = $state('');
@@ -96,7 +97,6 @@
   const live = $derived(period === 'today' || period === '7d' || period === '30d' || period === thisMonth());
 
   onMount(() => {
-    start();
     const onVisible = () => {
       if (!document.hidden) tick();
     };
@@ -290,13 +290,14 @@
   <header>
     <h1>Статистика</h1>
     <div class="seg" role="group" aria-label="Вид статистики">
-      <button class:on={!showNow} aria-pressed={!showNow} onclick={() => { showNow = false; tick(); }}>За период</button>
-      <button class:on={showNow} aria-pressed={showNow} onclick={() => (showNow = true)}>Сейчас</button>
+      <button class:on={view === 'map'} aria-pressed={view === 'map'} onclick={() => view = 'map'}>Карта</button>
+      <button class:on={view === 'table'} aria-pressed={view === 'table'} onclick={() => view = 'table'}>Таблица</button>
+      <button class:on={!showNow} aria-pressed={!showNow} onclick={() => { view = 'history'; tick(); }}>За период</button>
     </div>
   </header>
 
   {#if showNow}
-  <LiveTraffic />
+  <LiveTraffic mapView={view === 'map'} />
   {:else}
   <Help id="stats" title="Что здесь считается">
     <p>

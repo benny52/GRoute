@@ -1,17 +1,19 @@
 <script lang="ts">
-  // A plain-words hint for the simple mode: shown until closed, never in
-  // the full interface.
   import type { Snippet } from 'svelte';
-  import { ui, helpClosed, closeHelp } from '../state.svelte';
+  import { helpClosed, setHelpClosed } from '../state.svelte';
   import Icon from './Icon.svelte';
 
   let { id, title, children }: { id: string; title: string; children: Snippet } = $props();
 
-  let closedNow = $state(false);
-  const closed = $derived(closedNow || helpClosed(id));
+  let closed = $derived(helpClosed(id));
+  function toggle() {
+    closed = !closed;
+    setHelpClosed(id, closed);
+  }
 </script>
 
-{#if !ui.expert && !closed}
+<div class="hint-tools"><button class="ghost" aria-expanded={!closed} onclick={toggle}><Icon name="info" size={16} />Подсказка</button></div>
+  {#if !closed}
   <section class="help">
     <Icon name="info" size={20} />
     <div class="grow">
@@ -20,16 +22,13 @@
     </div>
     <button
       class="icon"
-      title="Понятно, больше не показывать"
-      onclick={() => {
-        closeHelp(id);
-        closedNow = true;
-      }}><Icon name="x" size={16} /></button
+      title="Свернуть подсказку" aria-label="Свернуть подсказку" onclick={toggle}><Icon name="x" size={16} /></button
     >
   </section>
 {/if}
 
 <style>
+  .hint-tools { display: flex; justify-content: flex-end; }
   .help {
     display: flex;
     gap: 12px;

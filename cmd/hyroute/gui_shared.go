@@ -290,6 +290,11 @@ func (g *GUI) SavePrefs(p store.Prefs) error {
 }
 
 func (g *GUI) CheckProfile(id string) (app.CheckResult, error) { return g.ctl.CheckProfile(id) }
+func (g *GUI) BeginCheckBatch() uint64                         { return g.ctl.BeginCheckBatch() }
+func (g *GUI) CheckBatchProfile(token uint64, id string) (app.CheckResult, error) {
+	return g.ctl.CheckBatchProfile(token, id)
+}
+func (g *GUI) EndCheckBatch(token uint64) { g.ctl.EndCheckBatch(token) }
 
 // Diagnostics is the support report (Privacy mode when privacy).
 func (g *GUI) Diagnostics(privacy bool) string {

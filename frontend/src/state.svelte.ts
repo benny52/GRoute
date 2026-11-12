@@ -91,11 +91,12 @@ export function finishSetup() {
 
 // Hints (lib/Help.svelte) the user closed.
 export function helpClosed(id: string): boolean {
-  return get('help.' + id) === '1';
+  const saved = get('help.' + id);
+  return saved === null ? !!ui.expert : saved === '1';
 }
 
-export function closeHelp(id: string) {
-  set('help.' + id, '1');
+export function setHelpClosed(id: string, closed: boolean) {
+  set('help.' + id, closed ? '1' : '0');
 }
 
 export function resetHelp() {

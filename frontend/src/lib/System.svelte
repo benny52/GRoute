@@ -564,7 +564,7 @@
 </div>
 
 <style>
-  .layout { display: grid; gap: 16px; max-width: 900px; }
+  .layout { display: grid; gap: 16px; grid-template-columns: minmax(0,1fr); }
   h2 { display: flex; align-items: center; gap: 8px; }
   .swatch { width: 28px; height: 28px; border-radius: 50%; padding: 0; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border); }
   .swatch.on { box-shadow: 0 0 0 2px var(--text); }

@@ -5,6 +5,8 @@ export interface Direction {
   key: string;
   process: string;
   pid: number;
+  source: string;
+  rule: string;
   destination: string;
   exit: ObservedExit;
   up: number;
@@ -52,10 +54,12 @@ export function sampleDirections(connections: Connections, previous: DirectionSa
     if (flow.closed && (old?.closed || (!old && !newInInterval))) continue;
     const exit = observedExit(flow);
     const destination = destinationOf(flow);
-    const key = JSON.stringify([flow.pid, flow.path || flow.process, destination, exit.kind, exit.serverId, exit.label]);
+    const source = flow.path || flow.process;
+    const rule = flow.rule || (flow.excluded ? 'Системное исключение' : 'Правило не записано');
+    const key = JSON.stringify([flow.pid, source, destination, rule, exit.kind, exit.serverId, exit.label]);
     let row = grouped.get(key);
     if (!row) {
-      row = { key, process: flow.process, pid: flow.pid, destination, exit, up: 0, down: 0, hasDown: true, measured: false };
+      row = { key, process: flow.process, pid: flow.pid, source, rule, destination, exit, up: 0, down: 0, hasDown: true, measured: false };
       grouped.set(key, row);
     }
     if (flow.recv < 0) row.hasDown = false;

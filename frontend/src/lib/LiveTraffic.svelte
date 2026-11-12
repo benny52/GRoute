@@ -6,6 +6,9 @@
   import Icon from './Icon.svelte';
   import { sampleDirections, type Direction, type DirectionSample } from './liveDirections';
 
+  import TrafficMap from './TrafficMap.svelte';
+
+  let { mapView }: { mapView: boolean } = $props();
   let rows = $state.raw<Direction[]>([]);
   let ready = $state(false);
   let error = $state('');
@@ -65,22 +68,24 @@
 {/snippet}
 
 <section class="card traffic">
-  <h2><Icon name="activity" size={18} /> Направления трафика</h2>
-  <p class="muted small">Чем выше скорость, тем быстрее движутся точки. ↑ Отправлено, ↓ получено, «—» означает, что измерения нет. Адреса видны только во время просмотра.</p>
+  <h2><Icon name="activity" size={18} /> {mapView ? 'Карта маршрутов' : 'Направления трафика'}</h2>
+  {#if !mapView}<p class="muted small">Чем выше скорость, тем быстрее движутся точки. ↑ Отправлено, ↓ получено, «—» означает, что измерения нет. Адреса видны только во время просмотра.</p>{/if}
   {#if error}
     <p class="note error">{hide(error)}</p>
   {:else if !ready}
     <p class="muted">Ожидание данных…</p>
+  {:else if mapView}
+    <TrafficMap {rows} />
   {:else if !rows.length}
     <p class="empty muted">{ui.status?.state === 'disconnected' ? 'GRoute отключён.' : 'Сейчас нет наблюдаемых соединений.'}</p>
   {:else}
-    <div class="columns small muted" aria-hidden="true"><span>Процесс</span><span>Домен или IP</span><span>Выход</span><span>Скорость</span></div>
+    <div class="columns small muted" aria-hidden="true"><span>Процесс</span><span>Правило · адрес</span><span>Выход</span><span>Скорость</span></div>
     <ul>
       {#each rows.slice(0, limit) as row (row.key)}
         <li class="flow-{row.exit.kind}">
           <span class="node"><Icon name="app" size={16} /><span><b>{hide(row.process) || 'Неизвестный процесс'}</b>{#if row.pid}<small>PID {row.pid}</small>{/if}</span></span>
           {@render track(row)}
-          <span class="address">{ui.privacy ? 'Адрес скрыт' : row.destination || 'Адрес неизвестен'}</span>
+          <span class="address"><b>{hide(row.rule)}</b><br />{ui.privacy ? 'Адрес скрыт' : row.destination || 'Адрес неизвестен'}</span>
           {@render track(row)}
           <span class="exit"><Icon name={row.exit.kind === 'vpn' ? 'server' : row.exit.kind === 'block' ? 'ban' : row.exit.kind === 'direct' ? 'globe' : 'info'} size={15} />{exitLabel(row)}</span>
           <span class="rates"><span title={row.exit.kind === 'direct' && !row.hasDown ? 'Отправлено примерно, включая повторные пакеты' : 'Отправлено'}>↑ {row.measured ? rate(row.up) : '—'}</span><span title={row.hasDown ? 'Получено' : 'Входящий трафик этого пути не измеряется'}>↓ {row.hasDown && row.measured ? rate(row.down) : '—'}</span></span>

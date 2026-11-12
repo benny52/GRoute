@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -39,6 +41,115 @@ func (r *stubRunner) UDPAssociate(ctx context.Context) (*socks5.UDPAssoc, error)
 	return r.c.UDPAssociate(ctx)
 }
 func (r *stubRunner) SOCKS() socks5.Client { return r.c }
+
+type waitingCheckRunner struct {
+	stubRunner
+	started chan struct{}
+}
+
+func (r *waitingCheckRunner) Start() error {
+	close(r.started)
+	return r.stubRunner.Start()
+}
+
+func (r *waitingCheckRunner) Status() hysteria.Status {
+	return hysteria.Status{State: hysteria.Connecting}
+}
+
+func TestCancelBatchReleasesPendingCheck(t *testing.T) {
+	c, _ := newCtl(t)
+	runner := &waitingCheckRunner{started: make(chan struct{})}
+	c.Runners = func(hysteria.Profile, tunnels.Hooks) tunnels.Runner { return runner }
+	added, _ := c.ImportURIs(link)
+	id := added.Added[0].ID
+	old, token := c.BeginCheckBatch(), c.BeginCheckBatch()
+	defer c.EndCheckBatch(token)
+	c.EndCheckBatch(old) // a late cancellation belongs to its original batch
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.CheckBatchProfile(token, id)
+		done <- err
+	}()
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("batch did not start")
+	}
+	c.EndCheckBatch(token)
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancel: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancellation did not interrupt the pending connection")
+	}
+	if runner.up {
+		t.Fatal("temporary runner still active")
+	}
+	if _, err := c.CheckBatchProfile(token, id); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled token accepted another check: %v", err)
+	}
+}
+
+func TestCancelBatchHTTPKeepsSharedRunner(t *testing.T) {
+	proxy := &socks5.Server{}
+	if err := proxy.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	defer proxy.Close()
+	requested, releaseHTTP := make(chan struct{}), make(chan struct{})
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		close(requested)
+		select {
+		case <-req.Context().Done():
+		case <-releaseHTTP:
+		}
+	}))
+	defer web.Close()
+	defer close(releaseHTTP)
+	oldIP, oldLatency := ipServices, latencyTarget
+	defer func() { ipServices, latencyTarget = oldIP, oldLatency }()
+	ipServices = []string{web.URL}
+	latencyTarget = socks5.AddrFromAddrPort(web.Listener.Addr().(*net.TCPAddr).AddrPort())
+
+	c, _ := newCtl(t)
+	runner := &stubRunner{c: socks5.Client{Server: proxy.Addr()}, noUDP: true}
+	c.Runners = func(hysteria.Profile, tunnels.Hooks) tunnels.Runner { return runner }
+	added, _ := c.ImportURIs(link)
+	id := added.Added[0].ID
+	profile, err := c.Profile(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, release := c.acquire(profile) // a separate check already owns this endpoint
+	defer release()
+	token := c.BeginCheckBatch()
+	defer c.EndCheckBatch(token)
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.CheckBatchProfile(token, id)
+		done <- err
+	}()
+	select {
+	case <-requested:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no HTTP probe received")
+	}
+	c.EndCheckBatch(token)
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancel: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP request still running")
+	}
+	if !runner.up {
+		t.Fatal("cancel stopped a runner shared with another check")
+	}
+}
 
 func TestCheckProfileStandalone(t *testing.T) {
 	stub := &socks5.Server{}

@@ -9,6 +9,7 @@
   import CheckProfile from './CheckProfile.svelte';
   import Help from './Help.svelte';
   import Groups from './Groups.svelte';
+  import { batch, cancelBatch, checkAll } from './batchCheck.svelte';
 
   let { onchange }: { onchange: () => void } = $props();
 
@@ -182,7 +183,8 @@
         </p>
       {/if}
     </div>
-    {#if view === 'servers'}<button class="primary" onclick={() => (adding = !adding)}><Icon name="plus" size={16} />Добавить сервер</button>{/if}
+    {#if view === 'servers'}
+      <button class="primary" onclick={() => (adding = !adding)}><Icon name="plus" size={16} />Добавить сервер</button>{/if}
   </header>
   {#if ui.expert}
     <div class="seg tabs" role="tablist">
@@ -242,6 +244,15 @@
   {/if}
 
   <div class="list">
+    <div class="batch-row">
+      {#if batch.cancelled}<span class="batch-note small muted" role="status">Проверка отменена · проверено {batch.done} из {batch.total}</span>{/if}
+      {#if batch.error}<span class="batch-note note error" role="alert">{hide(batch.error)}</span>{/if}
+      <button class="primary check-button" disabled={batch.running ? batch.stopping || batch.done === batch.total : !list.length || !!checking}
+        onclick={() => batch.running ? cancelBatch() : checkAll(list.map(p => p.id))}>
+        <Icon name={batch.running ? 'x' : 'zap'} size={16} />
+        {batch.running ? (batch.stopping ? 'Отмена…' : `Отменить проверку · ${batch.done} из ${batch.total}`) : 'Проверить все серверы'}
+      </button>
+    </div>
     {#each list as p, i (p.id)}
       {@const t = tunnel(p.id)}
       <div class="srv card" class:main={p.main} class:missing={p.missing}>
@@ -263,7 +274,11 @@
             {#if p.obfs}<span class="badge">{p.obfs}</span>{/if}
             {#if p.pinned}<span class="badge" title="Сертификат проверяется по отпечатку">pin</span>{:else if p.insecure}<span class="badge warn-b" title="Сертификат не проверяется">insecure</span>{/if}
           </div>
-          <button class="link small" onclick={() => (usage = p)}>Где используется</button>
+          {#if batch.current === p.id}<span class="small muted">Проверяем…</span>
+          {:else if batch.results[p.id]}
+            {@const result = batch.results[p.id]}
+            <strong class="check-result" class:ok={result.ok}><Icon name={result.ok ? 'check' : 'x'} size={15} />{hide(result.label)}</strong>
+          {/if}
         </div>
         {#if t}
           <div class="state" title={hide(t.message)}>
@@ -271,7 +286,8 @@
             <span class="faint small mono">↓ {fmtBytes(t.recv)}</span>
           </div>
         {/if}
-        <button onclick={() => (checking = p)} title="Запустить и проверить: подключение, внешний IP, задержка, UDP"><Icon name="zap" size={15} />Проверить</button>
+        <button class="link small usage" onclick={() => (usage = p)}>Где используется</button>
+        <button class="check-button" disabled={batch.running} onclick={() => (checking = p)} title="Запустить и проверить: подключение, внешний IP, задержка, UDP"><Icon name="zap" size={15} />Проверить</button>
         <div class="acts">
           <button class="icon" onclick={() => edit(p)} title="Изменить"><Icon name="edit" size={16} /></button>
           <button class="icon" onclick={() => run(() => api.CopyURI(p.id), 'Ссылка скопирована (в ней пароль сервера)')} title="Копировать ссылку"><Icon name="copy" size={16} /></button>
@@ -331,13 +347,25 @@
 {/if}
 
 <style>
-  .page-wrap { display: grid; gap: 16px; max-width: 1000px; }
+  .page-wrap { display: grid; gap: 16px; min-width: 0; container-type: inline-size; }
   .tabs { justify-self: start; }
   header { align-items: flex-start; }
   .sub { margin: 4px 0 0; }
   textarea { width: 100%; }
-  .list { display: grid; gap: 8px; }
-  .srv { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+  .list { display: grid; grid-template-columns: auto minmax(0,1fr) auto auto auto auto; gap: 8px 12px; }
+  .batch-row, .srv { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
+  .batch-row { padding-inline: 15px; }
+  .batch-note { grid-column: 1 / 5; }
+  .srv { padding: 12px 14px; }
+  .srv .star { grid-column: 1; }
+  .srv .info { grid-column: 2; }
+  .srv .state { grid-column: 3; }
+  .srv .usage { grid-column: 4; }
+  .check-button { grid-column: 5; }
+  .srv .acts { grid-column: 6; }
+  .check-result { display: flex; gap: 5px; align-items: center; font-weight: 700; color: color-mix(in srgb, var(--block) 85%, var(--text)); overflow-wrap: anywhere; }
+  .check-result :global(svg) { flex: none; }
+  .check-result.ok { color: color-mix(in srgb, var(--direct) 80%, var(--text)); }
   .srv.main { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
   .srv.missing { border-style: dashed; }
   .skipped { margin: 4px 0 0; padding-left: 18px; }
@@ -349,6 +377,20 @@
   .warn-b { color: var(--warn); }
   .state { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
   .acts { display: flex; }
+  .usage { flex: none; }
+  .info { min-width: 0; }
+  @container (max-width: 840px) {
+    .batch-note { grid-column: 1; }
+    .list { grid-template-columns: minmax(0,1fr) auto auto; }
+    .check-button { grid-column: 2; }
+    .srv .check-button { grid-row: 3; }
+    .srv .info { grid-area: 1 / 1 / 2 / -1; }
+    .srv .star { grid-area: 1 / 3; align-self: start; justify-self: end; }
+    .srv.main .info { padding-right: 22px; }
+    .srv .state { grid-area: 2 / 1 / 3 / -1; }
+    .srv .usage { grid-area: 3 / 1; justify-self: end; }
+    .srv .acts { grid-area: 3 / 3; justify-content: flex-end; }
+  }
   .empty { display: flex; gap: 16px; align-items: center; color: var(--muted); }
   .own { display: flex; gap: 14px; align-items: center; color: var(--muted); }
   .own b { color: var(--text); }

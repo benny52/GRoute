@@ -678,6 +678,9 @@ interface GUI {
   Prefs(): Promise<Prefs>;
   SavePrefs(p: Prefs): Promise<void>;
   CheckProfile(id: string): Promise<CheckResult>;
+  BeginCheckBatch(): Promise<number>;
+  CheckBatchProfile(token: number, id: string): Promise<CheckResult>;
+  EndCheckBatch(token: number): Promise<void>;
   Diagnostics(privacy: boolean): Promise<string>;
   CopyDiagnostics(privacy: boolean): Promise<void>;
   Updates(): Promise<Updates>;

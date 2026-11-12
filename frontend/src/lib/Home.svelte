@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { api, errText, fmtBytes, fmtDuration, cleanSettings, strategyLabel, plural, type ProfileSummary, type GroupView, type RulesetsView, type Settings, type SystemInfo, type TunnelStatus, type TunnelReason } from '../api';
   import { ui, hide, settle, hideUserPath, mainTarget, profileName } from '../state.svelte';
   import { startRestore } from '../state.svelte'; // backup
@@ -15,6 +15,7 @@
 
   let { go, onsetup }: { go: (page: string) => void; onsetup: () => void } = $props();
   import { every } from '../poll';
+  import { createSpeedSampler, formatSpeed, maxSampleAge } from './tunnelSpeeds';
 
   let settings = $state<Settings | null>(null);
   let busy = $state(false);
@@ -109,6 +110,17 @@
   }
 
   const st = $derived(ui.status);
+  const sampleSpeeds = createSpeedSampler();
+  // The snapshot already on screen when navigating here may be old. Start
+  // the clock at the next status received while this page is mounted.
+  const initialStatus = untrack(() => ui.status);
+  let speeds = $state.raw<ReturnType<typeof sampleSpeeds>>();
+  $effect(() => {
+    if (!st || st === initialStatus) return;
+    speeds = sampleSpeeds(st.since, st.tunnels, performance.now());
+    const expiry = setTimeout(() => (speeds = undefined), maxSampleAge);
+    return () => clearTimeout(expiry);
+  });
   const online = $derived(st != null && st.state !== 'disconnected' && !(st.state === 'error' && !st.stats));
   const main = $derived(mainTarget());
   const mainProfile = $derived(ui.profiles.find((p) => p.id === main?.id));
@@ -303,6 +315,12 @@
   });
 </script>
 
+{#snippet speedLine(speed: { up: number; down: number } | undefined)}
+  <span class="speed-pair mono" title="Скорость отправки и получения">
+    <span>↑ {formatSpeed(speed?.up)}</span> <span>↓ {formatSpeed(speed?.down)}</span>
+  </span>
+{/snippet}
+
 <div class="home">
   <section class="hero card tone-{tone}">
     <button class="power" onclick={toggle} disabled={busy || st?.state === 'starting' || (!online && (ui.profiles.length === 0 || sys?.canRestartAsAdmin))} title={online ? 'Отключить' : sys?.canRestartAsAdmin ? 'Для подключения нужны права администратора' : 'Подключить'}>
@@ -320,6 +338,9 @@
         </p>
       {/if}
       {#if online && since > 0}<p class="faint small">Работает {fmtDuration(since * 1e6)}{st?.killSwitch === 'armed' ? ' · kill switch включён' : ''}</p>{/if}
+      {#if online && st?.tunnels.length}
+        <div class="vpn-speed"><span>Общая скорость VPN</span> {@render speedLine(speeds?.total)}</div>
+      {/if}
       {#if error}<div class="note error">{hide(error)}</div>{/if}
       {#if !online && sys?.canRestartAsAdmin && ui.profiles.length}
         <p>Для подключения VPN нужны права администратора. После перезапуска нажмите «Подключить».</p>
@@ -474,6 +495,7 @@
             <span>{mainTunnel ? (tunnelText[mainTunnel.state] ?? mainTunnel.state) : 'Не подключён'}</span>
             {#if mainTunnel}
               <span class="mono" title="Отправлено и получено этим сервером">↑ {fmtBytes(mainTunnel.sent)} ↓ {fmtBytes(mainTunnel.recv)}</span>
+              {@render speedLine(speeds?.servers.get(mainTunnel.id))}
               {#if mainTunnel.rejected}<span class="muted">Отклонено {mainTunnel.rejected}</span>{/if}
             {/if}
           </div>
@@ -516,7 +538,10 @@
                 {#if t.message && t.state !== 'connected'}<div class="small bad-text">{hide(t.message)}</div>{/if}
               </div>
               {#if t.rejected}<span class="badge" title="Соединений отклонено, пока сервер был недоступен">отклонено {t.rejected}</span>{/if}
-              <span class="small muted mono">↑ {fmtBytes(t.sent)} ↓ {fmtBytes(t.recv)}</span>
+              <div class="traffic small">
+                {@render speedLine(speeds?.servers.get(t.id))}
+                <span class="muted mono" title="Отправлено и получено этим сервером">↑ {fmtBytes(t.sent)} ↓ {fmtBytes(t.recv)}</span>
+              </div>
             </div>
           {/each}
         </div>
@@ -551,7 +576,7 @@
 {/if}
 
 <style>
-  .home { display: grid; gap: 16px; max-width: 980px; }
+  .home { display: grid; gap: 16px; min-width: 0; }
 
   .hero { display: flex; align-items: center; gap: 26px; padding: 26px 28px; }
   .hero h1 { margin-bottom: 4px; }
@@ -579,7 +604,7 @@
   :global(:root[data-accent='rainbow']) .tone-ok .power :global(svg) { animation: spin 6s linear infinite reverse; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .seg.wide { display: flex; }
   .seg.wide button { flex: 1; }
   .explain { margin: 10px 0 12px; min-height: 36px; }
@@ -601,6 +626,11 @@
   .tunnels { display: grid; gap: 4px; }
   .tunnel { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: var(--radius-sm); }
   .tunnel:hover { background: var(--surface-2); }
+  .vpn-speed, .speed-pair { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+  .vpn-speed { margin-top: 8px; font-size: 13px; }
+  .speed-pair { color: var(--tunnel); color: light-dark(#075986, #80ccff); font-weight: 650; }
+  .speed-pair span { white-space: nowrap; }
+  .traffic { display: grid; justify-items: end; gap: 3px; }
   .bad-text { color: var(--block); }
 
   @media (max-width: 900px) {

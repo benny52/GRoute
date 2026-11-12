@@ -168,6 +168,9 @@ type Controller struct {
 	prefsBroken                error
 	prefs                      store.Prefs
 	checkMgr                   *tunnels.Manager
+	checkBatchID               uint64
+	checkBatchCtx              context.Context
+	checkBatchCancel           context.CancelFunc
 	files                      logFiles
 	geo                        geoState
 	ksMu                       sync.Mutex // guards ks; never held with mu
