@@ -479,7 +479,6 @@
 
   {#if s}
     <div class="row tools">
-      <button onclick={() => (bulk = true)} disabled={pending > 0}>Групповое изменение</button>
       {#if s.rules.length > 1}
         <input class="grow search" type="text" placeholder="Найти правило: сайт, программа, название или сервер" bind:value={query} />
         {#if q}<span class="muted small found">{foundCount} из {s.rules.length}</span>{/if}
@@ -488,6 +487,9 @@
           <button class:on={dense} onclick={() => setCompact(true)} title="Правило в одну строку: на экране помещается вдвое больше">Компактно</button>
         </div>
       {/if}
+      <button type="button" class="primary bulk-button" onclick={() => (bulk = true)} disabled={pending > 0}>
+        <Icon name="rules" size={16} />Групповое изменение
+      </button>
     </div>
     <div class="list" class:dense>
       {#if q && !foundCount}
@@ -780,6 +782,7 @@
   .list { display: grid; gap: 8px; }
 
   .tools { gap: 10px; align-items: center; }
+  .bulk-button { margin-inline-start: auto; }
   .search { max-width: 460px; }
   .found { white-space: nowrap; }
   .num { color: var(--faint); font-size: 12px; min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; flex: none; }

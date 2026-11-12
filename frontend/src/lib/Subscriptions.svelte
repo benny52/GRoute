@@ -235,7 +235,7 @@
     const notes = [...pv.warnings, ...pv.errors];
     if (notes.length) {
       const more = notes.length > 8 ? `\n… и ещё ${notes.length - 8}` : '';
-      const found = `Найдено ${pv.count} ${plural(pv.count, 'профиль', 'профиля', 'профилей')}.`;
+      const found = previewSummary(pv);
       if (!confirm(`${found}\n\n${notes.slice(0, 8).map(hide).join('\n')}${more}\n\nСменить ссылку подписки «${hide(s.name)}»?`)) return;
     }
     const ok = await edit(s, { token: pv.token });
@@ -316,11 +316,14 @@
     onchange();
   }
 
-  function ignoredText(m: Record<string, number> | null): string {
-    if (!m) return '';
-    return Object.entries(m)
-      .map(([k, v]) => `${k}: ${v}`)
-      .join(', ');
+  function previewSummary(pv: SubPreview): string {
+    const count = pv.report.profiles?.length ?? 0;
+    const duplicates = pv.report.duplicates?.length ?? 0;
+    const skipped = pv.report.skipped?.reduce((sum, entry) => sum + (entry.count ?? 1), 0) ?? 0;
+    const parts = [`К добавлению: ${count} ${plural(count, 'профиль', 'профиля', 'профилей')}`];
+    if (duplicates) parts.push(`дублей: ${duplicates}`);
+    if (skipped) parts.push(`пропущено: ${skipped}`);
+    return parts.join(' · ');
   }
 
   function total(m: Record<string, number> | null): number {
@@ -360,9 +363,7 @@
     {#if shown}
       <div class="preview">
         <div class="big">
-          Найдено {shown.count} {plural(shown.count, 'профиль', 'профиля', 'профилей')}{#if shown.ignoredTotal},
-            {shown.ignoredTotal} {plural(shown.ignoredTotal, 'запись', 'записи', 'записей')} других протоколов {plural(shown.ignoredTotal, 'проигнорирована', 'проигнорированы', 'проигнорированы')}
-            <span class="muted">({ignoredText(shown.ignored)})</span>{/if}.
+          {previewSummary(shown)}
         </div>
         {#if shown.info}<SubInfoBar info={shown.info} compact />{/if}
         {#if shown.updateHours}<div class="muted small">Сервис советует обновлять каждые {shown.updateHours} ч.</div>{/if}

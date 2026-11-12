@@ -68,3 +68,25 @@ func TestExtraFromLinkAndSaved(t *testing.T) {
 		t.Errorf("tlsSettings %v", tls)
 	}
 }
+
+func TestPanelXHTTPAliasesReachXray(t *testing.T) {
+	const link = "vless://" + testID + "@example.invalid:443?type=xhttp&security=tls&"
+	for _, tc := range []struct {
+		query, mode, padding string
+		warnings             int
+	}{
+		{"x_padding_bytes=64-256", "", "64-256", 0},
+		{"extra=" + url.QueryEscape(`{"mode":"stream-up","xPaddingBytes":"50-200"}`), "stream-up", "50-200", 0},
+		{"mode=auto&x_padding_bytes=200-400&extra=" + url.QueryEscape(`{"mode":"stream-up","xPaddingBytes":"50-200"}`), "auto", "50-200", 2},
+	} {
+		l, warnings, err := Parse(link + tc.query)
+		if err != nil || len(warnings) != tc.warnings || l.Settings.Mode != tc.mode {
+			t.Fatalf("settings %+v, %v, %v", l.Settings, warnings, err)
+		}
+		cfg := config(t, l.Settings, Run{Host: l.Host, Port: l.Port})
+		v := at(t, cfg, "outbounds", 0, "streamSettings", "xhttpSettings", "extra", "xPaddingBytes")
+		if v != tc.padding {
+			t.Errorf("xPaddingBytes = %v, want %s", v, tc.padding)
+		}
+	}
+}

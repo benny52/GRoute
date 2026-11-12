@@ -86,6 +86,18 @@ func skippedLink(link, scheme, cause string) SubEntry {
 // Parser errors can quote an invalid port, malformed host or other untrusted
 // field. Return a reason we own instead of exposing any part of that value.
 func invalidReason(msg string) string {
+	// These converter errors are constant strings with no imported values.
+	switch msg {
+	case "поддерживается только Hysteria версии 2", "нужен транспорт hysteria с TLS",
+		"невозможно перенести pinnedPeerCertSha256 в Hysteria 2", "невозможно перенести проверку сертификата TLS в Hysteria 2",
+		"некорректная маска salamander для Hysteria 2",
+		"настройка packetSize маски salamander не переносится", "несколько масок udphop не поддерживаются",
+		"неподдерживаемая UDP-маска Hysteria 2", "некорректный диапазон портов Hysteria 2",
+		"неподдерживаемый интервал смены порта Hysteria 2", "неподдерживаемая цепочка прокси Hysteria 2",
+		"неподдерживаемый режим смены порта Hysteria 2", "некорректные параметры смены порта Hysteria 2",
+		"неподдерживаемая конфигурация смены адреса или порта Hysteria 2":
+		return msg
+	}
 	msg = strings.ToLower(msg)
 	for _, rule := range []struct{ token, reason string }{
 		{"uuid", "Некорректный идентификатор пользователя"}, {"id пользователя", "Некорректный идентификатор пользователя"},
@@ -102,8 +114,41 @@ func invalidReason(msg string) string {
 	return "Некорректные параметры сервера"
 }
 
-// An Amnezia vpn link can contain different protocols. Identify AWG only
-// from an explicit container in its JSON (plain or Qt qCompress framing).
+// 3x-ui encodes a client .conf directly in vpn://. The same sections
+// appear in WireGuard: require an AWG-specific option in [Interface].
+func isAWGConfig(config string) bool {
+	section := ""
+	var private, peer, obfuscated bool
+	for line := range strings.SplitSeq(config, "\n") {
+		line, _, _ = strings.Cut(line, "#")
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") {
+			section = strings.ToLower(line)
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		switch section {
+		case "[interface]":
+			switch key {
+			case "privatekey":
+				private = true
+			case "jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5":
+				obfuscated = true
+			}
+		case "[peer]":
+			if key == "publickey" {
+				peer = true
+			}
+		}
+	}
+	return private && peer && obfuscated
+}
+
+// Other Amnezia clients encode a JSON container, sometimes Qt-compressed.
 func amneziaWG(link string, budget *int) bool {
 	_, payload, _ := strings.Cut(link, "://")
 	payload, _, _ = strings.Cut(payload, "#")
@@ -113,10 +158,13 @@ func amneziaWG(link string, budget *int) bool {
 	}
 	*budget -= len(payload)
 	raw, ok := decodeBase64(payload)
-	if !ok || len(raw) < 4 {
+	if !ok || len(raw) < 4 || len(raw) > maxConfig {
 		return false
 	}
 	data := []byte(raw)
+	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("[")) {
+		return isAWGConfig(raw)
+	}
 	if !bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
 		n := binary.BigEndian.Uint32(data[:4])
 		if n == 0 || n > maxConfig || int(n) > *budget {
@@ -153,49 +201,104 @@ func profileEntry(p hysteria.Profile) SubEntry {
 }
 
 func importReport(l Links) SubReport {
-	r := SubReport{Skipped: l.Skipped, Warnings: safeWarnings(l.Warnings)}
+	r := SubReport{Skipped: l.Skipped}
 	seen := map[string]bool{}
+	labels := map[string]string{}
 	for _, p := range l.Profiles {
+		entry := profileEntry(p)
+		labels[p.Name] = entry.Name + " (" + entry.Protocol + ")"
 		key := connKey(p)
 		if seen[key] {
-			r.Duplicates = append(r.Duplicates, profileEntry(p))
+			r.Duplicates = append(r.Duplicates, entry)
 			continue
 		}
-		r.Profiles = append(r.Profiles, profileEntry(p))
+		r.Profiles = append(r.Profiles, entry)
 		seen[key] = true
 	}
+	r.Warnings = safeWarnings(l.Warnings, labels)
 	return r
 }
 
-// Keep actionable parameter names from the parsers. Arbitrary parameter
-// values, free-form panel notices and unknown query keys may contain secrets.
-func safeWarnings(warnings []string) []string {
+// A parser warning may quote a URL parameter, a path or a value from the
+// panel. Classify its message separately from its profile name, returning
+// only allowlisted field names to the UI.
+func safeWarnings(warnings []string, labels map[string]string) []string {
 	var out []string
+	seen := map[string]bool{}
 	for _, w := range warnings {
-		const fallback = "Подписка содержит параметры, которые не удалось перенести."
-		note := fallback
+		var note string
 		switch {
-		case strings.Contains(w, "сообщение панели"):
+		case strings.HasPrefix(w, "сообщение панели: «"):
 			note = "Панель передала информационную запись."
-		case strings.Contains(w, "obfs-password without obfs"):
-			note = "Для пароля обфускации без типа выбран salamander."
-		case strings.Contains(w, "insecure") || strings.Contains(w, "провер"):
-			note = "Xray продолжает проверять сертификат сервера."
-		case strings.Contains(w, "pinSHA256"):
-			note = "Проверьте отпечаток SHA-256 сертификата."
-		case strings.Contains(w, "взяты первые"):
+		case strings.HasPrefix(w, "в подписке ") && strings.HasSuffix(w, fmt.Sprintf(": взяты первые %d", maxSubServers)):
 			note = fmt.Sprintf("Достигнут лимит в %d серверов.", maxSubServers)
 		default:
-			for _, parameter := range []string{"xhttp", "sockopt", "finalmask", "mux", "mportHopInt", "ports", "ech", "down", "up"} {
-				if strings.Contains(w, parameter) {
-					note = "Параметр " + parameter + " перенесён не полностью или пропущен."
-					break
+			// Labels can themselves contain ": ". The message begins after
+			// the longest matching known profile name. Bound candidate work
+			// on untrusted panel strings; longer names just lose the label.
+			var label string
+			_, msg, _ := strings.Cut(w, ": ")
+			for i := range min(len(w), 512) {
+				if w[i] == ':' && strings.HasPrefix(w[i:], ": ") {
+					if display, ok := labels[w[:i]]; ok {
+						label, msg = display, w[i+2:]
+					}
 				}
 			}
+			note = parameterWarning(msg)
+			if label != "" {
+				note = label + " — " + note
+			}
 		}
-		out = append(out, note)
+		if !seen[note] {
+			out = append(out, note)
+			seen[note] = true
+		}
 	}
 	return out
+}
+
+func parameterWarning(msg string) string {
+	switch {
+	case msg == "Hysteria 2: используются штатные параметры QUIC клиента вместо quicParams Xray":
+		return msg
+	case strings.HasPrefix(msg, "obfs-password without obfs:"):
+		return "Для пароля обфускации без типа выбран salamander."
+	case strings.HasPrefix(msg, "allowInsecure:"), strings.HasPrefix(msg, "insecure:"), strings.HasPrefix(msg, "skip-cert-verify:"):
+		return "Xray продолжает проверять сертификат сервера."
+	case strings.HasPrefix(msg, "pinSHA256 "):
+		return "Проверьте отпечаток SHA-256 сертификата."
+	case strings.HasPrefix(msg, "xhttp extra: «"), strings.HasPrefix(msg, "xhttp: «"):
+		_, rest, _ := strings.Cut(msg, "«")
+		field, _, _ := strings.Cut(rest, "»")
+		switch field {
+		case "downloadSettings.tlsSettings.masterKeyLog", "downloadSettings.tlsSettings.certificates", "downloadSettings.sockopt", "downloadSettings.tlsSettings.allowInsecure":
+			return "XHTTP: поле " + field + " исключено из настроек клиента."
+		}
+		return "XHTTP: расширенные настройки содержат поле, которое клиент не принимает."
+	case strings.HasPrefix(msg, "xhttp conflict: "):
+		field := strings.TrimPrefix(msg, "xhttp conflict: ")
+		switch field {
+		case "mode":
+			return "XHTTP: для mode использовано значение из строки ссылки."
+		case "sessionIDPlacement", "sessionIDKey", "xPaddingBytes":
+			return "XHTTP: значения расходятся. Использовано поле " + field + " из extra."
+		}
+	case strings.HasPrefix(msg, "fm:"):
+		return "Часть настроек маскировки fm не перенесена."
+	}
+	if msg == "ignored parameter ech: not an inline ECH config list" {
+		return "ECH пропущен: в ссылке должен быть встроенный список конфигурации."
+	}
+	field, fromQuery := strings.CutPrefix(msg, "ignored parameter ")
+	if !fromQuery {
+		field, _, _ = strings.Cut(strings.TrimPrefix(msg, "ignored "), " ")
+	}
+	switch field {
+	case "up", "down", "ech", "mportHopInt", "ports", "sockopt", "finalmask", "mux", "x_padding_bytes", "support-x25519mlkem768":
+		return "Параметр " + field + " не применён."
+	}
+	return "В профиле есть неподдерживаемый дополнительный параметр."
 }
 
 func (c *Controller) SubscriptionDetails(id string) (SubReport, error) {
@@ -210,9 +313,12 @@ func (c *Controller) SubscriptionDetails(id string) (SubReport, error) {
 	}
 	s := c.subs[i]
 	var saved []SubEntry
+	labels := map[string]string{}
 	for _, p := range c.profiles.List {
 		if p.Source == "sub:"+id && !p.Missing {
-			saved = append(saved, profileEntry(p))
+			entry := profileEntry(p)
+			saved = append(saved, entry)
+			labels[p.Name] = entry.Name + " (" + entry.Protocol + ")"
 		}
 	}
 	c.mu.Unlock()
@@ -226,7 +332,7 @@ func (c *Controller) SubscriptionDetails(id string) (SubReport, error) {
 			}
 		}
 	}
-	r := SubReport{Profiles: saved, Partial: true, Warnings: safeWarnings(s.Warnings)}
+	r := SubReport{Profiles: saved, Partial: true, Warnings: safeWarnings(s.Warnings, labels)}
 	var schemes []string
 	for scheme := range s.Ignored {
 		schemes = append(schemes, scheme)

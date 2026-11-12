@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -97,6 +98,11 @@ func Parse(raw string) (l Link, warnings []string, err error) {
 	s.Authority = get("authority")
 	s.Mode = get("mode")
 	s.Extra = get("extra")
+	if s.Network == "xhttp" {
+		// 3x-ui emits these settings twice for different client families.
+		// Normalise them into the fields Xray actually reads.
+		warnings = append(warnings, s.readPanelExtra(get("x_padding_bytes"))...)
+	}
 	if clean, dropped, err := CleanExtra(s.Extra); err == nil { // else Validate says so
 		s.Extra = clean
 		for _, d := range dropped {
@@ -123,7 +129,20 @@ func Parse(raw string) (l Link, warnings []string, err error) {
 	for _, k := range []string{"packetEncoding", "fm"} {
 		q.Del(k)
 	}
-	for k := range q {
+	// 3x-ui advertises this Mihomo capability on REALITY links. Xray
+	// negotiates the key exchange itself. A request to disable it is
+	// different: we cannot enforce that override.
+	if s.Security == "reality" && strings.EqualFold(q.Get("support-x25519mlkem768"), "true") {
+		q.Del("support-x25519mlkem768")
+	}
+	var unknown []string
+	for k, values := range q {
+		if slices.ContainsFunc(values, func(v string) bool { return strings.TrimSpace(v) != "" }) {
+			unknown = append(unknown, k)
+		}
+	}
+	slices.Sort(unknown)
+	for _, k := range unknown {
 		warnings = append(warnings, "ignored parameter "+k)
 	}
 	return l, warnings, s.Validate()

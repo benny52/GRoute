@@ -277,6 +277,10 @@ func (r *Result) hy2Link(l hy2uri.Link) {
 
 func (r *Result) xray(protocol, name string, raw json.RawMessage) {
 	r.protocol = protocol
+	if strings.EqualFold(protocol, "hysteria") {
+		r.xrayHysteria(name, raw)
+		return
+	}
 	if strings.ToLower(protocol) != "vless" {
 		if !service(protocol) {
 			r.other(protocol, name)

@@ -7,9 +7,49 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 )
+
+func TestPanelPlainSubscription(t *testing.T) {
+	awg := "[Interface]\r\nPrivateKey = artificial-secret\r\nJc = 4\r\n[Peer]\r\nPublicKey = example\r\n"
+	query := url.Values{
+		"type": {"xhttp"}, "mode": {"auto"}, "security": {"reality"}, "sni": {"tls.example"},
+		"pbk": {strings.Repeat("A", 43)}, "support-x25519mlkem768": {"true"},
+		"extra":           {`{"mode":"auto","xPaddingBytes":"100-1000","sessionIDKey":"demo","sessionKey":"demo"}`},
+		"x_padding_bytes": {"100-1000"}, "unusedEmpty": {""},
+	}
+	body := "vless://test@example.invalid:443?" + query.Encode() + "#XHTTP\nhy2://demo@example.invalid:443#H2\nvpn://" + base64.RawURLEncoding.EncodeToString([]byte(awg))
+	l, err := parseSubscription([]byte(base64.StdEncoding.EncodeToString([]byte(body))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := importReport(l)
+	if !l.Base64 || len(d.Profiles) != 2 || len(d.Duplicates) != 0 || len(d.Skipped) != 1 || d.Skipped[0].Protocol != "AmneziaWG" || len(d.Warnings) != 0 {
+		t.Fatalf("unexpected report: %+v", d)
+	}
+	p := l.Profiles[0].VLESS
+	if p.Mode != "auto" || !strings.Contains(p.Extra, `"xPaddingBytes":"100-1000"`) || !strings.Contains(p.Extra, `"sessionIDKey":"demo"`) {
+		t.Fatal("XHTTP settings lost")
+	}
+	// A plain WireGuard config or a marker hidden in a comment is inconclusive.
+	for _, other := range []string{strings.ReplaceAll(awg, "Jc = 4", "# Jc = 4"), "[Interface]\nJc = 1\n"} {
+		budget := maxSubBody
+		if amneziaWG("vpn://"+base64.RawURLEncoding.EncodeToString([]byte(other)), &budget) {
+			t.Fatal("false AWG detection")
+		}
+	}
+}
+
+func TestSubscriptionWarningsHaveSafeProfileContext(t *testing.T) {
+	input := "vless://test@one.invalid:443?type=httpupgrade&security=tls&allowInsecure=1&private-marker=value#httpupgrade\nvless://test@two.invalid:443?type=xhttp&security=tls&extra=" + url.QueryEscape(`{"downloadSettings":{"tlsSettings":{"masterKeyLog":"test-secret"}}}`) + "#Panel"
+	d := importReport(ParseLinks(input))
+	text := strings.Join(d.Warnings, "\n")
+	if len(d.Warnings) != 3 || !strings.Contains(text, "httpupgrade") || !strings.Contains(text, "masterKeyLog") || !strings.Contains(text, "Panel") || !strings.Contains(text, "сертификат") || strings.Contains(text, "Параметр up ") || strings.Contains(text, "private-marker") || strings.Contains(text, "test-secret") {
+		t.Fatal(text)
+	}
+}
 
 func TestSubscriptionDetailsSnapshot(t *testing.T) {
 	c, _ := newCtl(t)

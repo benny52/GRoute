@@ -6,6 +6,55 @@ import (
 	"sort"
 )
 
+// readPanelExtra folds the URI aliases emitted by 3x-ui into their
+// Xray fields before CleanExtra enforces the usual allowlist.
+func (s *Settings) readPanelExtra(padding string) (warnings []string) {
+	if padding == "" && s.Extra == "" {
+		return nil
+	}
+	fields := map[string]json.RawMessage{}
+	if s.Extra != "" {
+		if err := json.Unmarshal([]byte(s.Extra), &fields); err != nil || fields == nil {
+			return nil // Preserve the invalid input for Validate.
+		}
+	}
+	if v, ok := fields["mode"]; ok {
+		var mode string
+		if json.Unmarshal(v, &mode) == nil {
+			if s.Mode == "" {
+				s.Mode = mode
+			}
+			if mode != "" && s.Mode != mode {
+				warnings = append(warnings, "xhttp conflict: mode")
+			}
+			delete(fields, "mode")
+		}
+	}
+	if padding != "" {
+		if v, ok := fields["xPaddingBytes"]; ok {
+			var value string
+			if json.Unmarshal(v, &value) != nil || value != padding {
+				warnings = append(warnings, "xhttp conflict: xPaddingBytes")
+			}
+		} else {
+			fields["xPaddingBytes"], _ = json.Marshal(padding)
+		}
+	}
+	for _, pair := range [][2]string{{"sessionPlacement", "sessionIDPlacement"}, {"sessionKey", "sessionIDKey"}} {
+		if v, ok := fields[pair[0]]; ok {
+			if canonical, exists := fields[pair[1]]; !exists {
+				fields[pair[1]] = v
+			} else if string(v) != string(canonical) {
+				warnings = append(warnings, "xhttp conflict: "+pair[1])
+			}
+			delete(fields, pair[0])
+		}
+	}
+	b, _ := json.Marshal(fields)
+	s.Extra = string(b)
+	return warnings
+}
+
 // xhttp's "extra" is the rest of Xray's xhttpSettings (SplitHTTPConfig)
 // as a share link or a subscription carries it, and its downloadSettings
 // is a whole streamSettings. xray.exe runs with the administrator's
