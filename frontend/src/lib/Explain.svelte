@@ -20,6 +20,7 @@
 
   // svelte-ignore state_referenced_locally
   const init = initial;
+  let expanded = $state(!!init);
   let app = $state(init?.app ?? '');
   let target = $state(init?.target ?? '');
   // ports: one destination port (a connection has one) and the protocol.
@@ -28,6 +29,7 @@
   // A prefilled address stays masked in Privacy mode until the field is
   // focused (then it is the user's to see and edit).
   let revealed = $state(!init);
+  const masked = $derived(ui.privacy && !revealed);
 
   onMount(() => {
     if (init) run();
@@ -101,7 +103,7 @@
   }
 </script>
 
-<details class="card check" open={!!init}>
+<details class="card check" bind:open={expanded}>
   <summary
     ><Icon name="search" size={16} /> Проверить адрес <span class="muted small grow">— куда пойдёт сайт или программа и почему</span>{#if onclose}<button
         class="icon"
@@ -118,11 +120,9 @@
     протокол.
   </p>
   <div class="row">
-    {#if ui.privacy && !revealed}
-      <input class="grow site" readonly value={hide(target)} aria-label="Сайт или IP" onfocus={() => (revealed = true)} />
-    {:else}
-      <input class="grow site" placeholder="Сайт или IP: youtube.com, ссылка, 1.2.3.4" bind:value={target} onkeydown={(e) => e.key === 'Enter' && run()} />
-    {/if}
+    <input class="grow site" placeholder="Сайт или IP: youtube.com, ссылка, 1.2.3.4" aria-label="Сайт или IP"
+      readonly={masked} value={masked ? hide(target) : target} onfocus={() => (revealed = true)}
+      oninput={(e) => (target = e.currentTarget.value)} onkeydown={(e) => e.key === 'Enter' && run()} />
     <input class="grow prog" placeholder="Программа (необязательно): chrome" bind:value={app} onkeydown={(e) => e.key === 'Enter' && run()} />
     <input class="port" placeholder="Порт" inputmode="numeric" aria-label="Порт (необязательно)" bind:value={port} onkeydown={(e) => e.key === 'Enter' && run()} />
     <div class="seg" role="group" aria-label="Протокол">
