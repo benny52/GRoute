@@ -9,8 +9,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -36,6 +39,7 @@ type CheckResult struct {
 	Steps      []CheckStep `json:"steps"`
 	ExternalIP string      `json:"externalIP"`
 	LatencyMs  int64       `json:"latencyMs"`
+	ResponseMs *int64      `json:"responseMs,omitempty"`
 }
 
 // Check targets (variables for tests): IP-echo services over HTTPS, a
@@ -112,7 +116,7 @@ func (c *Controller) checkProfile(ctx context.Context, id string) (CheckResult, 
 	if err != nil {
 		step.Detail = err.Error()
 		res.Steps = append(res.Steps, step)
-		res.Steps = append(res.Steps, CheckStep{Name: "TCP через туннель", Skip: true, Detail: "пропущено"})
+		res.Steps = append(res.Steps, CheckStep{Name: "Открытие TCP до " + latencyTarget.String(), Skip: true, Detail: "пропущено"})
 		return res, nil
 	}
 	step.OK, step.Detail = true, "подключено"
@@ -126,7 +130,7 @@ func (c *Controller) checkProfile(ctx context.Context, id string) (CheckResult, 
 	t0 := time.Now()
 	conn, err := ep.Dial(dialCtx, latencyTarget)
 	cancel()
-	step = CheckStep{Name: "TCP через туннель", Ms: time.Since(t0).Milliseconds()}
+	step = CheckStep{Name: "Открытие TCP до " + latencyTarget.String(), Ms: time.Since(t0).Milliseconds()}
 	if err != nil {
 		step.Detail = "соединение через SOCKS5 не открылось: " + err.Error()
 		res.Steps = append(res.Steps, step)
@@ -134,11 +138,13 @@ func (c *Controller) checkProfile(ctx context.Context, id string) (CheckResult, 
 	}
 	conn.Close()
 	res.LatencyMs = step.Ms
-	step.OK, step.Detail = true, fmt.Sprintf("соединение открыто за %d мс (задержка до сервера и дальше до цели)", step.Ms)
+	step.OK, step.Detail = true, "Локальный SOCKS5 подтвердил запрос на соединение через выбранный профиль."
 	res.Steps = append(res.Steps, step)
 
 	t0 = time.Now()
-	ip, err := externalIP(ctx, ep)
+	client := checkHTTPClient(ctx, ep)
+	defer client.CloseIdleConnections()
+	ip, target, err := externalIP(ctx, client)
 	if ctx.Err() != nil {
 		return res, ctx.Err()
 	}
@@ -147,6 +153,22 @@ func (c *Controller) checkProfile(ctx context.Context, id string) (CheckResult, 
 		step.Detail = err.Error()
 	} else {
 		step.OK, step.Detail, res.ExternalIP = true, ip, ip
+	}
+	res.Steps = append(res.Steps, step)
+
+	step = CheckStep{Name: "Отклик после подключения", Skip: true, Detail: "Сервис внешнего IP недоступен."}
+	if target != nil {
+		ms, err := responseTime(ctx, client.Transport, target)
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
+		if err != nil {
+			step.Detail = fmt.Sprintf("Не удалось измерить отклик %s: %v", target.Host, err)
+		} else {
+			res.ResponseMs = &ms
+			step.OK, step.Skip, step.Ms = true, false, ms
+			step.Detail = fmt.Sprintf("Повторный запрос к %s. От готового соединения до заголовков ответа.", target.Host)
+		}
 	}
 	res.Steps = append(res.Steps, step)
 
@@ -229,7 +251,7 @@ func waitConnected(ctx context.Context, ep *tunnels.Endpoint, timeout time.Durat
 	}
 }
 
-func externalIP(ctx context.Context, ep *tunnels.Endpoint) (string, error) {
+func checkHTTPClient(ctx context.Context, ep *tunnels.Endpoint) *http.Client {
 	tr := &http.Transport{
 		DialContext: func(transportCtx context.Context, _, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
@@ -249,12 +271,14 @@ func externalIP(ctx context.Context, ep *tunnels.Endpoint) (string, error) {
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
-	defer tr.CloseIdleConnections()
-	cl := &http.Client{Transport: tr, Timeout: 12 * time.Second}
+	return &http.Client{Transport: tr, Timeout: 12 * time.Second}
+}
+
+func externalIP(ctx context.Context, cl *http.Client) (string, *url.URL, error) {
 	var last error
 	for _, u := range ipServices {
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return "", nil, err
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
@@ -270,11 +294,41 @@ func externalIP(ctx context.Context, ep *tunnels.Endpoint) (string, error) {
 		resp.Body.Close()
 		ip := strings.TrimSpace(string(b))
 		if _, err := netip.ParseAddr(ip); resp.StatusCode == 200 && err == nil {
-			return ip, nil
+			return ip, resp.Request.URL, nil
 		}
 		last = fmt.Errorf("%s ответил %s", u, resp.Status)
 	}
-	return "", fmt.Errorf("HTTPS через туннель не прошёл: %v", last)
+	return "", nil, fmt.Errorf("HTTPS через туннель не прошёл: %v", last)
+}
+
+// Reuse the IP service and its transport. If a server closed its idle
+// connection, GotConn starts the timer after the replacement's TLS handshake.
+func responseTime(parent context.Context, tr http.RoundTripper, target *url.URL) (int64, error) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	var start atomic.Pointer[time.Time]
+	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) {
+		now := time.Now()
+		start.Store(&now)
+	}}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodGet, target.String(), nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		return 0, err
+	}
+	end := time.Now()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	ready := start.Load()
+	if ready == nil {
+		return 0, errors.New("неизвестно время установки соединения")
+	}
+	return end.Sub(*ready).Milliseconds(), nil
 }
 
 func udpProbe(parent context.Context, ep *tunnels.Endpoint) error {

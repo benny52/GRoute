@@ -2,7 +2,7 @@
   // "Check profile": starts the profile's Hysteria (or uses the running
   // one) and tests TCP, the external IP, latency and UDP.
   import { onMount } from 'svelte';
-  import { api, errText, type CheckResult, type ProfileSummary } from '../api';
+  import { api, errText, formatResponseMs, type CheckResult, type ProfileSummary } from '../api';
   import { hide } from '../state.svelte';
 
   let { profile, onclose }: { profile: ProfileSummary; onclose: () => void } = $props();
@@ -29,7 +29,7 @@
 <div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && !running && onclose()}>
   <div class="dialog panel">
     <h2>Проверка профиля «{hide(profile.name)}»</h2>
-    <p>{#if profile.protocol === 'amneziawg'}AmneziaWG · локальный SOCKS5{:else}{profile.protocol === 'vless' ? 'VLESS' : 'Hysteria 2'} · {profile.engine}{/if}</p>
+    <p>{#if profile.protocol === 'amneziawg'}{profile.engine}{:else}{profile.protocol === 'vless' ? 'VLESS' : 'Hysteria 2'} · {profile.engine}{/if}</p>
     {#if running}
       <p class="muted">Проверяем соединение…</p>
     {/if}
@@ -38,7 +38,7 @@
       <div class="verdict" class:ok={res.ok}>
         {#if res.ok}Профиль работает{:else}Есть проблема{/if}
         {#if res.externalIP} · внешний IP {hide(res.externalIP)}{/if}
-        {#if res.latencyMs} · задержка {res.latencyMs} мс{/if}
+        {#if res.responseMs != null} · отклик {formatResponseMs(res.responseMs)}{/if}
       </div>
       <ul>
         {#each res.steps as s}

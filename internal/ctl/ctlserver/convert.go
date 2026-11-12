@@ -97,7 +97,7 @@ func groupsView(info app.GroupsInfo) ctl.GroupsView {
 }
 
 func checkView(r app.CheckResult) ctl.CheckView {
-	v := ctl.CheckView{Profile: r.Profile, OK: r.OK, ExternalIP: r.ExternalIP, LatencyMs: r.LatencyMs, Steps: []ctl.CheckStep{}}
+	v := ctl.CheckView{Profile: r.Profile, OK: r.OK, ExternalIP: r.ExternalIP, LatencyMs: r.LatencyMs, ResponseMs: r.ResponseMs, Steps: []ctl.CheckStep{}}
 	for _, s := range r.Steps {
 		v.Steps = append(v.Steps, ctl.CheckStep{Name: s.Name, OK: s.OK, Skip: s.Skip, Detail: s.Detail, Ms: s.Ms})
 	}

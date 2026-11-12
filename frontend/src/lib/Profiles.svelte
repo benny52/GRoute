@@ -191,88 +191,90 @@
   }
 </script>
 
-<div class="page-wrap">
-  <header class="row">
-    <div class="grow">
-      <h1>Серверы</h1>
-      {#if view === 'servers'}
-        <p class="muted sub">
-          Серверы Hysteria 2, VLESS и AmneziaWG. Работает только тот, который нужен правилам, и несколько могут работать одновременно. ★ — основной сервер.
-        </p>
-      {/if}
-    </div>
-    {#if view === 'servers'}
-      <button class="primary" onclick={() => (adding = !adding)}><Icon name="plus" size={16} />Добавить сервер</button>{/if}
-  </header>
+{#snippet tabs()}
   {#if ui.expert}
     <div class="seg tabs" role="tablist">
       <button role="tab" aria-selected={view === 'servers'} class:on={view === 'servers'} onclick={() => setTab('servers')}>Серверы</button>
       <button role="tab" aria-selected={view === 'groups'} class:on={view === 'groups'} onclick={() => setTab('groups')}>Группы</button>
     </div>
   {/if}
+{/snippet}
 
+<div class="page-wrap">
+  <header>
+    <div>
+      <h1>Серверы</h1>
+      {#if view === 'servers'}
+        <p class="muted sub">Серверы Hysteria 2, VLESS и AmneziaWG. Звёздочкой отмечен основной сервер.</p>
+      {/if}
+    </div>
+    {#if view === 'servers'}
+      <Help id="servers" title="Что здесь">
+        <p>
+          Здесь все серверы вашего VPN-сервиса. <b>Звёздочка</b> отмечает основной сервер, выбранный на главной.
+          Его используют правила с назначением «Основной сервер».
+        </p>
+        <ul>
+          <li><b>«Проверить»</b> покажет, работает ли сервер и сколько времени занимает ответ контрольного сервиса после подключения.</li>
+          <li>Новый сервер: «Добавить сервер» и вставьте ссылку <code>hysteria2://…</code> или <code>vless://…</code>. Для AmneziaWG откройте файл <code>.conf</code> или вставьте ссылку <code>vpn://…</code> или <code>amneziawg://…</code>. Ссылка подписки (<code>https://…</code>) добавляется на странице «Подписки».</li>
+          <li>Серверы из подписки обновляются сами, их не нужно добавлять заново.</li>
+        </ul>
+      </Help>
+    {/if}
+  </header>
   {#if view === 'groups'}
+    {@render tabs()}
     <Groups {onchange} />
   {:else}
-
-  <Help id="servers" title="Что здесь">
-    <p>
-      Здесь все серверы вашего VPN-сервиса. <b>Звёздочка</b> отмечает основной сервер, выбранный на главной.
-      Его используют правила с назначением «Основной сервер».
-    </p>
-    <ul>
-      <li><b>«Проверить»</b> покажет, работает ли сервер и насколько он быстрый (задержка: чем меньше, тем лучше).</li>
-      <li>Новый сервер: «Добавить сервер» и вставьте ссылку <code>hysteria2://…</code> или <code>vless://…</code>. Для AmneziaWG откройте файл <code>.conf</code> или вставьте ссылку <code>vpn://…</code> или <code>amneziawg://…</code>. Ссылка подписки (<code>https://…</code>) добавляется на странице «Подписки».</li>
-      <li>Серверы из подписки обновляются сами, их не нужно добавлять заново.</li>
-    </ul>
-  </Help>
-
-  {#if adding}
-    <section class="card">
-      <h2>Добавить сервер</h2>
-      <textarea rows="4" class:masked={ui.privacy} placeholder="Ссылки серверов по одной на строку или конфигурация AmneziaWG, Clash, sing-box, Xray" bind:value={text}></textarea>
-      <div class="row" style="margin-top: 10px">
-        <button class="primary" onclick={() => doImport(false)} disabled={!text.trim()}>Добавить</button>
-        <input hidden type="file" accept=".conf,text/plain" bind:this={confPicker} onchange={(e) => readConf(e.currentTarget)} />
-        <button onclick={() => confPicker?.click()}>Открыть .conf</button>
-        <button onclick={() => doImport(true)}><Icon name="clipboard" size={16} />Из буфера обмена</button>
-        <div class="grow"></div>
-        <button class="ghost" onclick={create}>Заполнить вручную</button>
-      </div>
-      <p class="muted small">Ссылка подписки (https://…) добавляется на странице «Подписки».</p>
-    </section>
-  {/if}
-
-  {#if result}
-    {#each result.warnings as w}<div class="note warn">{hide(w)}</div>{/each}
-    {#if result.skipped.length}
-      <div class="note info">
-        Не добавлены — такие серверы уже есть:
-        <ul class="skipped">{#each result.skipped as w}<li>{hide(w)}</li>{/each}</ul>
-      </div>
-    {/if}
-    {#each result.errors as w}<div class="note error">{hide(w)}</div>{/each}
-  {/if}
-  {#if error}<div class="note error">{hide(error)}</div>{/if}
-  {#if info}<div class="note ok">{hide(info)}</div>{/if}
-
-  {#if list.length === 0}
-    <div class="card empty">
-      <Icon name="server" size={28} />
-      <div><b>Серверов пока нет.</b><p class="muted">Нажмите «Добавить сервер» и вставьте ссылку от вашего VPN.</p></div>
-    </div>
-  {/if}
-
   <div class="list">
-    <div class="batch-row">
-      {#if batch.cancelled}<span class="batch-note small muted" role="status">Проверка отменена · проверено {batch.done} из {batch.total}</span>{/if}
-      {#if batch.error}<span class="batch-note note error" role="alert">{hide(batch.error)}</span>{/if}
+    <div class="toolbar">
+      {@render tabs()}
       <button class="primary check-button" disabled={batch.running ? batch.stopping || batch.done === batch.total : !list.length || !!checking}
         onclick={() => batch.running ? cancelBatch() : checkAll(list.map(p => p.id))}>
         <Icon name={batch.running ? 'x' : 'zap'} size={16} />
         {batch.running ? (batch.stopping ? 'Отмена…' : `Отменить проверку · ${batch.done} из ${batch.total}`) : 'Проверить все серверы'}
       </button>
+      <button class="primary add-button" aria-expanded={adding} onclick={() => (adding = !adding)}><Icon name="plus" size={16} />Добавить сервер</button>
     </div>
+    {#if batch.cancelled}<span class="small muted" role="status">Проверка отменена · проверено {batch.done} из {batch.total}</span>{/if}
+    {#if batch.error}<div class="note error" role="alert">{hide(batch.error)}</div>{/if}
+
+    {#if adding}
+      <section class="card">
+        <h2>Добавить сервер</h2>
+        <textarea rows="4" class:masked={ui.privacy} placeholder="Ссылки серверов по одной на строку или конфигурация AmneziaWG, Clash, sing-box, Xray" bind:value={text}></textarea>
+        <div class="row" style="margin-top: 10px">
+          <button class="primary" onclick={() => doImport(false)} disabled={!text.trim()}>Добавить</button>
+          <input hidden type="file" accept=".conf,text/plain" bind:this={confPicker} onchange={(e) => readConf(e.currentTarget)} />
+          <button onclick={() => confPicker?.click()}>Открыть .conf</button>
+          <button onclick={() => doImport(true)}><Icon name="clipboard" size={16} />Из буфера обмена</button>
+          <div class="grow"></div>
+          <button class="ghost" onclick={create}>Заполнить вручную</button>
+        </div>
+        <p class="muted small">Ссылка подписки (https://…) добавляется на странице «Подписки».</p>
+      </section>
+    {/if}
+
+    {#if result}
+      {#each result.warnings as w}<div class="note warn">{hide(w)}</div>{/each}
+      {#if result.skipped.length}
+        <div class="note info">
+          Не добавлены — такие серверы уже есть:
+          <ul class="skipped">{#each result.skipped as w}<li>{hide(w)}</li>{/each}</ul>
+        </div>
+      {/if}
+      {#each result.errors as w}<div class="note error">{hide(w)}</div>{/each}
+    {/if}
+    {#if error}<div class="note error">{hide(error)}</div>{/if}
+    {#if info}<div class="note ok">{hide(info)}</div>{/if}
+
+    {#if list.length === 0}
+      <div class="card empty">
+        <Icon name="server" size={28} />
+        <div><b>Серверов пока нет.</b><p class="muted">Нажмите «Добавить сервер» и вставьте ссылку от вашего VPN.</p></div>
+      </div>
+    {/if}
+
     {#each list as p, i (p.id)}
       {@const t = tunnel(p.id)}
       <div class="srv card" class:main={p.main} class:missing={p.missing}>
@@ -370,13 +372,16 @@
 <style>
   .page-wrap { display: grid; gap: 16px; min-width: 0; container-type: inline-size; }
   .tabs { justify-self: start; }
-  header { align-items: flex-start; }
+  header { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 8px 12px; }
+  header :global(.help) { grid-column: 1 / -1; }
   .sub { margin: 4px 0 0; }
   textarea { width: 100%; }
   .list { display: grid; grid-template-columns: auto minmax(0,1fr) auto auto auto auto; gap: 8px 12px; }
-  .batch-row, .srv { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
-  .batch-row { padding-inline: 15px; }
-  .batch-note { grid-column: 1 / 5; }
+  .list > * { grid-column: 1 / -1; }
+  .toolbar, .srv { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; }
+  .toolbar { padding-inline: 15px; }
+  .toolbar .tabs { grid-column: 1 / 5; }
+  .add-button { grid-column: 6; justify-self: end; }
   .srv { padding: 12px 14px; }
   .srv .star { grid-column: 1; }
   .srv .info { grid-column: 2; }
@@ -401,7 +406,8 @@
   .usage { flex: none; }
   .info { min-width: 0; }
   @container (max-width: 840px) {
-    .batch-note { grid-column: 1; }
+    .toolbar .tabs { grid-column: 1; }
+    .add-button { grid-column: 3; }
     .list { grid-template-columns: minmax(0,1fr) auto auto; }
     .check-button { grid-column: 2; }
     .srv .check-button { grid-row: 3; }
@@ -411,6 +417,10 @@
     .srv .state { grid-area: 2 / 1 / 3 / -1; }
     .srv .usage { grid-area: 3 / 1; justify-self: end; }
     .srv .acts { grid-area: 3 / 3; justify-content: flex-end; }
+  }
+  @container (max-width: 540px) {
+    .toolbar .tabs { grid-column: 1 / -1; }
+    .toolbar { row-gap: 8px; }
   }
   .empty { display: flex; gap: 16px; align-items: center; color: var(--muted); }
   .own { display: flex; gap: 14px; align-items: center; color: var(--muted); }

@@ -615,7 +615,10 @@ func formatCheck(b *strings.Builder, v ctl.CheckView) {
 		b.WriteString("Внешний IP: " + v.ExternalIP + "\n")
 	}
 	if v.LatencyMs > 0 {
-		fmt.Fprintf(b, "Задержка: %d мс\n", v.LatencyMs)
+		fmt.Fprintf(b, "Открытие TCP: %d мс\n", v.LatencyMs)
+	}
+	if v.ResponseMs != nil {
+		fmt.Fprintf(b, "Отклик после подключения: %d мс\n", *v.ResponseMs)
 	}
 }
 

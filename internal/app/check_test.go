@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -94,13 +96,25 @@ func TestCancelBatchReleasesPendingCheck(t *testing.T) {
 }
 
 func TestCancelBatchHTTPKeepsSharedRunner(t *testing.T) {
+	t.Run("determining external IP", func(t *testing.T) { cancelDuringProfileHTTP(t, true) })
+	t.Run("measuring response", func(t *testing.T) { cancelDuringProfileHTTP(t, false) })
+}
+
+func cancelDuringProfileHTTP(t *testing.T, cancelOnFirstRequest bool) {
 	proxy := &socks5.Server{}
 	if err := proxy.Listen("127.0.0.1:0"); err != nil {
 		t.Fatal(err)
 	}
 	defer proxy.Close()
 	requested, releaseHTTP := make(chan struct{}), make(chan struct{})
+	var firstRequest sync.Once
 	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		reply := false
+		firstRequest.Do(func() { reply = !cancelOnFirstRequest })
+		if reply {
+			w.Write([]byte("203.0.113.7\n"))
+			return
+		}
 		close(requested)
 		select {
 		case <-req.Context().Done():
@@ -157,7 +171,14 @@ func TestCheckProfileStandalone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stub.Close()
-	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("203.0.113.7\n")) }))
+	var calls []string
+	var mu sync.Mutex
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		calls = append(calls, req.RemoteAddr)
+		mu.Unlock()
+		w.Write([]byte("203.0.113.7\n"))
+	}))
 	defer web.Close()
 	dns, _ := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	defer dns.Close()
@@ -191,12 +212,82 @@ func TestCheckProfileStandalone(t *testing.T) {
 	}
 	res, _ := c.ImportURIs(link)
 	out, err := c.CheckProfile(res.Added[0].ID)
-	if err != nil || !out.OK || out.ExternalIP != "203.0.113.7" || len(out.Steps) != 4 {
+	if err != nil || !out.OK || out.ExternalIP != "203.0.113.7" || out.ResponseMs == nil || len(out.Steps) != 5 {
 		t.Fatalf("%+v %v", out, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 2 || calls[0] != calls[1] {
+		t.Fatalf("expected a second HTTP request on the established connection, got %v", calls)
 	}
 	if len(runners) != 1 || runners[0].up {
 		t.Fatal("temporary Hysteria must be stopped after the check")
 	}
+}
+
+func TestResponseTimeAfterTLS(t *testing.T) {
+	const handshakeDelay = 150 * time.Millisecond
+	const serviceDelay = 25 * time.Millisecond
+	web := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		time.Sleep(serviceDelay)
+		w.WriteHeader(http.StatusOK)
+	}))
+	web.TLS = &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		time.Sleep(handshakeDelay)
+		return nil, nil
+	}}
+	web.StartTLS()
+	defer web.Close()
+	target, err := url.Parse(web.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	ms, err := responseTime(context.Background(), web.Client().Transport, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ms < serviceDelay.Milliseconds() || time.Since(start).Milliseconds()-ms < handshakeDelay.Milliseconds() {
+		t.Fatalf("measured %d ms out of %v including TLS setup", ms, time.Since(start))
+	}
+}
+
+func TestCheckWithoutResponseSample(t *testing.T) {
+	stub := &socks5.Server{}
+	if err := stub.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	defer stub.Close()
+	var first sync.Once
+	web := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		reply := false
+		first.Do(func() { reply = true })
+		if reply {
+			w.Write([]byte("203.0.113.7\n"))
+			return
+		}
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer web.Close()
+	oldIP, oldTCP := ipServices, latencyTarget
+	defer func() { ipServices, latencyTarget = oldIP, oldTCP }()
+	ipServices = []string{web.URL}
+	latencyTarget = socks5.AddrFromAddrPort(web.Listener.Addr().(*net.TCPAddr).AddrPort())
+	c, _ := newCtl(t)
+	c.Runners = func(hysteria.Profile, tunnels.Hooks) tunnels.Runner {
+		return &stubRunner{c: socks5.Client{Server: stub.Addr()}, noUDP: true}
+	}
+	added, _ := c.ImportURIs(link)
+	result, err := c.CheckProfile(added.Added[0].ID)
+	if err != nil || !result.OK || result.ResponseMs != nil || result.ExternalIP != "203.0.113.7" {
+		t.Fatalf("unavailable sample changed verdict: %+v %v", result, err)
+	}
+	for _, step := range result.Steps {
+		if step.Skip && strings.Contains(step.Detail, "429") {
+			return
+		}
+	}
+	t.Fatal("missing reason for unavailable response time")
 }
 
 func TestDiagnosticsRedacts(t *testing.T) {

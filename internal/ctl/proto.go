@@ -288,6 +288,7 @@ type CheckView struct {
 	Steps      []CheckStep `json:"steps"`
 	ExternalIP string      `json:"externalIP"`
 	LatencyMs  int64       `json:"latencyMs"`
+	ResponseMs *int64      `json:"responseMs,omitempty"`
 }
 
 type RulesetLine struct {

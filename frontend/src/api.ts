@@ -490,7 +490,12 @@ export interface CheckResult {
   ok: boolean;
   steps: CheckStep[];
   externalIP: string;
-  latencyMs: number;
+  latencyMs: number; // Время открытия TCP через движок.
+  responseMs?: number; // Отклик контрольного сервиса после подключения.
+}
+
+export function formatResponseMs(ms: number): string {
+  return ms === 0 ? '<1 мс' : `${ms} мс`;
 }
 
 export interface AppUpdate {

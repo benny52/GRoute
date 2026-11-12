@@ -93,7 +93,8 @@ func TestFormatLists(t *testing.T) {
 	out, _ = runOut(t, groups, "groups")
 	golden(t, "groups", out)
 
-	check := ctl.CheckView{Profile: "a", OK: false, ExternalIP: "198.51.100.4", LatencyMs: 120, Steps: []ctl.CheckStep{
+	responseMs := int64(0)
+	check := ctl.CheckView{Profile: "a", OK: false, ExternalIP: "198.51.100.4", LatencyMs: 120, ResponseMs: &responseMs, Steps: []ctl.CheckStep{
 		{Name: "TCP через сервер", OK: true, Detail: "соединение есть", Ms: 820}, {Name: "UDP", Detail: "нет ответа"}, {Name: "IPv6", Skip: true}}}
 	out, code := runOut(t, check, "check", "DE")
 	golden(t, "check", out)

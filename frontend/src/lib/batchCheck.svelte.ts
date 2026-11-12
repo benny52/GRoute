@@ -1,4 +1,4 @@
-import { api, errText } from '../api';
+import { api, errText, formatResponseMs } from '../api';
 
 export const batch = $state({
   running: false, done: 0, total: 0, current: '',
@@ -42,7 +42,7 @@ export async function checkAll(ids: string[]) {
         const failed = result.steps?.find(step => !step.ok && !step.skip);
         const detail = failed?.detail || failed?.name || 'соединение не прошло проверку';
         batch.results[id] = { ok: result.ok, label: result.ok
-          ? 'Работает' + (result.latencyMs ? ' · ' + result.latencyMs + ' мс' : '')
+          ? 'Работает' + (result.responseMs != null ? ' · отклик ' + formatResponseMs(result.responseMs) : '')
           : 'Ошибка: ' + detail };
       } catch (error) {
         if (batch.stopping) break;

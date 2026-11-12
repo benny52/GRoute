@@ -9,6 +9,7 @@
     plural,
     isGroupId,
     optionsOf,
+    formatResponseMs,
     type CheckResult,
     type Settings,
     type SystemInfo,
@@ -207,12 +208,6 @@
   $effect(() => {
     if (step === 'check' && checkId && !checkUnloaded && checkedId !== checkId) runCheck(checkId);
   });
-
-  function speed(ms: number): string {
-    if (ms < 80) return 'отлично';
-    if (ms < 200) return 'хорошо';
-    return 'сервер далеко, сайты будут открываться чуть медленнее';
-  }
 
   const failed = $derived(check?.steps.find((s) => !s.ok && !s.skip));
 
@@ -491,7 +486,8 @@
           <div>
             <b>Сервер работает</b>
             {#if check.externalIP}<p>При проверке через этот сервер сайт увидел адрес {hide(check.externalIP)}.</p>{/if}
-            {#if check.latencyMs}<p>Задержка {check.latencyMs} мс — {speed(check.latencyMs)}.</p>{/if}
+            {#if check.latencyMs}<p>Открытие TCP через туннель — {check.latencyMs} мс.</p>{/if}
+            {#if check.responseMs != null}<p>Отклик после подключения — {formatResponseMs(check.responseMs)}.</p>{/if}
           </div>
         </div>
       {:else if check}
