@@ -436,6 +436,7 @@ export interface LogEntry {
 }
 
 export interface SystemInfo {
+  canRestartAsAdmin?: boolean;
   build: string;
   dataDir: string;
   programDir: string;
@@ -687,6 +688,7 @@ interface GUI {
   SkipAppVersion(v: string): Promise<void>;
   StartupNotice(): Promise<string>;
   System(): Promise<SystemInfo>;
+  RestartAsAdmin(): Promise<void>;
   // macos: "windows" or "macos".
   Platform(): Promise<string>;
   RemoveFirewallRule(): Promise<void>;

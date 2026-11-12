@@ -293,6 +293,7 @@ func macVersion() string {
 func (g *GUI) RemoveFirewallRule() error       { return errMac }
 func (g *GUI) DeleteStaleDriverService() error { return errMac }
 func (g *GUI) MoveToProgramFiles() error       { return errMac }
+func (g *GUI) RestartAsAdmin() error           { return errMac }
 func (g *GUI) OpenServerPanel() error {
 	return errors.New("панель серверов (hyroute-server) запускается на Windows или Linux")
 }

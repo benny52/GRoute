@@ -56,7 +56,7 @@ func main() {
 	updFrom := flag.String("updated-from", "", "set by hyroute-updater: version replaced")
 	updFailed := flag.String("update-failed", "", "set by hyroute-updater: the update to this version failed")
 	updError := flag.String("update-error", "", "set by hyroute-updater: why")
-	waitPID := flag.Uint("wait-pid", 0, "wait for this process to exit first (move to Program Files)")
+	waitPID := flag.Uint("wait-pid", 0, "wait for the previous instance to exit before restarting")
 	movedFrom := flag.String("moved-from", "", "set after a move to Program Files: the old folder")
 	reconnect := flag.Bool("reconnect", false, "set by hyroute-updater (then report healthy) and after a move to Program Files: connect again")
 	atLogon := flag.Bool("autostart", false, "set by the sign-in task: start minimized")
@@ -81,7 +81,7 @@ func main() {
 	// Started at sign-in by the kill switch check: without a block to show
 	// HyRoute ends here, before anything with an effect (the instance
 	// claim would bring a running copy's window up).
-	if portable && (*ksCheck || *atLogon || *updEvent != "" || *updFrom != "" || *updFailed != "" || *movedFrom != "" || *waitPID != 0 || *reconnect) {
+	if portable && (*ksCheck || *atLogon || *updEvent != "" || *updFrom != "" || *updFailed != "" || *movedFrom != "" || (*waitPID != 0 && !elevated) || *reconnect) {
 		// Neither HyRoute's scheduled tasks nor its updater are entry
 		// points to the portable client. Never apply a restore on startup.
 		return
@@ -89,9 +89,8 @@ func main() {
 	if !signInCheck(*ksCheck, killswitch.Leftover) {
 		os.Exit(0)
 	}
-	// After a move the old copy may take long to disconnect: it must be
-	// gone first, or the check below would hand over to it and HyRoute
-	// would end with it.
+	// The previous process must release the instance mutex before a move
+	// or UAC restart, otherwise this one would only show its predecessor.
 	if *waitPID != 0 {
 		waitProcess(uint32(*waitPID))
 	}
@@ -194,7 +193,7 @@ func main() {
 	hysteria.CleanRunDir(filepath.Join(dataDir, "run"), time.Minute)
 	ctl := app.New(st, func(cfg session.Config) (app.Session, error) {
 		if portable && !elevated {
-			return nil, errors.New("для подключения закройте GRoute через «Выход» в трее и запустите GRoute.exe от имени администратора")
+			return nil, errors.New("для подключения нужны права администратора. Нажмите «Перезапустить от имени администратора» на главной")
 		}
 		// The staged copies run with admin rights, and HyRoute may run for
 		// weeks after Stage checked them: each session checks them again.
@@ -636,7 +635,7 @@ func stageRuntime(src, runtimeDir string, files []runtimefiles.File, get runtime
 	return own, res2, nil
 }
 
-// waitProcess waits for a process to exit (the old copy after a move).
+// waitProcess waits for a process to exit (the old copy after a move or UAC).
 // Stopping routing may take minutes (local proxies wait for their
 // connections) and the old copy exits in any case, so there is no limit:
 // starting while it still runs would end with it.

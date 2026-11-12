@@ -4,6 +4,7 @@
   import { ui, hide, settle, hideUserPath, mainTarget, profileName } from '../state.svelte';
   import { startRestore } from '../state.svelte'; // backup
   import Icon from './Icon.svelte';
+  import RestartAsAdmin from './RestartAsAdmin.svelte';
   import CheckProfile from './CheckProfile.svelte';
   import Help from './Help.svelte';
   import TargetOptions from './TargetOptions.svelte';
@@ -304,7 +305,7 @@
 
 <div class="home">
   <section class="hero card tone-{tone}">
-    <button class="power" onclick={toggle} disabled={busy || st?.state === 'starting' || (!online && ui.profiles.length === 0)} title={online ? 'Отключить' : 'Подключить'}>
+    <button class="power" onclick={toggle} disabled={busy || st?.state === 'starting' || (!online && (ui.profiles.length === 0 || sys?.canRestartAsAdmin))} title={online ? 'Отключить' : sys?.canRestartAsAdmin ? 'Для подключения нужны права администратора' : 'Подключить'}>
       <Icon name="power" size={38} stroke={2.2} />
     </button>
     <div class="grow">
@@ -320,6 +321,10 @@
       {/if}
       {#if online && since > 0}<p class="faint small">Работает {fmtDuration(since * 1e6)}{st?.killSwitch === 'armed' ? ' · kill switch включён' : ''}</p>{/if}
       {#if error}<div class="note error">{hide(error)}</div>{/if}
+      {#if !online && sys?.canRestartAsAdmin && ui.profiles.length}
+        <p>Для подключения VPN нужны права администратора. После перезапуска нажмите «Подключить».</p>
+        <RestartAsAdmin />
+      {/if}
     </div>
   </section>
 

@@ -351,14 +351,15 @@ func (g *GUI) DownloadAppUpdate() error { return g.ctl.DownloadAppUpdate() }
 func (g *GUI) SkipAppVersion(v string) error { return g.ctl.SkipAppVersion(v) }
 
 type SystemInfo struct {
-	Build        string   `json:"build"`
-	DataDir      string   `json:"dataDir"`
-	ProgramDir   string   `json:"programDir"`
-	FirewallRule string   `json:"firewallRule"`
-	Driver       string   `json:"driver"`
-	DriverStale  bool     `json:"driverStale"`
-	Legacy       []string `json:"legacy"`
-	Missing      []string `json:"missing"`
+	CanRestartAsAdmin bool     `json:"canRestartAsAdmin,omitempty"`
+	Build             string   `json:"build"`
+	DataDir           string   `json:"dataDir"`
+	ProgramDir        string   `json:"programDir"`
+	FirewallRule      string   `json:"firewallRule"`
+	Driver            string   `json:"driver"`
+	DriverStale       bool     `json:"driverStale"`
+	Legacy            []string `json:"legacy"`
+	Missing           []string `json:"missing"`
 	// FirewallRuleOK: the rule exists.
 	FirewallRuleOK bool   `json:"firewallRuleOK"`
 	Hysteria       string `json:"hysteria"` // core version

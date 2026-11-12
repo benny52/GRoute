@@ -22,6 +22,7 @@
   // elsewhere meanwhile.
   import { ui, hide, hideUserPath, serverLabel, mainTarget, mainText, profileName, setupStep, setSetupStep, finishSetup } from '../state.svelte';
   import Icon from './Icon.svelte';
+  import RestartAsAdmin from './RestartAsAdmin.svelte';
   import TargetOptions from './TargetOptions.svelte';
   import RouteWizard from './RouteWizard.svelte';
 
@@ -585,7 +586,7 @@
         <div><span class="muted">Через VPN</span><b>{modeTitle}</b></div>
         {#if auto && !ui.mac}<div><span class="muted">Запуск с Windows</span><b>{wantAutostart && auto.allowed ? 'да' : 'нет'}</b></div>{/if}
       </div>
-      <p class="lead">Осталось включить VPN. Потом включать и выключать его можно большой кнопкой на главной странице.</p>
+      <p class="lead">{sys?.canRestartAsAdmin ? 'Для подключения VPN нужны права администратора. Перезапустите GRoute кнопкой внизу и затем включите VPN.' : 'Осталось включить VPN. Потом включать и выключать его можно большой кнопкой на главной странице.'}</p>
       {#if wantBrowser && ext?.installed}
         <div class="box">
           <Icon name="globe" size={20} />
@@ -642,7 +643,11 @@
       <button class="primary big" onclick={applyLaunch} disabled={busy || !auto}>{busy ? 'Сохраняю…' : 'Дальше'}<Icon name="arrow" size={16} /></button>
     {:else if step === 'done'}
       <button class="ghost" onclick={later} disabled={busy}>Закрыть, подключусь потом</button>
-      <button class="primary big" onclick={connect} disabled={busy || ui.profiles.length === 0}><Icon name="power" size={18} />{busy ? 'Подключаюсь…' : 'Включить VPN'}</button>
+      {#if sys?.canRestartAsAdmin}
+        <RestartAsAdmin />
+      {:else}
+        <button class="primary big" onclick={connect} disabled={busy || ui.profiles.length === 0}><Icon name="power" size={18} />{busy ? 'Подключаюсь…' : 'Включить VPN'}</button>
+      {/if}
     {/if}
   </div>
   {/if}

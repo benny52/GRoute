@@ -214,17 +214,8 @@
     ...(base === 'all' ? [{ key: 'rest', title: 'Весь остальной интернет', rules: [] }] : []),
   ]);
 
-  // New items start with the wizard's single suggested spare. Once
-  // edited, their literal assignments survive changes to the main server.
   function reserveOf(key: string): string[] {
-    const profile = server[key] ?? '';
-    if (fallbacks[key]) return cleanFallback(fallbacks[key], profile);
-    const available = [...ui.profiles, ...ui.groups];
-    const saved = settings?.defaultAction === 'tunnel' ? settings.defaultFallback ?? [] : undefined;
-    if (saved?.length === 0) return [];
-    const spare = saved?.find((id) => id !== main?.id && available.some((p) => p.id === id))
-      ?? available.find((p) => p.id !== main?.id)?.id;
-    return spare ? cleanFallback([profile === spare ? '' : spare], profile) : [];
+    return cleanFallback(fallbacks[key], server[key]);
   }
 
   function built(): Rule[] {
@@ -512,7 +503,7 @@
       <p class="lead">
         Основной сервер выбирается на главной. Оставьте «Основной сервер», и правило будет следовать этому выбору.
         Чтобы закрепить приоритетный сервер за правилом, выберите его по имени.
-        Запасные серверы подключаются заранее. Если приоритетный сервер недоступен, новое соединение пойдёт через первый доступный запасной.
+        Запасные серверы можно добавить по желанию. Они подключатся заранее. Если приоритетный сервер недоступен, новое соединение пойдёт через первый доступный запасной в списке.
       </p>
       {#if vpnGroups.length}
         <div class="items">

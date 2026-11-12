@@ -347,7 +347,7 @@
   {/snippet}
 
   {#if view && !view.available}
-    <div class="note info">Обход DPI (zapret2) пока работает только на Windows.</div>
+    <div class="note info">{ui.portable ? 'В этой версии GRoute Portable компонент обхода DPI (zapret2) не входит в поставку. Перенос программы в Program Files или запуск от имени администратора его не включает.' : 'Обход DPI (zapret2) пока работает только на Windows.'}</div>
     {@render telegramCard(view)}
   {:else if view}
     {#if view.loadError}<div class="note error">{view.loadError}</div>{/if}

@@ -51,11 +51,12 @@ type GUI struct {
 	// (window.ready) and, with --reconnect, the filters are in place again.
 	uiUp, connUp atomic.Bool
 
-	tray     trayState
-	quitting atomic.Bool // a real exit: the close button no longer hides
-	updating atomic.Bool // ApplyAppUpdate started the updater: HyRoute is exiting
-	quitOnce sync.Once
-	quitCh   chan struct{} // closed by quit: main ends HyRoute
+	tray              trayState
+	quitting          atomic.Bool // a real exit: the close button no longer hides
+	restartingAsAdmin atomic.Bool // only one UAC prompt may be active
+	updating          atomic.Bool // ApplyAppUpdate started the updater: HyRoute is exiting
+	quitOnce          sync.Once
+	quitCh            chan struct{} // closed by quit: main ends HyRoute
 
 	cli *cliState // cli: the control pipe (ctl_windows.go)
 }
@@ -311,6 +312,7 @@ func (g *GUI) ApplyAppUpdate() error {
 func (g *GUI) System() SystemInfo {
 	info := SystemInfo{Build: build, DataDir: g.dataDir, ProgramDir: g.dllDir, FirewallRule: fwrule.Name, Legacy: []string{}, Missing: []string{},
 		ProtectedLocation: protectedLocation(g.dllDir), RuntimeDir: g.runtimeDir, MoveTarget: moveTarget()}
+	info.CanRestartAsAdmin = canRestartAsAdmin()
 	for _, f := range runtimeFilesList {
 		if _, err := os.Stat(filepath.Join(g.runtimeDir, f)); err != nil {
 			info.Missing = append(info.Missing, f)
