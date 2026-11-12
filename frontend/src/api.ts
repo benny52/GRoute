@@ -106,6 +106,7 @@ export interface ProfileSummary {
   insecure: boolean;
   pinned: boolean;
   protocol: string; // hysteria2 | vless
+  engine: string;
   transport: string; // VLESS: "REALITY", "WS · TLS" …
   flow: string; // VLESS flow, '' none
   main: boolean;
@@ -582,7 +583,23 @@ export interface SubProxiesInput {
   password: string;
 }
 
+export interface SubEntry {
+  name: string;
+  protocol: string;
+  reason?: string;
+  count?: number;
+}
+
+export interface SubReport {
+  profiles: SubEntry[] | null;
+  skipped: SubEntry[] | null;
+  duplicates: SubEntry[] | null;
+  warnings: string[] | null;
+  partial?: boolean;
+}
+
 export interface SubPreview {
+  report: SubReport;
   token: string;
   title: string;
   count: number;
@@ -679,6 +696,7 @@ interface GUI {
   MoveToProgramFiles(): Promise<void>;
   CopyText(text: string): Promise<void>;
   Subscriptions(): Promise<Subscription[]>;
+  SubscriptionDetails(id: string): Promise<SubReport>;
   PreviewSubscription(url: string): Promise<SubPreview>;
   AddSubscription(i: SubInput): Promise<Subscription>;
   EditSubscription(i: SubInput): Promise<void>;

@@ -237,6 +237,15 @@
     );
   }
 
+  function assignToAll(key: string) {
+    const primary = server[key] ?? '';
+    const reserves = reserveOf(key);
+    for (const group of vpnGroups) {
+      server[group.key] = primary;
+      fallbacks[group.key] = [...reserves];
+    }
+  }
+
   const restAction: Action = $derived(base === 'all' ? 'tunnel' : 'direct');
 
   function serverName(id: string): string {
@@ -351,7 +360,7 @@
     {#if step === 'intro'}
       <h1>Настроим, что пускать через VPN</h1>
       <p class="lead">
-        Каждое соединение с интернетом — сайт в браузере, сообщение в Telegram, игра — HyRoute отправляет одним из трёх путей. Какой путь у чего,
+        Каждое соединение с интернетом — сайт в браузере, сообщение в Telegram, игра — GRoute отправляет одним из трёх путей. Какой путь у чего,
         выбираете вы: сейчас по шагам соберём это в правила.
       </p>
       <div class="ways">
@@ -398,7 +407,7 @@
         <h1>Что оставить напрямую?</h1>
         <p class="lead">
           Некоторые сайты не работают или работают хуже, когда видят зарубежный адрес сервера. Отметьте, что пускать мимо VPN. Списки сайтов
-          HyRoute скачает сам и будет обновлять.
+          GRoute скачает сам и будет обновлять.
         </p>
       {:else}
         <h1>Какие сервисы пустить через VPN?</h1>
@@ -422,7 +431,7 @@
         {/if}
       {/each}
       <p class="muted small">
-        Домашняя сеть (роутер, принтер, NAS) всегда идёт напрямую, это HyRoute добавит сам.{base === 'only'
+        Домашняя сеть (роутер, принтер, NAS) всегда идёт напрямую, это GRoute добавит сам.{base === 'only'
           ? ' Нужного сервиса нет? Его можно добавить на шаге «Сайты» — там есть поиск по готовым спискам.'
           : ''}
       </p>
@@ -456,7 +465,7 @@
     {:else if step === 'sites'}
       <h1>{base === 'all' ? 'Пустить какие-то сайты мимо VPN?' : 'Пустить через VPN отдельные сайты?'}</h1>
       <p class="lead">
-        Впишите адрес сайта, например <code>example.com</code>, или вставьте ссылку прямо из браузера — HyRoute возьмёт из неё адрес. Правило
+        Впишите адрес сайта, например <code>example.com</code>, или вставьте ссылку прямо из браузера — GRoute возьмёт из неё адрес. Правило
         сработает для сайта и всех его поддоменов (www., m., api.) в любой программе.
       </p>
       <div class="row">
@@ -521,6 +530,9 @@
                 </select>
               </label>
               <FallbackPicker primary={server[g.key] ?? ''} value={reserveOf(g.key)} onchange={(v) => (fallbacks[g.key] = v)} />
+              {#if vpnGroups.length > 1}
+                <button class="copy-servers" onclick={() => assignToAll(g.key)}>Назначить эти серверы всем разделам VPN</button>
+              {/if}
             </div>
           {/each}
         </div>
@@ -530,7 +542,7 @@
     {:else if step === 'sum'}
       <h1>Проверим, что получилось</h1>
       <p class="lead">
-        Вот правила, которые мы собрали. HyRoute проверяет их сверху вниз и берёт первое подходящее, поэтому ваши сайты и программы стоят выше
+        Вот правила, которые мы собрали. GRoute проверяет их сверху вниз и берёт первое подходящее, поэтому ваши сайты и программы стоят выше
         готовых списков.
       </p>
       <ol class="rules">
@@ -649,6 +661,7 @@
   .item select { max-width: 280px; }
 
   .route-servers { display: grid; gap: 8px; }
+  .copy-servers { justify-self: start; }
   .route-servers label { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); }
 
   .rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, errText, fmtBytes, fmtDuration, cleanSettings, strategyLabel, plural, type GroupView, type RulesetsView, type Settings, type SystemInfo, type TunnelStatus, type TunnelReason } from '../api';
+  import { api, errText, fmtBytes, fmtDuration, cleanSettings, strategyLabel, plural, type ProfileSummary, type GroupView, type RulesetsView, type Settings, type SystemInfo, type TunnelStatus, type TunnelReason } from '../api';
   import { ui, hide, settle, hideUserPath, mainTarget, profileName } from '../state.svelte';
   import { startRestore } from '../state.svelte'; // backup
   import Icon from './Icon.svelte';
@@ -18,7 +18,7 @@
   let settings = $state<Settings | null>(null);
   let busy = $state(false);
   let error = $state('');
-  let checking = $state(false);
+  let checking = $state<ProfileSummary | null>(null);
 
   async function loadSettings() {
     try {
@@ -110,6 +110,8 @@
   const st = $derived(ui.status);
   const online = $derived(st != null && st.state !== 'disconnected' && !(st.state === 'error' && !st.stats));
   const main = $derived(mainTarget());
+  const mainProfile = $derived(ui.profiles.find((p) => p.id === main?.id));
+  const mainTunnel = $derived(mainProfile && st?.tunnels?.find((t) => t.id === mainProfile.id));
   const waitingForMain = $derived(!main && ui.profiles.length === 0 && st?.warnings?.some((w) => w.kind === 'no-main'));
   const everything = $derived(settings?.defaultAction === 'tunnel');
   const selected = $derived(settings?.defaultAction === 'direct');
@@ -327,8 +329,8 @@
       <div class="grow">
         <b>Kill switch закрыл интернет</b>
         <p class="muted small">
-          HyRoute закрылся или перестал маршрутизировать трафик без команды «Отключить», поэтому соединения не выпускаются
-          напрямую. Работают только локальная сеть, DNS-запросы {ui.mac ? "macOS" : "Windows к DNS-серверам сети"}, сам HyRoute, Hysteria и Xray. Подключитесь
+          GRoute закрылся или перестал маршрутизировать трафик без команды «Отключить», поэтому соединения не выпускаются
+          напрямую. Работают только локальная сеть, DNS-запросы {ui.mac ? "macOS" : "Windows к DNS-серверам сети"}, сам GRoute, Hysteria и Xray. Подключитесь
           снова или откройте интернет.
         </p>
       </div>
@@ -357,10 +359,10 @@
     <section class="card unsafe">
       <Icon name="alert" size={22} />
       <div class="grow">
-        <b>HyRoute запущен из папки, в которую может писать любая программа</b>
+        <b>GRoute запущен из папки, в которую может писать любая программа</b>
         <p class="muted small">
           {hideUserPath(sys.programDir)}. HyRoute работает с правами администратора, поэтому его лучше держать в Program Files: туда без запроса прав ничего не
-          записать. HyRoute скопирует себя в {sys.moveTarget}, добавит ярлык в меню «Пуск» и перезапустится оттуда. Настройки, серверы и правила
+          записать. GRoute скопирует себя в {sys.moveTarget}, добавит ярлык в меню «Пуск» и перезапустится оттуда. Настройки, серверы и правила
           останутся.
         </p>
       </div>
@@ -396,7 +398,7 @@
     <section class="card start simple">
       <Icon name="sparkles" size={26} />
       <div class="grow">
-        <h2>Настроим HyRoute шаг за шагом</h2>
+        <h2>Настроим GRoute шаг за шагом</h2>
         <p class="muted">Добавим ваш сервер, проверим его и выберем, что пускать через VPN. Каждый шаг объясняется, займёт пару минут.</p>
       </div>
       <button class="primary" onclick={onsetup}>Начать настройку<Icon name="arrow" size={16} /></button>
@@ -461,6 +463,16 @@
         {:else if groupLine}
           <p class="small sub">{hide(groupLine)}</p>
         {/if}
+        {#if mainProfile}
+          <div class="row small sub" aria-label="Состояние основного сервера">
+            <span class="dot {mainTunnel ? tunnelTone(mainTunnel) : ''}"></span>
+            <span>{mainTunnel ? (tunnelText[mainTunnel.state] ?? mainTunnel.state) : 'Не подключён'}</span>
+            {#if mainTunnel}
+              <span class="mono" title="Отправлено и получено этим сервером">↑ {fmtBytes(mainTunnel.sent)} ↓ {fmtBytes(mainTunnel.recv)}</span>
+              {#if mainTunnel.rejected}<span class="muted">Отклонено {mainTunnel.rejected}</span>{/if}
+            {/if}
+          </div>
+        {/if}
         <p class="muted small explain">Его используют VPN-правила и маршрут «Всё остальное», в которых выбран «Основной сервер».</p>
         <div class="row">
           {#if main?.group}
@@ -468,7 +480,7 @@
               <button onclick={probeGroup} disabled={probing}><Icon name="zap" size={16} />{probing ? 'Проверяю…' : 'Проверить группу'}</button>
             {/if}
           {:else}
-            <button onclick={() => (checking = true)} disabled={!main}><Icon name="zap" size={16} />Проверить сервер</button>
+            <button onclick={() => (checking = mainProfile ?? null)} disabled={!mainProfile}><Icon name="zap" size={16} />Проверить сервер</button>
           {/if}
           <button class="ghost" onclick={() => go('servers')}>Все серверы<Icon name="arrow" size={15} /></button>
         </div>
@@ -494,7 +506,7 @@
             <div class="tunnel">
               <span class="dot {tunnelTone(t)}"></span>
               <div class="grow">
-                <div class="ellipsis"><b>{ui.profiles.some((p) => p.id === t.id) ? profileName(t.id) : hide(t.name)}</b> <span class="muted small">{tunnelText[t.state] ?? t.state}</span></div>
+                <div class="ellipsis"><b>{ui.profiles.some((p) => p.id === t.id) ? profileName(t.id) : hide(t.name)}</b> <span class="muted small">{tunnelText[t.state] ?? t.state}{mainProfile?.id === t.id ? ' · Основной сервер' : ''}</span></div>
                 {#each st.tunnelReasons?.[t.id] ?? [] as reason}<div class="muted small">{reasonText(reason)}</div>{/each}
                 {#if t.message && t.state !== 'connected'}<div class="small bad-text">{hide(t.message)}</div>{/if}
               </div>
@@ -529,8 +541,8 @@
   {/if}
 </div>
 
-{#if checking && main && !main.group}
-  <CheckProfile id={main.id} name={main.name} onclose={() => (checking = false)} />
+{#if checking}
+  <CheckProfile profile={checking} onclose={() => (checking = null)} />
 {/if}
 
 <style>

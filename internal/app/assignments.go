@@ -21,14 +21,26 @@ type AssignmentRow struct {
 	Index     *int   `json:"index,omitempty"`
 	Revision  string `json:"revision,omitempty"`
 }
+
+// AssignmentEdit carries both roles as displayed and as edited. A draft may
+// span several profiles and must not overwrite a concurrent rule change.
+type AssignmentEdit struct {
+	Row            AssignmentRow `json:"row"`
+	Primary        string        `json:"primary"`
+	Fallback       []string      `json:"fallback"`
+	BeforePrimary  string        `json:"beforePrimary"`
+	BeforeFallback []string      `json:"beforeFallback"`
+}
+
 type AssignmentRequest struct {
-	Operation      string          `json:"operation"`
-	Role           string          `json:"role,omitempty"`
-	Rows           []AssignmentRow `json:"rows,omitempty"`
-	Source         string          `json:"source,omitempty"`
-	Target         string          `json:"target,omitempty"`
-	Fallback       []string        `json:"fallback,omitempty"`
-	SubscriptionID string          `json:"subscriptionId,omitempty"`
+	Edits          []AssignmentEdit `json:"edits,omitempty"`
+	Operation      string           `json:"operation"`
+	Role           string           `json:"role,omitempty"`
+	Rows           []AssignmentRow  `json:"rows,omitempty"`
+	Source         string           `json:"source,omitempty"`
+	Target         string           `json:"target,omitempty"`
+	Fallback       []string         `json:"fallback,omitempty"`
+	SubscriptionID string           `json:"subscriptionId,omitempty"`
 }
 type AssignmentChange struct {
 	Kind        string   `json:"kind"`
@@ -110,7 +122,11 @@ func (c *Controller) planAssignmentsLocked(req AssignmentRequest) (*assignmentPl
 				return nil, errors.New("Выбранный сервер или группа больше не существует")
 			}
 		}
-	case "transfer", "deleteSubscription":
+	case "edit":
+		if len(req.Edits) == 0 || len(req.Rows) != 0 || req.Role != "" {
+			return nil, errors.New("Передайте изменённые строки правил")
+		}
+	case "transfer", "deleteSubscription", "deleteServer":
 		if req.Role != "" || len(req.Rows) > 0 {
 			return nil, errors.New("Глобальный перенос должен охватывать все назначения")
 		}
@@ -148,9 +164,36 @@ type assignmentSelection struct {
 
 func (c *Controller) planRuleChangesLocked(p *assignmentPlan) error {
 	req := p.req
-	all := req.Operation == "transfer" || req.Operation == "deleteSubscription"
+	all := req.Operation == "transfer" || req.Operation == "deleteSubscription" || req.Operation == "deleteServer"
 	selected := map[string]*assignmentSelection{}
-	for _, r := range req.Rows {
+	rows := req.Rows
+	type rowKey struct {
+		profile, rule string
+		index         int
+		isDefault     bool
+	}
+	key := func(r AssignmentRow) rowKey {
+		k := rowKey{r.RulesetID, r.RuleID, -1, r.IsDefault}
+		if r.IsDefault {
+			k.rule = ""
+		} else if r.Index != nil {
+			k.index, k.rule = *r.Index, ""
+		}
+		return k
+	}
+	edits := map[rowKey]*AssignmentEdit{}
+	if req.Operation == "edit" {
+		for i := range req.Edits {
+			edit := &req.Edits[i]
+			k := key(edit.Row)
+			if edits[k] != nil {
+				return errors.New("Одна строка назначена дважды")
+			}
+			edits[k] = edit
+			rows = append(rows, edit.Row)
+		}
+	}
+	for _, r := range rows {
 		x := selected[r.RulesetID]
 		if x == nil {
 			x = &assignmentSelection{rules: map[string]AssignmentRow{}, indexes: map[int]AssignmentRow{}}
@@ -195,19 +238,28 @@ func (c *Controller) planRuleChangesLocked(p *assignmentPlan) error {
 		count := len(p.Changes)
 		for i := range cfg.Rules {
 			r := &cfg.Rules[i]
+			var edit *AssignmentEdit
 			if !all {
-				_, byID := x.rules[r.ID]
+				idRow, byID := x.rules[r.ID]
 				row, byIndex := x.indexes[i]
 				if !byID && !byIndex {
 					continue
 				}
-				if byIndex && (row.Revision != revision || r.ID != row.RuleID) {
+				if byID && byIndex || byIndex && (row.Revision != revision || r.ID != row.RuleID) {
 					return ErrPlanChanged
+				}
+				if byIndex {
+					edit = edits[key(row)]
+				} else {
+					edit = edits[key(idRow)]
 				}
 				delete(x.indexes, i)
 				delete(x.rules, r.ID)
 			}
 			if r.Action != rules.Tunnel {
+				if edit != nil {
+					return ErrPlanChanged
+				}
 				continue
 			}
 			name := r.Name
@@ -215,13 +267,23 @@ func (c *Controller) planRuleChangesLocked(p *assignmentPlan) error {
 				name = fmt.Sprintf("Правило %d", i+1)
 			}
 			ref := assignmentRule{AssignmentChange: AssignmentChange{Kind: "rule", RuleKey: fmt.Sprintf("%s/%d", id, i), Name: name, RulesetName: label, Disabled: r.Enabled != nil && !*r.Enabled}, primary: &r.Profile, fallback: &r.Fallback}
-			p.updateRoute(ref)
+			if err := c.updateAssignmentLocked(p, ref, edit); err != nil {
+				return err
+			}
 		}
 		if !all && (len(x.rules) > 0 || len(x.indexes) > 0) {
 			return ErrPlanChanged
 		}
-		if (all || x.defaultRoute) && cfg.DefaultAction == rules.Tunnel {
-			p.updateRoute(assignmentRule{AssignmentChange: AssignmentChange{Kind: "default", RulesetName: label, Name: "Всё остальное"}, primary: &cfg.DefaultProfile, fallback: &cfg.DefaultFallback})
+		if all || x.defaultRoute {
+			edit := edits[key(AssignmentRow{RulesetID: id, IsDefault: true})]
+			if cfg.DefaultAction == rules.Tunnel {
+				ref := assignmentRule{AssignmentChange: AssignmentChange{Kind: "default", RulesetName: label, Name: "Всё остальное"}, primary: &cfg.DefaultProfile, fallback: &cfg.DefaultFallback}
+				if err := c.updateAssignmentLocked(p, ref, edit); err != nil {
+					return err
+				}
+			} else if edit != nil {
+				return ErrPlanChanged
+			}
 		}
 		if count != len(p.Changes) {
 			if err := checkRules(*cfg); err != nil {
@@ -270,7 +332,7 @@ func distinctTargets(ids []string, primary string) []string {
 	return out
 }
 
-func (p *assignmentPlan) updateRoute(r assignmentRule) {
+func (c *Controller) updateAssignmentLocked(p *assignmentPlan, r assignmentRule, edit *AssignmentEdit) error {
 	req := p.req
 	old := *r.primary
 	primary := old
@@ -278,6 +340,16 @@ func (p *assignmentPlan) updateRoute(r assignmentRule) {
 	fb := slices.Clone(before)
 	pos := 0
 	switch req.Operation {
+	case "edit":
+		if edit == nil || old != edit.BeforePrimary || !slices.Equal(before, edit.BeforeFallback) {
+			return ErrPlanChanged
+		}
+		primary, fb = edit.Primary, slices.Clone(edit.Fallback)
+		for _, id := range append(slices.Clone(fb), primary) {
+			if id != "" && id != old && !slices.Contains(before, id) && (c.groupsBroken != nil || !c.targetExistsLocked(id)) {
+				return errors.New("Сервер или группа больше недоступны. Обновите список назначений")
+			}
+		}
 	case "set":
 		if req.Role == "primary" {
 			primary = req.Target
@@ -298,7 +370,7 @@ func (p *assignmentPlan) updateRoute(r assignmentRule) {
 				}
 			}
 		}
-	case "deleteSubscription":
+	case "deleteSubscription", "deleteServer":
 		if p.removed[old] {
 			primary = ""
 		}
@@ -312,7 +384,7 @@ func (p *assignmentPlan) updateRoute(r assignmentRule) {
 		}
 	}
 	if primary == old && slices.Equal(fb, before) {
-		return
+		return nil
 	}
 	fb = distinctTargets(fb, primary)
 	if old != primary {
@@ -335,6 +407,7 @@ func (p *assignmentPlan) updateRoute(r assignmentRule) {
 	if primary == "" && len(fb) == 0 && (old != "" || len(before) > 0) && len(p.Warnings) == 0 {
 		p.Warnings = append(p.Warnings, "Эти правила будут использовать основной сервер с главной. После добавления других серверов назначения можно поменять массово.")
 	}
+	return nil
 }
 
 func (c *Controller) ApplyAssignments(req AssignmentRequest, token string) error {

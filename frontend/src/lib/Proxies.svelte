@@ -122,7 +122,7 @@
     }
   }
 
-  const stateText: Record<string, string> = { off: 'выключен', waiting: 'ждёт подключения HyRoute', listening: 'работает', error: 'ошибка' };
+  const stateText: Record<string, string> = { off: 'выключен', waiting: 'ждёт подключения GRoute', listening: 'работает', error: 'ошибка' };
   const tone = (p: ProxyView) => (p.state === 'listening' ? 'ok' : p.state === 'error' ? 'bad' : p.state === 'waiting' ? 'wait' : '');
   const main = $derived(mainTarget());
   // «через группу «Авто»», «через DE1», «через основной сервер — …».
@@ -148,7 +148,7 @@
   {#if error}<div class="note error">{hide(error)}</div>{/if}
   {#if ok}<div class="note ok">{ok}</div>{/if}
   {#if list.length && !online}
-    <div class="note info">Прокси работают, пока HyRoute подключён. Включите HyRoute на главной — порты откроются, серверы прокси запустятся сами.</div>
+    <div class="note info">Прокси работают, пока GRoute подключён. Включите GRoute на главной — порты откроются, серверы прокси запустятся сами.</div>
   {/if}
 
   {#if list.length === 0}
@@ -177,7 +177,7 @@
                   >работает · сервер спит</span
                 >{:else}{stateText[p.state]}{/if}</span
             >
-            {#if p.source}<span class="badge" title="HyRoute держит этот прокси для сервера подписки: он появляется и исчезает вместе с сервером">подписка «{hide(p.sourceName ?? '')}»</span>{/if}
+            {#if p.source}<span class="badge" title="GRoute держит этот прокси для сервера подписки: он появляется и исчезает вместе с сервером">подписка «{hide(p.sourceName ?? '')}»</span>{/if}
           </div>
           <div class="muted small">
             через {via(p)}
@@ -212,11 +212,11 @@
           Соединений сейчас {p.active}, всего {p.total}{#if p.udpServed}
             · UDP-сессий {p.udpActive} (всего {p.udpTotal}){/if} · ↑ {fmtBytes(p.sent)} ↓ {fmtBytes(p.recv)}{#if p.udpDropped > 0}
             <span
-              title="Больше предела Hysteria (около 4 КБ, меньше для длинных доменных имён), от чужого адреса или другой программы, разбитые на части (FRAG) или когда сервер недоступен. Подробности — в журнале HyRoute."
+              title="Больше предела Hysteria (около 4 КБ, меньше для длинных доменных имён), от чужого адреса или другой программы, разбитые на части (FRAG) или когда сервер недоступен. Подробности — в журнале GRoute."
             >
               · отброшено UDP-пакетов {p.udpDropped}</span
             >{/if}{#if p.authFailures > 0}
-            <span title="Адрес, с которого 5 раз подряд ввели неверный логин или пароль, какое-то время не может подключиться. Подробности — в журнале HyRoute.">
+            <span title="Адрес, с которого 5 раз подряд ввели неверный логин или пароль, какое-то время не может подключиться. Подробности — в журнале GRoute.">
               · неверных входов {p.authFailures}</span
             >{/if}
         </div>

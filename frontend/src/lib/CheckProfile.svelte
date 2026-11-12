@@ -2,10 +2,10 @@
   // "Check profile": starts the profile's Hysteria (or uses the running
   // one) and tests TCP, the external IP, latency and UDP.
   import { onMount } from 'svelte';
-  import { api, errText, type CheckResult } from '../api';
+  import { api, errText, type CheckResult, type ProfileSummary } from '../api';
   import { hide } from '../state.svelte';
 
-  let { id, name, onclose }: { id: string; name: string; onclose: () => void } = $props();
+  let { profile, onclose }: { profile: ProfileSummary; onclose: () => void } = $props();
 
   let res = $state<CheckResult | null>(null);
   let error = $state('');
@@ -16,7 +16,7 @@
     error = '';
     res = null;
     try {
-      res = await api.CheckProfile(id);
+      res = await api.CheckProfile(profile.id);
     } catch (e) {
       error = errText(e);
     }
@@ -28,9 +28,10 @@
 
 <div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && !running && onclose()}>
   <div class="dialog panel">
-    <h2>Проверка профиля «{hide(name)}»</h2>
+    <h2>Проверка профиля «{hide(profile.name)}»</h2>
+    <p>{profile.protocol === 'vless' ? 'VLESS' : 'Hysteria 2'} · {profile.engine}</p>
     {#if running}
-      <p class="muted">Запуск Hysteria и проверка соединения… (до 30 секунд)</p>
+      <p class="muted">Проверяем соединение…</p>
     {/if}
     {#if error}<div class="note error">{hide(error)}</div>{/if}
     {#if res}

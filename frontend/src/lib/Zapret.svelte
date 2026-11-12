@@ -232,7 +232,7 @@
   <header>
     <h1>Обход DPI</h1>
     <p class="muted">
-      YouTube, Discord и другие сайты без VPN: HyRoute запускает zapret2, который обманывает блокировку провайдера. Трафик идёт напрямую, не тратит
+      YouTube, Discord и другие сайты без VPN: GRoute запускает zapret2, который обманывает блокировку провайдера. Трафик идёт напрямую, не тратит
       трафик серверов и не замедляется ими.
     </p>
   </header>
@@ -243,8 +243,8 @@
     <section class="card">
       <h2>Telegram без VPN</h2>
       <p class="muted small">
-        Telegram ходит к своим серверам через WebSocket веб-версии — их блокируют редко. Когда HyRoute подключён, он перехватывает Telegram сам (и его
-        форки, например AyuGram): ничего настраивать не нужно. Без подключения Telegram идёт через прокси HyRoute — его нужно один раз добавить в
+        Telegram ходит к своим серверам через WebSocket веб-версии — их блокируют редко. Когда GRoute подключён, он перехватывает Telegram сам (и его
+        форки, например AyuGram): ничего настраивать не нужно. Без подключения Telegram идёт через прокси GRoute — его нужно один раз добавить в
         Telegram. Если WebSocket не отвечает, Telegram идёт через Cloudflare, ваш сервер VPN или напрямую. Звонки так не идут.
       </p>
       <label class="switch">
@@ -262,13 +262,13 @@
           {@const viaCF = h.cf && (tg.cloudflareFirst || !tg.intercepted || !h.fallback)}
           <div class="note info small">
             WebSocket сейчас не отвечает — Telegram идёт
-            {viaCF ? 'через Cloudflare' : h.fallback === 'vpn' ? 'через ваш сервер VPN' : 'напрямую к серверам Telegram'}. HyRoute проверяет снова
+            {viaCF ? 'через Cloudflare' : h.fallback === 'vpn' ? 'через ваш сервер VPN' : 'напрямую к серверам Telegram'}. GRoute проверяет снова
             каждые 5 минут и вернётся к WebSocket, когда он заработает. <span class="faint">({hide(h.wsError)})</span>
           </div>
         {:else}
           <div class="note error small">
             Telegram не отвечает ни через WebSocket, ни {tg.cloudflare ? 'через Cloudflare, ни ' : ''}{tg.intercepted ? 'через VPN, ни ' : ''}напрямую.
-            {tg.intercepted ? 'Проверьте интернет и сервер VPN.' : 'Подключите HyRoute к серверу VPN: тогда Telegram пойдёт через него.'}
+            {tg.intercepted ? 'Проверьте интернет и сервер VPN.' : 'Подключите GRoute к серверу VPN: тогда Telegram пойдёт через него.'}
             <span class="faint">({hide(h.wsError ?? '')}{h.fallbackError ? '; ' + hide(h.fallbackError) : ''})</span>
           </div>
         {/if}
@@ -287,9 +287,9 @@
       {#if tg.enabled}
         <div class="small">
           {#if tg.intercepted}
-            HyRoute подключён: Telegram идёт сюда сам, прокси в Telegram не нужен.
+            GRoute подключён: Telegram идёт сюда сам, прокси в Telegram не нужен.
           {:else}
-            HyRoute не подключён: Telegram идёт сюда, только если в нём добавлен прокси HyRoute.
+            GRoute не подключён: Telegram идёт сюда, только если в нём добавлен прокси GRoute.
           {/if}
         </div>
       {/if}
@@ -300,7 +300,7 @@
           <button onclick={copyTelegram}><Icon name="copy" size={15} />Скопировать ссылку</button>
         </div>
         <p class="muted small">
-          Один раз: Telegram спросит, подключить ли прокси, — согласитесь. Дальше он работает сам, пока HyRoute запущен. Если Telegram не открылся,
+          Один раз: Telegram спросит, подключить ли прокси, — согласитесь. Дальше он работает сам, пока GRoute запущен. Если Telegram не открылся,
           скопируйте ссылку, отправьте её себе в «Избранное» и нажмите на неё.
         </p>
         {#if tg.stats.total > 0}
@@ -327,7 +327,7 @@
         <p class="muted small">
           Когда WebSocket Telegram заблокирован, соединения идут через домены на Cloudflare, которые держит автор tg-ws-proxy: так открываются все
           дата-центры Telegram без VPN. Переписку ни Cloudflare, ни владелец домена не прочитают — она зашифрована, — но видят, что вы пользуетесь
-          Telegram. Если включён обход DPI для Discord или своих сайтов, HyRoute пропускает через него и эти домены, и Cloudflare идёт раньше VPN; без
+          Telegram. Если включён обход DPI для Discord или своих сайтов, GRoute пропускает через него и эти домены, и Cloudflare идёт раньше VPN; без
           этого — после VPN.
         </p>
       {/if}
@@ -426,7 +426,7 @@
           {:else if running}
             <span class="dot ok"></span> zapret2 работает
           {:else if view.status.state === 'error'}
-            <div class="note error small">{view.status.error}. HyRoute запустит его снова.</div>
+            <div class="note error small">{view.status.error}. GRoute запустит его снова.</div>
           {:else if !view.busy}
             <span class="dot"></span>
             <span class="muted">zapret2 не запущен: на этой сети обход не нужен или ещё не настроен</span>
@@ -439,7 +439,7 @@
       <section class="card">
         <h2>Подобрать метод</h2>
         <p class="muted small">
-          У каждого провайдера работают свои методы. HyRoute выяснит, как именно блокируется каждый сервис, попробует известные методы, а потом
+          У каждого провайдера работают свои методы. GRoute выяснит, как именно блокируется каждый сервис, попробует известные методы, а потом
           сам соберёт и проверит десятки своих вариантов: рядом с теми, что сработали, а если не сработало ничего — по всем приёмам zapret2 и с фейками
           сайтов из белого списка. Для этой сети{view.network ? ` («${hide(view.network)}»)` : ''} запомнит самый быстрый и запасные. Займёт от полуминуты до
           трёх минут; обход при этом продолжает работать.
@@ -460,7 +460,7 @@
           <span
             >Следить и подбирать заново самому
             <span class="muted small"
-              >— раз в 10 минут HyRoute открывает сервисы через обход. Если сервис перестал открываться, а блокировку можно обойти, подберёт метод
+              >— раз в 10 минут GRoute открывает сервисы через обход. Если сервис перестал открываться, а блокировку можно обойти, подберёт метод
               заново сам; на новой сети — тоже. Если не открывается и без обхода (нет интернета, блок по адресу), ничего не трогает.</span
             ></span
           >
@@ -490,7 +490,7 @@
                       {:else if view.hasServer}
                         <button class="primary small-btn" onclick={() => (vpnFor = t.target)} disabled={dirty}>Пустить {t.name} через VPN</button>
                       {:else}
-                        <span class="small muted">Добавьте сервер VPN, и HyRoute сможет пустить {t.name} через него.</span>
+                        <span class="small muted">Добавьте сервер VPN, и GRoute сможет пустить {t.name} через него.</span>
                       {/if}
                     </div>
                   {/if}
@@ -512,13 +512,13 @@
 
     <section class="card info">
       <p class="small">
-        HyRoute держит правила «Обход DPI: …» наверху профиля правил: этот трафик идёт напрямую, через обход, а не через VPN. Если обход сервису не
+        GRoute держит правила «Обход DPI: …» наверху профиля правил: этот трафик идёт напрямую, через обход, а не через VPN. Если обход сервису не
         помогает, подбор предложит пустить его через VPN; снимите сервис здесь, и он пойдёт по вашим обычным правилам.
         {#if ui.expert}<button class="link" onclick={() => go('rules')}>Правила</button>{/if}
       </p>
       <p class="small muted">
         zapret2 (bol-van/zapret2) скачивается с GitHub при первом включении и проверяется по контрольным суммам. Антивирусы иногда ругаются на winws2 и
-        WinDivert: это ложная тревога, они перехватывают сетевые пакеты, как и сам HyRoute.
+        WinDivert: это ложная тревога, они перехватывают сетевые пакеты, как и сам GRoute.
       </p>
     </section>
 

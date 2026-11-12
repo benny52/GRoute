@@ -27,6 +27,7 @@ type Links struct {
 	// Notices are the texts of placeholder servers (panelNotice): what
 	// the panel says instead of, or next to, the servers.
 	Notices []string
+	Skipped []SubEntry
 }
 
 func (l *Links) IgnoredTotal() int {
@@ -49,6 +50,7 @@ func ParseLinks(text string) Links {
 		}
 	}
 	n := 0
+	decodeBudget := maxSubBody
 	for _, f := range splitLinks(text) {
 		scheme, _, _ := strings.Cut(f, "://")
 		scheme = strings.ToLower(scheme)
@@ -57,6 +59,12 @@ func ParseLinks(text string) Links {
 		}
 		if !slices.Contains(hysteria.LinkSchemes, scheme) {
 			res.Ignored[scheme]++
+			entry := skippedLink(f, scheme, "")
+			if scheme == "vpn" && amneziaWG(f, &decodeBudget) {
+				entry.Protocol = "AmneziaWG"
+				entry.Reason = "Протокол AmneziaWG не поддерживается"
+			}
+			res.Skipped = append(res.Skipped, entry)
 			continue
 		}
 		if msg, ok := panelNotice(f); ok {
@@ -71,6 +79,7 @@ func ParseLinks(text string) Links {
 		}
 		if err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("ссылка %d: %v", n, err))
+			res.Skipped = append(res.Skipped, skippedLink(f, scheme, err.Error()))
 			continue
 		}
 		for _, w := range warns {

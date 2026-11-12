@@ -257,7 +257,7 @@
       return `DNS-запрос имени ${hide(f.domain)}: ${r}.${(f.count ?? 0) > 1 ? ` Запросов: ${f.count}.` : ''}`;
     }
     if (dnsRuleLabel[f.rule]) return `${dnsRuleLabel[f.rule]}.`; // dns: a browser's DoH connection
-    const rule = f.excluded || f.rule.startsWith('exclusion') ? 'служебное исключение HyRoute' : !f.rule || f.rule === 'default' ? 'сработало «Всё остальное»' : `сработало правило «${hide(f.rule)}»`;
+    const rule = f.excluded || f.rule.startsWith('exclusion') ? 'служебное исключение GRoute' : !f.rule || f.rule === 'default' ? 'сработало «Всё остальное»' : `сработало правило «${hide(f.rule)}»`;
     const dom = f.domain ? `, сайт определён ${srcName[f.domainSrc] ?? f.domainSrc}` : ', сайт не определён';
     return rule[0].toUpperCase() + rule.slice(1) + dom + '.';
   }
@@ -287,7 +287,7 @@
     <label class="check"><input type="checkbox" bind:checked={showClosed} /> закрытые</label>
     <label class="check"><input type="checkbox" bind:checked={paused} /> пауза</label>
     {#if dnsRows > 0}
-      <label class="check" title="Запросы, на которые ответил HyRoute. Имена серверов, служебные и локальные имена идут как раньше и здесь не показываются.">
+      <label class="check" title="Запросы, на которые ответил GRoute. Имена серверов, служебные и локальные имена идут как раньше и здесь не показываются.">
         <input type="checkbox" checked={showDNS} onchange={(e) => setShowDNS((e.currentTarget as HTMLInputElement).checked)} /> DNS-запросы{showDNS ? '' : ` (${dnsRows})`}
       </label>
     {/if}

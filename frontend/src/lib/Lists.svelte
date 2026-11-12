@@ -53,8 +53,8 @@
     const to = w.action === 'direct' ? 'напрямую' : w.action === 'block' ? 'блокируется' : `через ${w.profile ? targetText(w.profile) : 'основной сервер'}`;
     const why = w.index < 0 ? 'ни одно правило не подошло, сработало «Всё остальное»' : `правило «${w.name}»`;
     // With port rules the answer is for one port: the site's web port.
-    if (r.route?.portRules) return `Сейчас HyRoute для TCP ${r.route.port}: ${to} (${why}). На других портах может быть иначе — «Проверить адрес» покажет.`;
-    return `Сейчас HyRoute: ${to} (${why}).`;
+    if (r.route?.portRules) return `Сейчас GRoute для TCP ${r.route.port}: ${to} (${why}). На других портах может быть иначе — «Проверить адрес» покажет.`;
+    return `Сейчас GRoute: ${to} (${why}).`;
   }
 
   // Hysteria ACL snippet in priority order (specific lists first).
@@ -199,7 +199,7 @@
       {#if all.length}
         <div class="row">
           <button onclick={() => copy(acl(all), 'все списки как ACL Hysteria')}><Icon name="copy" size={14} />Все как ACL Hysteria</button>
-          <button onclick={() => copy(hyroute(all), 'все списки как правила HyRoute')}><Icon name="copy" size={14} />Все как правила HyRoute</button>
+          <button onclick={() => copy(hyroute(all), 'все списки как правила GRoute')}><Icon name="copy" size={14} />Все как правила GRoute</button>
           <span class="muted small">В ACL стоит <code>OUTBOUND</code>: замените на имя выхода в конфиге сервера.</span>
         </div>
       {/if}
@@ -207,18 +207,18 @@
   {:else}
     <section class="card acl">
       <div class="note info small other">
-        <span class="grow">Правила SwitchyOmega, v2rayN, Throne, sing-box, FoxyProxy, Clash, PAC-файл или список AutoProxy переводит в правила HyRoute окно импорта.</span>
+        <span class="grow">Правила SwitchyOmega, v2rayN, Throne, sing-box, FoxyProxy, Clash, PAC-файл или список AutoProxy переводит в правила GRoute окно импорта.</span>
         <button onclick={() => (importing = true)}><Icon name="download" size={14} />Из другой программы…</button>
       </div>
       <p class="muted small">
         Вставьте правила ACL сервера Hysteria (<code>- proxy(geosite:openai)</code>, <code>- direct(suffix:example.com)</code>…). Их можно превратить в
-        список доменов вида <code>*.example.com +hyst</code> для других программ или в правила HyRoute.
+        список доменов вида <code>*.example.com +hyst</code> для других программ или в правила GRoute.
       </p>
       <textarea bind:value={aclText} rows="9" spellcheck="false" placeholder={'acl:\n  inline:\n    - proxy(geosite:openai)\n    - proxy(suffix:telegram.org)\n    - direct(geoip:ru)\n    - direct(all)'}></textarea>
       <div class="opts">
         <div class="seg">
           <button class:on={mode === 'domains'} onclick={() => (mode = 'domains')}>Список доменов</button>
-          <button class:on={mode === 'rules'} onclick={() => (mode = 'rules')}>Правила HyRoute</button>
+          <button class:on={mode === 'rules'} onclick={() => (mode = 'rules')}>Правила GRoute</button>
         </div>
         {#if mode === 'domains'}
           <label>Суффикс <input class="short" bind:value={suffix} /></label>

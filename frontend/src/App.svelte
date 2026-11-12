@@ -264,7 +264,7 @@
   <aside>
     <div class="brand">
       <span class="logo"><Icon name="shield" size={18} stroke={2.2} /></span>
-      {ui.portable ? 'GRoute Portable' : 'HyRoute'}
+      {ui.portable ? 'GRoute Portable' : 'GRoute'}
     </div>
     <nav>
       {#each shown as p (p.id)}
@@ -309,7 +309,7 @@
       {/if}
       {#if blocking && page !== 'home'}
         <div class="note warn row">
-          <span class="grow">Kill switch закрыл интернет: HyRoute перестал маршрутизировать трафик без команды «Отключить». Подключитесь снова или откройте интернет.</span>
+          <span class="grow">Kill switch закрыл интернет: GRoute перестал маршрутизировать трафик без команды «Отключить». Подключитесь снова или откройте интернет.</span>
           <button class="primary" onclick={ksConnect} disabled={ksBusy || st?.state === 'starting' || ui.profiles.length === 0}>Подключиться</button>
           <button onclick={ksRelease}>Открыть интернет</button>
         </div>

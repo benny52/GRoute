@@ -82,6 +82,13 @@ func SameConnectionNoSecrets(a, b Profile) bool {
 // IsVLESS: the profile runs through Xray.
 func (p *Profile) IsVLESS() bool { return p.Protocol == ProtoVLESS }
 
+func (p *Profile) EngineName() string {
+	if p.IsVLESS() {
+		return "Xray"
+	}
+	return "Hysteria"
+}
+
 // ProtocolName names the protocol for the user.
 func (p *Profile) ProtocolName() string {
 	if p.IsVLESS() {

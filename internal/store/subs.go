@@ -35,9 +35,10 @@ type Subscription struct {
 	ErrorCount int      `json:"errorCount,omitempty"`
 	// ViaVPN: the last update came through the main server's tunnel (the
 	// panel did not answer directly).
-	ViaVPN      bool   `json:"viaVPN,omitempty"`
-	UserInfo    string `json:"userInfo"` // Subscription-Userinfo header
-	HasPrevious bool   `json:"hasPrevious"`
+	ViaVPN              bool   `json:"viaVPN,omitempty"`
+	UserInfo            string `json:"userInfo"` // Subscription-Userinfo header
+	HasPrevious         bool   `json:"hasPrevious"`
+	SnapshotUnavailable bool   `json:"snapshotUnavailable,omitempty"` // last import applied, but its snapshot failed
 	// subinfo: UserInfo holds the header's canonical form. InfoAt is when
 	// it was reported (zero in files of v1.0.0). Support is the panel's
 	// support-url: public, one contact link for the whole panel, stored in
@@ -195,6 +196,17 @@ func (s *Store) PushSnapshot(id string, body []byte, same func(cur []byte) bool)
 		}
 	}
 	return writeAtomic(cur, sealed)
+}
+
+// CurrentSnapshot reads the last applied download without fetching from the panel.
+func (s *Store) CurrentSnapshot(id string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sealed, err := os.ReadFile(s.snapPath(id, "cur"))
+	if err != nil {
+		return nil, err
+	}
+	return unseal(sealed)
 }
 
 // PreviousSnapshot returns the previous snapshot's body, the one a

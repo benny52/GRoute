@@ -43,6 +43,7 @@
   let editing = $state<Profile | null>(null);
   let editingSource = $state(''); // the subscription name of the edited server
   let checking = $state<ProfileSummary | null>(null);
+  let removing = $state<ProfileSummary | null>(null);
   let usage = $state<ProfileSummary | null>(null);
   let transferring = $state<(ProfileSummary & { duplicateId?: string }) | null>(null);
 
@@ -158,11 +159,7 @@
   }
 
   function remove(p: ProfileSummary) {
-    if (p.duplicateOf && p.duplicateSub && !p.source) {
-      transferring = p;
-      return;
-    }
-    if (confirm(`Удалить сервер «${hide(p.name)}»?`)) run(() => api.DeleteProfile(p.id));
+    removing = p;
   }
 
   function tunnel(id: string) {
@@ -280,7 +277,7 @@
           <button class="icon" onclick={() => run(() => api.CopyURI(p.id), 'Ссылка скопирована (в ней пароль сервера)')} title="Копировать ссылку"><Icon name="copy" size={16} /></button>
           <button class="icon" onclick={() => move(p.id, -1)} disabled={i === 0} title="Выше"><Icon name="up" size={16} /></button>
           <button class="icon" onclick={() => move(p.id, 1)} disabled={i === list.length - 1} title="Ниже"><Icon name="down" size={16} /></button>
-          <button class="icon danger" onclick={() => remove(p)} title="Удалить"><Icon name="trash" size={16} /></button>
+          <button class="icon danger" onclick={() => remove(p)} aria-label={`Удалить сервер «${hide(p.name)}»`} title="Удалить"><Icon name="trash" size={16} /></button>
         </div>
       </div>
     {/each}
@@ -304,10 +301,16 @@
 </div>
 
 {#if checking}
-  <CheckProfile id={checking.id} name={checking.name} onclose={() => (checking = null)} />
+  <CheckProfile profile={checking} onclose={() => (checking = null)} />
 {/if}
 
 {#if usage}<ServerAssignments profile={usage} onclose={() => (usage = null)} />{/if}
+{#if removing}
+  <AssignmentReview request={{ operation: 'deleteServer', source: removing.id }} title={`Удалить сервер «${hide(removing.name)}»?`}
+    confirmLabel="Всё равно удалить" onclose={() => (removing = null)}
+    onapplied={() => { removing = null; info = 'Сервер удалён.'; void after(); }} />
+{/if}
+
 {#if transferring}
   <AssignmentReview request={{ operation: 'transfer', source: transferring.id, target: transferring.duplicateId }}
     title={`Перенести назначения «${hide(transferring.name)}» на сервер из подписки «${hide(transferring.duplicateSub)}»?`}

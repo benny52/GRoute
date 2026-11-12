@@ -11,7 +11,8 @@ export interface AssignmentRow {
 }
 
 export interface AssignmentRequest {
-  operation: 'set' | 'replace' | 'transfer' | 'deleteSubscription';
+  operation: 'edit' | 'set' | 'replace' | 'transfer' | 'deleteSubscription' | 'deleteServer';
+  edits?: { row: AssignmentRow; primary: string; fallback: string[]; beforePrimary: string; beforeFallback: string[] }[];
   role?: Role;
   rows?: AssignmentRow[];
   source?: string;

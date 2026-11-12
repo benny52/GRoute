@@ -100,7 +100,7 @@
   {/if}
   <p class="muted small">
     Готовые списки сайтов и адресов для правил: <code>geosite:youtube</code> — все домены YouTube, <code>geoip:ru</code> — все IP России,
-    <code>geosite:ru-blocked</code> — заблокированное в России. Те же базы, что в v2rayN, Nekoray и Xray. HyRoute скачивает их, только если они нужны
+    <code>geosite:ru-blocked</code> — заблокированное в России. Те же базы, что в v2rayN, Nekoray и Xray. GRoute скачивает их, только если они нужны
     правилам, проверяет контрольную сумму и держит свежими.
   </p>
 
@@ -154,7 +154,7 @@
         {#if source === 'custom'}
           <input bind:value={siteURL} placeholder="https://…/geosite.dat" />
           <input bind:value={ipURL} placeholder="https://…/geoip.dat" />
-          <div class="muted small">Если рядом лежит файл <code>.sha256sum</code>, HyRoute проверит по нему целостность.</div>
+          <div class="muted small">Если рядом лежит файл <code>.sha256sum</code>, GRoute проверит по нему целостность.</div>
         {/if}
       </div>
       <label for="geo-auto">Автообновление</label>

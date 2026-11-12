@@ -7,6 +7,7 @@
   import { ackSubAlert, subAlerts } from '../state.svelte'; // subinfo
   import type { SubAlert } from '../api';
   import SubInfoBar from './SubInfoBar.svelte';
+  import SubscriptionReport from './SubscriptionReport.svelte';
   import { every } from '../poll';
 
   let { onchange }: { onchange: () => void } = $props();
@@ -25,6 +26,12 @@
   let error = $state('');
   let okMsg = $state('');
   let showNames = $state(false);
+  let expanded = $state('');
+  const revision = $derived.by(() => {
+    const s = list.find((item) => item.id === expanded);
+    return s ? [s.id, s.lastUpdate, s.profiles, s.missing].join('|') : '';
+  });
+  const details = $derived(revision ? api.SubscriptionDetails(expanded) : null);
   let removing = $state<Subscription | null>(null);
 
   const intervals = [
@@ -228,7 +235,7 @@
     const notes = [...pv.warnings, ...pv.errors];
     if (notes.length) {
       const more = notes.length > 8 ? `\n… и ещё ${notes.length - 8}` : '';
-      const found = `Найдено ${pv.count} ${plural(pv.count, 'Hysteria-профиль', 'Hysteria-профиля', 'Hysteria-профилей')}.`;
+      const found = `Найдено ${pv.count} ${plural(pv.count, 'профиль', 'профиля', 'профилей')}.`;
       if (!confirm(`${found}\n\n${notes.slice(0, 8).map(hide).join('\n')}${more}\n\nСменить ссылку подписки «${hide(s.name)}»?`)) return;
     }
     const ok = await edit(s, { token: pv.token });
@@ -324,20 +331,20 @@
 <div class="layout">
   <header>
     <h1>Подписки</h1>
-    <p class="muted sub">Ссылка от VPN-сервиса, по которой HyRoute сам получает и обновляет список серверов.</p>
+    <p class="muted sub">По ссылке от VPN-сервиса GRoute получает и обновляет список серверов.</p>
   </header>
   <Help id="subs" title="Что такое подписка">
     <p>
-      Многие VPN-сервисы дают не ссылку на один сервер, а ссылку подписки: по ней лежит список всех их серверов. HyRoute сам скачивает этот
+      Многие VPN-сервисы выдают подписку со списком своих серверов. GRoute скачивает этот
       список и обновляет его, поэтому, когда сервис добавит новый сервер или сменит старый, ничего делать не нужно.
     </p>
-    <p>Вставьте ссылку ниже и нажмите «Проверить»: HyRoute покажет, сколько серверов нашёл. Потом нажмите «Добавить».</p>
+    <p>Вставьте ссылку ниже и нажмите «Проверить». GRoute покажет, сколько серверов нашёл. Потом нажмите «Добавить».</p>
     <p>Если сервис сообщает остаток трафика и срок подписки, они видны у подписки, а когда подходят к концу, об этом предупредит главная.</p>
   </Help>
   <section class="card">
     <h2>Добавить подписку</h2>
     <p class="muted small">
-      Ссылка подписки от вашего VPN-сервиса (вида <code>https://…/sub/…</code>). HyRoute сам заберёт из неё все серверы
+      Ссылка подписки от вашего VPN-сервиса (вида <code>https://…/sub/…</code>). GRoute получит из неё серверы
       Hysteria 2 и VLESS (список ссылок, а также конфиги Clash, sing-box и Xray) и будет обновлять их. Ссылка хранится зашифрованной и в логах не показывается.
     </p>
     <div class="row">
@@ -353,7 +360,7 @@
     {#if shown}
       <div class="preview">
         <div class="big">
-          Найдено {shown.count} {plural(shown.count, 'Hysteria-профиль', 'Hysteria-профиля', 'Hysteria-профилей')}{#if shown.ignoredTotal},
+          Найдено {shown.count} {plural(shown.count, 'профиль', 'профиля', 'профилей')}{#if shown.ignoredTotal},
             {shown.ignoredTotal} {plural(shown.ignoredTotal, 'запись', 'записи', 'записей')} других протоколов {plural(shown.ignoredTotal, 'проигнорирована', 'проигнорированы', 'проигнорированы')}
             <span class="muted">({ignoredText(shown.ignored)})</span>{/if}.
         </div>
@@ -361,10 +368,10 @@
         {#if shown.updateHours}<div class="muted small">Сервис советует обновлять каждые {shown.updateHours} ч.</div>{/if}
         {#if shown.base64}<div class="muted small">Формат: base64-список ссылок.</div>{/if}
         {#if shown.format}<div class="muted small">Формат: конфиг {shown.format}.</div>{/if}
-        <button class="link" onclick={() => (showNames = !showNames)}>{showNames ? 'Скрыть список' : 'Показать профили'}</button>
-        {#if showNames}<div class="names">{#each shown.names as n}<span>{hide(n)}</span>{/each}</div>{/if}
-        {#each shown.warnings.slice(0, 8) as w}<div class="note warn small">{hide(w)}</div>{/each}
-        {#each shown.errors.slice(0, 8) as w}<div class="note error small">{hide(w)}</div>{/each}
+        <button class="link" aria-expanded={showNames} onclick={() => (showNames = !showNames)}>{showNames ? 'Скрыть подробности' : 'Показать подробности'}</button>
+        {#if showNames}<SubscriptionReport report={shown.report} preview />{/if}
+        {#if checkedURL.toLowerCase().startsWith('http://')}<div class="note warn small">Соединение с панелью не зашифровано. Токен подписки передаётся по HTTP.</div>{/if}
+        {#if !showNames && (shown.errors.length || shown.report.warnings?.length)}<div class="note warn small">В подробностях есть замечания по импорту.</div>{/if}
         <div class="row">
           <input class="grow" placeholder="Название" bind:value={name} />
           <select bind:value={interval} title="Автообновление" onchange={() => (intervalTouched = true)}>
@@ -437,7 +444,7 @@
           <div class="pf">
             <p class="muted small">
               У каждого сервера подписки будет свой порт на этом компьютере (SOCKS5 и HTTP на одном порту), начиная с первого. Новые
-              серверы подписки получат прокси сами, у пропавших прокси исчезнут, порт за сервером сохраняется. Прокси работают, пока HyRoute
+              серверы подписки получат прокси сами, у пропавших прокси исчезнут, порт за сервером сохраняется. Прокси работают, пока GRoute
               подключён, и каждый запускает свой сервер — при 30 серверах это 30 процессов Hysteria или Xray. Настроить или выключить
               отдельный прокси можно на странице «Прокси».
             </p>
@@ -472,19 +479,28 @@
           </div>
         {/if}
         <div class="meta small">
-          <span>Обновлено: {fmtDateTime(s.lastUpdate)}{#if s.viaVPN} <span class="muted" title="Сервер подписки не ответил напрямую (возможно, его блокирует сеть), и HyRoute скачал её через основной сервер">через VPN</span>{/if}</span>
+          <span>Обновлено: {fmtDateTime(s.lastUpdate)}{#if s.viaVPN} <span class="muted" title="Подписка загружена через основной сервер после неудачной попытки прямого соединения">через VPN</span>{/if}</span>
           <span>Профилей: {s.profiles}{s.missing ? ` (нет в подписке: ${s.missing})` : ''}</span>
           {#if total(s.ignored)}<span class="muted">пропущено других протоколов: {total(s.ignored)}</span>{/if}
           {#if s.enabled && s.nextAt && !s.nextAt.startsWith('0001')}<span class="muted">следующее: {fmtDateTime(s.nextAt)}</span>{/if}
+          <button class="link" aria-expanded={expanded === s.id} onclick={() => (expanded = expanded === s.id ? '' : s.id)}>{expanded === s.id ? 'Скрыть подробности' : 'Показать подробности'}</button>
         </div>
+        {#if expanded === s.id && details}
+          {#await details}
+            <p class="muted small">Загрузка подробностей…</p>
+          {:then report}
+            <SubscriptionReport {report} />
+          {:catch err}
+            <p class="note error small">{hide(errText(err))}</p>
+          {/await}
+        {/if}
         {#if s.lastError}<div class="note error small">Последняя ошибка ({fmtDateTime(s.lastAttempt)}): {hide(s.lastError)}. Профили не изменены.</div>{/if}
         {#if s.errorCount}
           <div class="note warn small">
             При последнем обновлении не разобрано {s.errorCount} {plural(s.errorCount, 'ссылка', 'ссылки', 'ссылок')}: их серверов нет в списке.
-            {#each s.errors ?? [] as e}<div>{hide(e)}</div>{/each}
           </div>
         {/if}
-        {#each (s.warnings ?? []).slice(0, 8) as w}<div class="note warn small">{hide(w)}</div>{/each}
+        {#if s.warnings?.length && expanded !== s.id}<div class="note warn small">Подробности содержат предупреждения импорта.</div>{/if}
       </div>
     {/each}
   </section>
@@ -504,7 +520,6 @@
   code { font-family: var(--mono); font-size: 12px; }
   .preview { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 6px; }
   .big { font-weight: 600; }
-  .names { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; max-height: 160px; overflow: auto; }
   .link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; justify-self: start; }
   .sub-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
   .sub-item.off { opacity: 0.7; }

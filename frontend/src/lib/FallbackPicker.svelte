@@ -5,7 +5,7 @@
   import { ui, hide, mainTarget, mainText, profileName } from '../state.svelte';
   import Icon from './Icon.svelte';
 
-  let { value, primary, onchange, compact = false }: { value: string[]; primary: string; onchange: (v: string[]) => void; compact?: boolean } =
+  let { value, primary, onchange, compact = false }: { value: string[]; primary?: string; onchange: (v: string[]) => void; compact?: boolean } =
     $props();
 
   const main = $derived(mainTarget());
@@ -31,10 +31,15 @@
     const id = value[i];
     if (id === primary || value.slice(0, i).includes(id)) return 'Повтор назначения. Уберётся при сохранении.';
     if (id === '' && !main) return 'Ожидает основной сервер';
-    if (key(id) === key(primary) || value.slice(0, i).some((v) => key(v) === key(id))) {
+    if ((primary !== undefined && key(id) === key(primary)) || value.slice(0, i).some((v) => key(v) === key(id))) {
       return 'Сейчас совпадает с предыдущим сервером. Назначение сохранится при смене основного.';
     }
     return '';
+  }
+  function move(index: number, by: number) {
+    const next = [...value];
+    [next[index], next[index + by]] = [next[index + by], next[index]];
+    onchange(next);
   }
 </script>
 
@@ -49,6 +54,10 @@
       >
         <span class="n">{i + 1}</span>
         <span class="ellipsis">{label(id)}</span>
+        {#if value.length > 1}
+          <button class="x" disabled={i === 0} onclick={() => move(i, -1)} aria-label={`Поднять запасной сервер № ${i + 1}`}>↑</button>
+          <button class="x" disabled={i === value.length - 1} onclick={() => move(i, 1)} aria-label={`Опустить запасной сервер № ${i + 1}`}>↓</button>
+        {/if}
         <button class="x" onclick={() => onchange(value.filter((_, j) => j !== i))} title="Убрать"><Icon name="x" size={12} /></button>
       </span>
     {/each}

@@ -262,6 +262,9 @@ func parseSubscription(body []byte) (Links, error) {
 	if r, ok := subfmt.Convert(body); ok {
 		l = ParseLinks(strings.Join(r.Links, "\n"))
 		l.Format = r.Format
+		for _, skipped := range r.Skipped {
+			l.Skipped = append(l.Skipped, skippedEntry(skipped.Name, skipped.Protocol, skipped.Reason))
+		}
 		l.Warnings = append(r.Warnings, l.Warnings...)
 		l.Errors = append(r.Errors, l.Errors...)
 		for k, v := range r.Other {
@@ -412,6 +415,7 @@ func (c *Controller) sourceNameLocked(source string) string {
 
 // Preview is shown before a subscription is added.
 type Preview struct {
+	Report   SubReport      `json:"report"`
 	Token    string         `json:"token"`
 	Title    string         `json:"title"`
 	Count    int            `json:"count"`
@@ -449,7 +453,7 @@ func (c *Controller) PreviewSubscription(rawURL string) (Preview, error) {
 	if err != nil {
 		return Preview{}, previewInfoErr(err, res)
 	}
-	pv := Preview{Token: newID(), Title: res.Title, Count: len(l.Profiles), Ignored: l.Ignored, IgnoredN: l.IgnoredTotal(),
+	pv := Preview{Report: importReport(l), Token: newID(), Title: res.Title, Count: len(l.Profiles), Ignored: l.Ignored, IgnoredN: l.IgnoredTotal(),
 		Warnings: l.Warnings, Errors: l.Errors, Base64: l.Base64, Format: l.Format, Names: []string{}}
 	pv.Info, pv.UpdateHours = fetchedInfo(res), res.UpdateHours
 	if strings.HasPrefix(strings.ToLower(rawURL), "http://") {
@@ -821,6 +825,7 @@ func (c *Controller) applyFetched(id string, res FetchResult, rollback bool, tag
 		s.InfoAt = s.LastUpdate
 	}
 	s.LastUpdate, s.LastAttempt, s.LastError = now, now, ""
+	s.SnapshotUnavailable = snapErr != nil
 	if snapErr != nil {
 		// The profiles are applied; a rollback may now return to an older
 		// version than the one before them.

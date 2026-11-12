@@ -17,7 +17,17 @@ func (c *Controller) planRemovalLocked(p *assignmentPlan) error {
 	req := &p.req
 	n := &p.restore.next
 	keep := map[string]bool{}
-	if req.Operation == "transfer" {
+	if req.Operation == "deleteServer" {
+		srv := n.Profiles.Find(req.Source)
+		if srv == nil {
+			return errors.New("Сервер уже удалён")
+		}
+		p.removed[srv.ID] = true
+		p.Warnings = append(p.Warnings, "Правила с этим приоритетным сервером перейдут на «Основной сервер». Из списка запасных будет удалён только этот сервер. Позже назначения можно изменить в разделе «Правила».")
+		if srv.Source != "" {
+			p.Warnings = append(p.Warnings, "При следующем обновлении подписка может снова добавить этот сервер. Прежние назначения правил при этом не восстановятся.")
+		}
+	} else if req.Operation == "transfer" {
 		old := n.Profiles.Find(req.Source)
 		if old == nil || old.Source != "" {
 			return errors.New("Ручная копия больше не существует")
@@ -69,6 +79,9 @@ func (c *Controller) planRemovalLocked(p *assignmentPlan) error {
 		if n.Groups.Main != "" {
 			label = "Выбранный сервер под основной группой"
 		}
+		if req.Operation == "deleteServer" && n.Groups.Main == "" {
+			p.Warnings = append(p.Warnings, "После удаления выберите основной сервер на главной. До этого новые VPN-соединения смогут использовать только доступные запасные серверы.")
+		}
 		p.change("main", label, "", []string{n.Profiles.Active}, optionalID(next))
 		n.Profiles.Active = next
 		n.Profiles.AwaitMain = next == ""
@@ -82,7 +95,16 @@ func (c *Controller) planRemovalLocked(p *assignmentPlan) error {
 			continue
 		}
 		if p.removed[proxy.Profile] {
-			if req.Operation == "transfer" {
+			if req.Operation == "deleteServer" && proxy.Source != "" {
+				p.change("proxy", proxy.Name, "Прокси, созданный подпиской для этого сервера, будет удалён", []string{proxy.Profile}, nil)
+				p.write("proxies.json")
+				continue
+			}
+			if req.Operation == "deleteServer" {
+				p.change("proxy", proxy.Name, "Прокси перейдёт на основной сервер", []string{proxy.Profile}, []string{""})
+				proxy.Profile = ""
+				p.write("proxies.json")
+			} else if req.Operation == "transfer" {
 				p.change("proxy", proxy.Name, "", []string{proxy.Profile}, []string{req.Target})
 				proxy.Profile = req.Target
 				p.write("proxies.json")
@@ -127,6 +149,23 @@ func (c *Controller) planRemovalLocked(p *assignmentPlan) error {
 			g.Members = distinctTargets(g.Members, "")
 			p.change("group", g.Name, "", before, g.Members)
 			p.write("groups.json")
+			continue
+		}
+		if req.Operation == "deleteServer" {
+			previous := c.membersLocked(g)
+			if !slices.Contains(previous, req.Source) && !slices.Contains(before, req.Source) {
+				continue
+			}
+			g.Members = slices.DeleteFunc(g.Members, func(id string) bool { return id == req.Source })
+			after := slices.DeleteFunc(slices.Clone(previous), func(id string) bool { return id == req.Source })
+			detail := "Сервер будет удалён из группы"
+			if len(after) == 0 {
+				detail = "В группе не останется серверов"
+			}
+			p.change("group", g.Name, detail, previous, after)
+			if !slices.Equal(g.Members, before) {
+				p.write("groups.json")
+			}
 			continue
 		}
 		follows := slices.Contains(g.Subs, req.SubscriptionID)

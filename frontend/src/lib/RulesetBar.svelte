@@ -157,7 +157,7 @@
 
   async function pick(r: RulesetView) {
     if (r.error) {
-      onerror(r.newer ? `Профиль правил «${r.name}» создан более новой версией HyRoute: обновите HyRoute` : `Профиль правил «${r.name}» не загружается: ${r.error}`);
+      onerror(r.newer ? `Профиль правил «${r.name}» создан более новой версией GRoute: обновите GRoute` : `Профиль правил «${r.name}» не загружается: ${r.error}`);
       close(true);
       return;
     }

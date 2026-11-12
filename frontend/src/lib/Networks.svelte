@@ -122,7 +122,7 @@
   // identified: the name of one it has not («Идентификация…») may be shared
   // by other networks.
   const forThisBlock = $derived(
-    !active ? '' : !active.id || !active.identified ? (ui.mac ? 'HyRoute ещё не узнал роутер этой сети — подождите или нажмите «Обновить»' : 'Windows ещё не опознала эту сеть — подождите или нажмите «Обновить»') : '',
+    !active ? '' : !active.id || !active.identified ? (ui.mac ? 'GRoute ещё не узнал роутер этой сети — подождите или нажмите «Обновить»' : 'Windows ещё не опознала эту сеть — подождите или нажмите «Обновить»') : '',
   );
   function forThisNetwork() {
     const a = active;
@@ -177,7 +177,7 @@
   function confirmOff(mt: NetModesView['match']): string | null {
     if (mt?.connect !== 'disconnect') return '';
     const name = mt.unknown ? 'Неизвестная сеть' : hideNet(mt.name);
-    if (!confirm(`Правило «${name}» отключит HyRoute: весь трафик пойдёт напрямую, kill switch снимет блокировку. Продолжить?`)) return null;
+    if (!confirm(`Правило «${name}» отключит GRoute: весь трафик пойдёт напрямую, kill switch снимет блокировку. Продолжить?`)) return null;
     return mt.unknown ? 'unknown' : mt.ruleId;
   }
 
@@ -244,8 +244,8 @@
     <div class="grow">
       <h1>Сети</h1>
       <p class="muted sub">
-        HyRoute сам подключается, отключается или переключает профиль правил, когда компьютер переходит в другую сеть. Правила проверяются сверху
-        вниз, срабатывает первое подходящее. Правило срабатывает при смене сети и при запуске HyRoute. Если вы сами подключились, отключились или
+        GRoute сам подключается, отключается или переключает профиль правил, когда компьютер переходит в другую сеть. Правила проверяются сверху
+        вниз, срабатывает первое подходящее. Правило срабатывает при смене сети и при запуске GRoute. Если вы сами подключились, отключились или
         сменили профиль правил, это действует до следующей смены сети.
       </p>
     </div>
@@ -265,7 +265,7 @@
   {:else if view && cfg}
     {#if view.loadError}
       <div class="note error">
-        networks.json не загружен: {netText(view.loadError, view.state, names)}. Правила сетей не действуют. Исправьте или удалите файл и перезапустите HyRoute.
+        networks.json не загружен: {netText(view.loadError, view.state, names)}. Правила сетей не действуют. Исправьте или удалите файл и перезапустите GRoute.
       </div>
     {/if}
     {#if !view.available}
@@ -303,10 +303,10 @@
       {#if view.state.override && !view.state.restored}
         <div class="note info small">Вы подключались, отключались или меняли профиль правил вручную — правила сетей снова сработают при смене сети.</div>
       {:else if view.state.restored}
-        <div class="note info small">После обновления или переноса HyRoute вернул прежнее состояние — правила сетей снова сработают при смене сети.</div>
+        <div class="note info small">После обновления или переноса GRoute вернул прежнее состояние — правила сетей снова сработают при смене сети.</div>
       {/if}
       {#if view.state.pending && cfg.enabled}
-        <p class="muted small">Сеть определяется — отключение и смена профиля правил ждут, пока {ui.mac ? 'HyRoute узнает её роутер' : 'Windows её опознает'}.</p>
+        <p class="muted small">Сеть определяется — отключение и смена профиля правил ждут, пока {ui.mac ? 'GRoute узнает её роутер' : 'Windows её опознает'}.</p>
       {/if}
       {#if !cfg.enabled}<div class="note info small">Правила сетей выключены.</div>{/if}
       {#if view.current.error}
@@ -318,11 +318,11 @@
       {#if active?.ssidDenied && view.usesSSID}
         <div class="note warn small">
           {#if ui.mac}
-            macOS не сообщает службе HyRoute имя Wi-Fi, поэтому условия «Имя Wi-Fi» не срабатывают. Узнавать сеть по роутеру можно условием «Именно эта
+            macOS не сообщает службе GRoute имя Wi-Fi, поэтому условия «Имя Wi-Fi» не срабатывают. Узнавать сеть по роутеру можно условием «Именно эта
             сеть».
           {:else}
-            Windows не даёт HyRoute имя Wi-Fi. В Windows 11 24H2 и новее включите «Параметры → Конфиденциальность и защита → Расположение → Разрешить
-            классическим приложениям доступ к расположению». Пока HyRoute сравнивает имя Wi-Fi с именем сети в Windows.
+            Windows не даёт GRoute имя Wi-Fi. В Windows 11 24H2 и новее включите «Параметры → Конфиденциальность и защита → Расположение → Разрешить
+            классическим приложениям доступ к расположению». Пока GRoute сравнивает имя Wi-Fi с именем сети в Windows.
           {/if}
         </div>
       {/if}
@@ -394,7 +394,7 @@
           {#if !view.rulesetsNote.startsWith('Профили')}<button class="link" onclick={() => go('rules')}>Открыть «Правила»</button>{/if}
         </p>
       {/if}
-      <p class="muted small">Сюда попадает и сеть, которую HyRoute не смог определить.</p>
+      <p class="muted small">Сюда попадает и сеть, которую GRoute не смог определить.</p>
       {#if unknownWarn}<div class="note warn small">{unknownWarn}</div>{/if}
       {#if unknownRsNote}<p class="muted small">{unknownRsNote}</p>{/if}
     </section>

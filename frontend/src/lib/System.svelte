@@ -335,7 +335,7 @@
       </div>
       <p class="muted small">
         Обновления берутся из GitHub Releases ({updates.repo || 'не задан'}; ядро — apernet/hysteria) и проверяются по SHA256.
-        HyRoute устанавливает новую версию отдельной программой после выхода и возвращает прежнюю, если новая не запустилась.
+        GRoute устанавливает новую версию отдельной программой после выхода и возвращает прежнюю, если новая не запустилась.
       </p>
     {/if}
   </section>
@@ -344,17 +344,17 @@
     <h2><Icon name="power" size={17} /> Запуск</h2>
     {#if ui.mac}
       <p class="muted small">
-        Служба HyRoute запускается вместе с Mac всегда и подключается сама, если включено «Подключаться сразу после запуска». Окно HyRoute можно
+        Служба GRoute запускается вместе с Mac всегда и подключается сама, если включено «Подключаться сразу после запуска». Окно GRoute можно
         закрыть: подключение остаётся.
       </p>
     {:else if autostart}
       <label class="check">
         <input type="checkbox" checked={autostart.enabled} disabled={!autostart.allowed && !autostart.enabled}
           onchange={(e) => settle(e, (el) => run(() => api.SetAutostart(el.checked), 'Сохранено'), () => autostart?.enabled)} />
-        Запускать HyRoute при входе в Windows
+        Запускать GRoute при входе в Windows
       </label>
       <p class="muted small">
-        HyRoute запустится в трее (или свёрнутым, если трей выключен ниже). Windows не спрашивает разрешения администратора: запуск идёт через
+        GRoute запустится в трее (или свёрнутым, если трей выключен ниже). Windows не спрашивает разрешения администратора: запуск идёт через
         задачу «HyRoute (&lt;SID&gt;)» в Планировщике заданий, у каждого пользователя Windows своя.
       </p>
       {#if !autostart.allowed}
@@ -374,7 +374,7 @@
     {#if !ui.mac}
     <label class="check">
       <input type="checkbox" checked={prefs.closeToTray ?? true} disabled={!prefsLoaded} onchange={(e) => settle(e, (el) => savePrefs({ closeToTray: el.checked }), () => prefs.closeToTray ?? true)} />
-      Кнопка × сворачивает HyRoute в трей
+      Кнопка × сворачивает GRoute в трей
     </label>
     <p class="muted small">Окно открывается щелчком по значку в трее. Выйти из программы — «Выход» в меню значка (правая кнопка мыши).</p>
     {/if}
@@ -383,7 +383,7 @@
       Подключаться сразу после запуска
     </label>
     <p class="muted small">
-      Вместе с автозапуском HyRoute сам восстановит подключение после перезагрузки. Если включён kill switch, до этого момента интернет открыт:
+      Вместе с автозапуском GRoute сам восстановит подключение после перезагрузки. Если включён kill switch, до этого момента интернет открыт:
       перезагрузка снимает его блокировку. Если включены «Сети», при запуске сначала действует правило текущей сети; эта настройка — когда правило
       говорит «не менять» или сети ещё нет.
     </p>
@@ -398,29 +398,29 @@
     <section class="card">
       <h2><Icon name="shield" size={17} /> Kill switch</h2>
       <label class="check"><input type="checkbox" checked={routing.killSwitch ?? false} onchange={(e) => settle(e, (el) => saveRouting({ killSwitch: el.checked }), () => routing?.killSwitch ?? false)} />
-        Закрывать интернет, если HyRoute перестал работать</label>
+        Закрывать интернет, если GRoute перестал работать</label>
       {#if ui.mac}
       <p class="muted small">
-        Если служба HyRoute остановится во время подключения (сбой, её завершили) или откажет перехват, трафик не пойдёт напрямую: macOS
+        Если служба GRoute остановится во время подключения (сбой, её завершили) или откажет перехват, трафик не пойдёт напрямую: macOS
         (брандмауэр pf) заблокирует соединения, пока вы снова не подключитесь или не нажмёте «Открыть интернет». Блокировку снимают кнопки
         «Отключить» и «Открыть интернет», выключение этой настройки и перезагрузка Mac. Во время блокировки работают локальная сеть, DNS-запросы
-        macOS, сама служба HyRoute, Hysteria и Xray.
+        macOS, сама служба GRoute, Hysteria и Xray.
       </p>
       {:else}
       <p class="muted small">
-        Если HyRoute закроется во время подключения (окно закрыто, «Снять задачу» в диспетчере задач, сбой) или откажет драйвер перехвата,
+        Если GRoute закроется во время подключения (окно закрыто, «Снять задачу» в диспетчере задач, сбой) или откажет драйвер перехвата,
         трафик не пойдёт напрямую: Windows заблокирует соединения, пока вы снова не подключитесь или не нажмёте «Открыть интернет». Если отказал
-        движок перехвата, HyRoute через 5 секунд переподключится сам (не больше 3 раз за 10 минут), блокировка держится всё это время.
+        движок перехвата, GRoute через 5 секунд переподключится сам (не больше 3 раз за 10 минут), блокировка держится всё это время.
         Блокировку снимают кнопки «Отключить» и «Открыть интернет», выключение этой настройки и перезагрузка Windows, а завершение работы и
-        выход из Windows — если HyRoute в этот момент запущен. Если он уже закрыт, при быстром запуске Windows блокировка переживёт выключение. Правило сети «Отключить» снимает блокировку так же, как кнопка «Отключить».
+        выход из Windows — если GRoute в этот момент запущен. Если он уже закрыт, при быстром запуске Windows блокировка переживёт выключение. Правило сети «Отключить» снимает блокировку так же, как кнопка «Отключить».
         Во время блокировки работают локальная сеть, DNS-запросы Windows (и зашифрованный DNS к DNS-серверам адаптеров на момент подключения),
-        сам HyRoute и Hysteria.
+        сам GRoute и Hysteria.
       </p>
       {/if}
       {#if routing.killSwitch && info && !info.protectedLocation}
         <div class="note warn small">
           HyRoute не в Program Files или его папку могут менять программы без прав администратора, поэтому после выключения компьютера он сам не
-          покажет оставшуюся блокировку: интернета не будет, пока вы не запустите HyRoute. Что сделать, написано на главной.
+          покажет оставшуюся блокировку: интернета не будет, пока вы не запустите GRoute. Что сделать, написано на главной.
         </div>
       {/if}
       {#if status?.killSwitch === 'armed'}
@@ -503,7 +503,7 @@
   {#if info}
     {#if info.missing.length}
       <div class="note error">
-        Нет файлов: {info.missing.join(', ')}. HyRoute скачает их при следующем запуске (нужен интернет) или возьмёт из полного архива HyRoute.
+        Нет файлов: {info.missing.join(', ')}. GRoute скачает их при следующем запуске (нужен интернет) или возьмёт из полного архива GRoute.
       </div>
     {/if}
 
@@ -514,10 +514,10 @@
       <h3>Драйвер WinDivert</h3>
       <p>{info.driver}{status?.stats?.driverVersion ? ` · версия ${status.stats.driverVersion}` : ''}</p>
       {#if info.legacy.length}
-        <div class="note warn">Запущены драйверы WinDivert 1.x ({info.legacy.join(', ')}): порядок обработки пакетов относительно HyRoute не определён.</div>
+        <div class="note warn">Запущены драйверы WinDivert 1.x ({info.legacy.join(', ')}): порядок обработки пакетов относительно GRoute не определён.</div>
       {/if}
       <p class="muted">
-        zapret и GoodbyeDPI используют ту же службу WinDivert и работают вместе с HyRoute: HyRoute видит пакеты раньше них (приоритет 1000),
+        zapret и GoodbyeDPI используют ту же службу WinDivert и работают вместе с GRoute: GRoute видит пакеты раньше них (приоритет 1000),
         а трафик, отправленный напрямую, дальше обрабатывают они.
       </p>
       <button onclick={() => run(() => api.DeleteStaleDriverService(), 'Служба удалена')} disabled={!info.driverStale}>
@@ -526,7 +526,7 @@
 
       <h3>Брандмауэр</h3>
       <p>
-        Правило «{info.firewallRule}»: <b>{info.firewallRuleOK ? 'есть' : 'нет'}</b>. HyRoute создаёт его, чтобы Windows Firewall пропускал
+        Правило «{info.firewallRule}»: <b>{info.firewallRuleOK ? 'есть' : 'нет'}</b>. GRoute создаёт его, чтобы Windows Firewall пропускал
         локальные соединения к relay, и проверяет при каждом подключении.
         <br />Правила для локальных прокси: {(info.proxyRules ?? []).join(', ') || 'нет'}.
       </p>
@@ -553,6 +553,14 @@
     </details>
     {/if}
   {/if}
+  <section class="card">
+    <h2>О программе</h2>
+    <a href="https://github.com/lardan099/HyRoute" target="_blank" rel="noopener noreferrer"
+      onclick={(e) => {
+        const runtime = (window as Window & { runtime?: { BrowserOpenURL?: (url: string) => void } }).runtime;
+        if (runtime?.BrowserOpenURL) { e.preventDefault(); runtime.BrowserOpenURL(e.currentTarget.href); }
+      }}>GRoute — форк HyRoute</a>
+  </section>
 </div>
 
 <style>

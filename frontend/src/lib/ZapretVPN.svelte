@@ -87,7 +87,7 @@
         {#if route.tunnel}
           <label class="check"
             ><input type="radio" name="zv-how" value="rules" bind:group={how} />Как в ваших правилах
-            <span class="muted small">— HyRoute не добавит своего правила</span></label
+            <span class="muted small">— GRoute не добавит своего правила</span></label
           >
         {/if}
         <label class="check"><input type="radio" name="zv-how" value="server" bind:group={how} />Через сервер</label>
@@ -100,10 +100,10 @@
             <label class="check small"
               ><input type="checkbox" bind:checked={editOwn} />Изменить ваше правило «{hide(own.name)}»: оно пойдёт через выбранный сервер</label
             >
-            {#if !editOwn}<span class="muted small">Иначе HyRoute будет держать своё правило «Обход DPI: {route.name}» выше вашего.</span>{/if}
+            {#if !editOwn}<span class="muted small">Иначе GRoute будет держать своё правило «Обход DPI: {route.name}» выше вашего.</span>{/if}
           {:else}
             <span class="muted small"
-              >Отдельного правила для {route.name} у вас нет: HyRoute будет держать своё «Обход DPI: {route.name}» через этот сервер, пока сервис идёт через
+              >Отдельного правила для {route.name} у вас нет: GRoute будет держать своё «Обход DPI: {route.name}» через этот сервер, пока сервис идёт через
               VPN.</span
             >
           {/if}

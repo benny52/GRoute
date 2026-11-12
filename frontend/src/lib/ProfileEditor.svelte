@@ -290,8 +290,8 @@
         {/if}
 
         <span></span>
-        <label class="check" title="HyRoute сам резолвит адрес и передаёт Xray IP: исключение из перехвата совпадает точно">
-          <input type="checkbox" bind:checked={p.pinServerIP} /> Резолвить адрес в HyRoute и передавать IP
+        <label class="check" title="GRoute сам резолвит адрес и передаёт Xray IP: исключение из перехвата совпадает точно">
+          <input type="checkbox" bind:checked={p.pinServerIP} /> Резолвить адрес в GRoute и передавать IP
         </label>
       </div>
     </details>
@@ -323,8 +323,8 @@
         <input id="pe-hop" bind:value={p.hop.interval} placeholder="интервал, напр. 30s" style="width: 170px" />
 
         <span></span>
-        <label class="check" title="HyRoute сам резолвит адрес и передаёт Hysteria IP: исключение из перехвата совпадает точно">
-          <input type="checkbox" bind:checked={p.pinServerIP} /> Резолвить адрес в HyRoute и передавать IP
+        <label class="check" title="GRoute сам резолвит адрес и передаёт Hysteria IP: исключение из перехвата совпадает точно">
+          <input type="checkbox" bind:checked={p.pinServerIP} /> Резолвить адрес в GRoute и передавать IP
         </label>
       </div>
     </details>

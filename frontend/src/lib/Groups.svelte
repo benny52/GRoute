@@ -162,7 +162,7 @@
       <Icon name="server" size={28} />
       <div>
         <b>Групп пока нет.</b>
-        <p class="muted">Например, «Авто»: DE1, DE2 и NL1 — HyRoute будет отправлять новые соединения через самый быстрый из них.</p>
+        <p class="muted">Например, «Авто»: DE1, DE2 и NL1 — GRoute будет отправлять новые соединения через самый быстрый из них.</p>
       </div>
     </div>
   {/if}
@@ -198,7 +198,7 @@
       {#if g.runLimit}
         <div class="note info small row">
           <span class="grow">
-            Серверов {g.memberViews.length}: одновременно работают {g.runLimit} самых быстрых, остальные HyRoute проверяет по очереди и подменяет, если найдёт
+            Серверов {g.memberViews.length}: одновременно работают {g.runLimit} самых быстрых, остальные GRoute проверяет по очереди и подменяет, если найдёт
             быстрее.
           </span>
           <button class="mini" onclick={() => (showAll[g.id] = !showAll[g.id])}>{showAll[g.id] ? 'Только работающие' : 'Показать все'}</button>

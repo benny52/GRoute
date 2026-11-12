@@ -32,13 +32,19 @@ type Result struct {
 	Warnings []string
 	// Errors: servers that could not be converted ("<name>: …").
 	Errors []string
+	// Skipped identifies each rejected configuration entry without serializing its settings.
+	Skipped  []SkippedServer
+	protocol string
 }
 
-func (r *Result) other(t string) {
+type SkippedServer struct{ Name, Protocol, Reason string }
+
+func (r *Result) other(t, name string) {
 	if t == "" {
 		t = "?"
 	}
 	r.Other[strings.ToLower(t)]++
+	r.Skipped = append(r.Skipped, SkippedServer{Name: name, Protocol: t})
 }
 
 // Convert reads body as Clash, sing-box or Xray. ok is false when it is
@@ -133,6 +139,7 @@ func (r *Result) add(link string) { r.Links = append(r.Links, link) }
 
 func (r *Result) fail(name string, err error) {
 	r.Errors = append(r.Errors, fmt.Sprintf("%s: %v", orUnnamed(name), err))
+	r.Skipped = append(r.Skipped, SkippedServer{name, r.protocol, err.Error()})
 }
 
 func (r *Result) warn(name, w string) {
@@ -182,6 +189,7 @@ type sbTLS struct {
 }
 
 func (r *Result) singbox(typ, tag string, raw json.RawMessage) {
+	r.protocol = typ
 	switch strings.ToLower(typ) {
 	case "vless":
 		var o struct {
@@ -251,7 +259,7 @@ func (r *Result) singbox(typ, tag string, raw json.RawMessage) {
 		r.hy2Link(l)
 	default:
 		if !service(typ) {
-			r.other(typ)
+			r.other(typ, tag)
 		}
 	}
 }
@@ -268,9 +276,10 @@ func (r *Result) hy2Link(l hy2uri.Link) {
 // ---- Xray ----
 
 func (r *Result) xray(protocol, name string, raw json.RawMessage) {
+	r.protocol = protocol
 	if strings.ToLower(protocol) != "vless" {
 		if !service(protocol) {
-			r.other(protocol)
+			r.other(protocol, name)
 		}
 		return
 	}
@@ -529,6 +538,7 @@ func (r *Result) clash(body []byte) bool {
 	for _, p := range cfg.Proxies {
 		c := clashProxy(p)
 		name := c.str("name")
+		r.protocol = c.str("type")
 		switch typ := strings.ToLower(c.str("type")); typ {
 		case "vless":
 			r.clashVLESS(name, c)
@@ -549,7 +559,7 @@ func (r *Result) clash(body []byte) bool {
 			r.hy2Link(l)
 		default:
 			if !service(typ) {
-				r.other(typ)
+				r.other(typ, name)
 			}
 		}
 	}

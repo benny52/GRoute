@@ -115,7 +115,7 @@
 <div class="wrap">
   <header>
     <h1>Журнал</h1>
-    <p class="muted sub">Что делают HyRoute и серверы (Hysteria и Xray). Пригодится, если что-то не работает.</p>
+    <p class="muted sub">Что делают GRoute и серверы (Hysteria и Xray). Пригодится, если что-то не работает.</p>
   </header>
   <div class="row">
     <select bind:value={source} title="Чей журнал">

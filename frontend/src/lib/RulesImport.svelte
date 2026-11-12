@@ -219,7 +219,7 @@
     <p class="muted small intro">
       Вставьте правила или откройте файл: SwitchyOmega и ZeroOmega (правила текстом или PAC), v2rayN (строки таблицы правил или JSON), Throne, Nekoray,
       sing-box, FoxyProxy, Clash, список AutoProxy / GFWList, ACL сервера Hysteria или просто список сайтов. Формат определяется сам. Потом выберите,
-      куда в HyRoute идёт каждый выход той программы.
+      куда в GRoute идёт каждый выход той программы.
     </p>
 
     <div class="cols">
@@ -285,7 +285,7 @@
     {#if res}
       <div class="result">
         <div class="row">
-          <b class="grow small">Правила HyRoute</b>
+          <b class="grow small">Правила GRoute</b>
           {#if masked}<button class="link small" onclick={() => (revealed = true)}>Показать</button>{/if}
         </div>
         <pre class="ro">{masked ? hide(res.text) : res.text}</pre>

@@ -27,6 +27,7 @@ type ProfileSummary struct {
 	// Protocol is "hysteria2" or "vless"; Transport describes a VLESS
 	// connection ("REALITY", "WS · TLS"), Flow is its flow ("" none).
 	Protocol  string `json:"protocol"`
+	Engine    string `json:"engine"`
 	Transport string `json:"transport"`
 	Flow      string `json:"flow"`
 	// Main: rules without an explicit profile use this one.
@@ -56,7 +57,7 @@ func (c *Controller) summaryLocked(p *hysteria.Profile) ProfileSummary {
 	s := ProfileSummary{ID: p.ID, Name: p.Name, Server: hysteria.ServerString(p.Host, p.Ports), Host: p.Host,
 		Obfs: p.Obfs.Type, SNI: p.TLS.SNI, Insecure: p.TLS.Insecure, Pinned: p.TLS.PinSHA256 != "",
 		Main: p.ID == c.mainTargetLocked(), Source: p.Source, Missing: p.Missing, UsedBy: c.usedByLocked(p.ID), FastOpen: fastOpen(p),
-		Protocol: "hysteria2"}
+		Protocol: "hysteria2", Engine: p.EngineName()}
 	if p.IsVLESS() {
 		s.Protocol, s.Transport, s.Flow = "vless", p.Transport(), p.VLESS.Flow
 		s.SNI, s.Pinned = p.VLESS.SNI, p.VLESS.PinSHA256 != ""

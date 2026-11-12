@@ -2,7 +2,11 @@
   <img src="build/windows/icon.png" width="96" alt="">
 </p>
 
-<h1 align="center">HyRoute</h1>
+<h1 align="center">GRoute Portable</h1>
+
+[GRoute — форк HyRoute](https://github.com/lardan099/HyRoute). Распакуйте портативный ZIP для Windows и запустите `GRoute.exe`. Настройки и профиль WebView2 создаются в папке `Data` рядом с программой. [Руководство GRoute](docs/GUIDE.md).
+
+Ниже сохранены описание, ссылки на выпуски и материалы исходного проекта HyRoute.
 
 <p align="center">
   Клиент Hysteria 2 и VLESS для Windows и macOS с раздельной маршрутизацией и обходом DPI без VPN.<br>
