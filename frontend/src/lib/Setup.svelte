@@ -23,6 +23,7 @@
   // elsewhere meanwhile.
   import { ui, hide, hideUserPath, serverLabel, mainTarget, mainText, profileName, setupStep, setSetupStep, finishSetup } from '../state.svelte';
   import Icon from './Icon.svelte';
+  import BrowserPageFallback from './BrowserPageFallback.svelte';
   import RestartAsAdmin from './RestartAsAdmin.svelte';
   import TargetOptions from './TargetOptions.svelte';
   import RouteWizard from './RouteWizard.svelte';
@@ -236,6 +237,8 @@
   let ext = $state<BrowserExtView | null>(null);
   let wantBrowser = $state(false);
   let extNote = $state('');
+  let failedBrowserPage = $state('');
+  let openingBrowser = $state(false);
   const extBrowsers = $derived(ext?.browsers.filter((b) => b.exe) ?? []);
 
   $effect(() => {
@@ -284,10 +287,30 @@
 
   // ---- done ----
   async function openBrowser(id: string) {
-    extNote = '';
+    if (openingBrowser) return;
+    openingBrowser = true;
+    extNote = failedBrowserPage = '';
     try {
       await api.OpenBrowserExtensions(id);
-      extNote = 'Путь к папке скопирован.';
+      extNote = 'Страница расширений открыта.';
+    } catch (e) {
+      extNote = errText(e);
+      failedBrowserPage = extBrowsers.find((b) => b.id === id)?.page ?? '';
+    } finally {
+      openingBrowser = false;
+    }
+  }
+
+  async function browserFolder(action: 'copy' | 'show') {
+    if (!ext) return;
+    try {
+      if (action === 'copy') {
+        await api.CopyText(ext.dir);
+        extNote = 'Путь к папке скопирован.';
+      } else {
+        await api.OpenBrowserExtensionFolder();
+        extNote = '';
+      }
     } catch (e) {
       extNote = errText(e);
     }
@@ -349,7 +372,7 @@
     {#if step === 'hello'}
       <h1>Добро пожаловать!</h1>
       <p class="lead">
-        {ui.portable && !ui.installed ? 'GRoute Portable' : 'GRoute'} — VPN, в котором вы сами выбираете, что через него пускать: отдельные сервисы и программы или весь интернет. Всё остальное
+        GRoute — VPN, в котором вы сами выбираете, что через него пускать: отдельные сервисы и программы или весь интернет. Всё остальное
         работает напрямую, как без VPN.
       </p>
       <p>
@@ -589,14 +612,19 @@
           <div>
             <b>Добавьте кнопку GRoute в браузер</b>
             <ol>
-              <li>Нажмите свой браузер: откроется страница расширений и папка с расширением.</li>
+              <li>Нажмите название браузера, чтобы открыть страницу расширений.</li>
               <li>Включите «Режим разработчика» — переключатель вверху страницы.</li>
-              <li>Перетащите папку <b>{ui.portable ? 'extension' : 'browser-extension'}</b> на страницу и закрепите значок GRoute (значок пазла → булавка).</li>
+              <li>Нажмите «Загрузить распакованное расширение» и укажите папку расширения. После загрузки закрепите значок GRoute в браузере.</li>
             </ol>
             <div class="row wrap">
-              {#each extBrowsers as b (b.id)}<button onclick={() => openBrowser(b.id)}>{b.name}</button>{/each}
+              {#each extBrowsers as b (b.id)}<button disabled={openingBrowser} onclick={() => openBrowser(b.id)}>{b.name}</button>{/each}
             </div>
             {#if extNote}<p class="small">{hide(extNote)}</p>{/if}
+            {#if failedBrowserPage}<BrowserPageFallback page={failedBrowserPage} />{/if}
+            <div class="row wrap">
+              {#if !ui.mac}<button onclick={() => browserFolder('show')} disabled={openingBrowser}>Показать папку</button>{/if}
+              <button onclick={() => browserFolder('copy')} disabled={openingBrowser}>Скопировать путь к папке</button>
+            </div>
             <p class="small muted">Можно и потом: «Настройки» → «Расширение для браузера».</p>
           </div>
         </div>

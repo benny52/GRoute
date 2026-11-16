@@ -1084,6 +1084,9 @@ export interface GroupBrief {
   rejected: number;
 }
 
+// Reserved route supplied by the local Telegram bridge (tgws.ProfileID).
+export const telegramBridgeId = 'telegram-ws';
+
 // isGroupId: a target ID naming a server group (servers and groups share
 // one namespace; the prefix keeps them apart).
 export function isGroupId(id: string | undefined | null): boolean {
@@ -1677,6 +1680,7 @@ interface GUI {
 export interface BrowserApp {
   id: string;
   name: string;
+  page?: string; // extensions manager address supplied by the Windows client
   exe: string; // '' = not found
   linked: boolean; // its registry key points at HyRoute's host
 }
@@ -1697,9 +1701,8 @@ interface GUI {
   InstallBrowserExt(): Promise<BrowserExtView>;
   SetBrowserExtOn(on: boolean): Promise<BrowserExtView>;
   RemoveBrowserExt(): Promise<BrowserExtView>;
-  // Opens the browser's extensions page, shows the folder in Explorer and
-  // copies its path.
   OpenBrowserExtensions(id: string): Promise<void>;
+  OpenBrowserExtensionFolder(): Promise<void>; // Windows
 }
 
 // ==== conn-rules ====

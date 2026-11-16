@@ -273,7 +273,7 @@
   <aside>
     <div class="brand">
       <img class="logo" src={brandIcon} alt="" width="30" height="30" />
-      {ui.portable && !ui.installed ? 'GRoute Portable' : 'GRoute'}
+      GRoute
     </div>
     <nav>
       {#each shown as p (p.id)}

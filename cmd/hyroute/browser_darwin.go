@@ -191,11 +191,16 @@ func (g *GUI) OpenBrowserExtensions(id string) error {
 			continue
 		}
 		g.CopyText(g.browserDir())
-		g.win.call("reveal", g.browserDir())
+		_ = g.OpenBrowserExtensionFolder()
 		_, err := g.win.call("open.browser", k.app, k.page)
 		return err
 	}
 	return errors.New("неизвестный браузер")
+}
+
+func (g *GUI) OpenBrowserExtensionFolder() error {
+	_, err := g.win.call("reveal", g.browserDir())
+	return err
 }
 
 func (g *GUI) browserLine() string {

@@ -27,6 +27,7 @@ var browserInstallMu sync.Mutex
 type BrowserApp struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
+	Page   string `json:"page"`
 	Exe    string `json:"exe"`    // "" = not found
 	Linked bool   `json:"linked"` // its registry key points at HyRoute's host
 }
@@ -139,7 +140,7 @@ func (g *GUI) BrowserExtInfo() BrowserExtView {
 	sid, _ := g.browserHive()
 	local := g.userLocalAppData(sid)
 	for _, k := range browserKinds {
-		b := BrowserApp{ID: k.id, Name: k.name, Exe: findBrowser(k, local)}
+		b := BrowserApp{ID: k.id, Name: k.name, Page: k.page, Exe: findBrowser(k, local)}
 		b.Linked = sid != "" && v.Installed
 		for _, key := range k.keys {
 			b.Linked = b.Linked && registryPoints(hostKey(sid, key), manifest)
@@ -334,9 +335,8 @@ func asBrowserUser(sid string, f func() error) error {
 	return <-done
 }
 
-// OpenBrowserExtensions opens the browser's extensions page and shows the
-// extension's folder in Explorer, its path on the clipboard: the user
-// turns on developer mode and drags the folder onto the page.
+// OpenBrowserExtensions keeps the extension path on the clipboard for
+// the browser's «Load unpacked» dialog.
 func (g *GUI) OpenBrowserExtensions(id string) error {
 	sid, _ := g.browserHive()
 	local := g.userLocalAppData(sid)
@@ -348,20 +348,22 @@ func (g *GUI) OpenBrowserExtensions(id string) error {
 		if exe == "" {
 			return errors.New(k.name + " не найден")
 		}
-		dir := g.browserDir()
-		g.CopyText(dir)
-		explorer := filepath.Join(windowsDir(), "explorer.exe")
-		shellExecuteArgs(explorer, `/select,"`+dir+`"`)
-		return shellExecuteArgs(exe, k.page)
+		_ = g.CopyText(g.browserDir())
+		return navigateBrowserExtensions(exe, k.page)
 	}
 	return errors.New("неизвестный браузер")
 }
 
-func windowsDir() string {
-	if d, err := windows.GetWindowsDirectory(); err == nil {
-		return d
+func (g *GUI) OpenBrowserExtensionFolder() error {
+	dir := g.browserDir()
+	if !filepath.IsAbs(dir) || !fileExists(filepath.Join(dir, "manifest.json")) {
+		return errors.New("сначала подготовьте файлы расширения")
 	}
-	return `C:\Windows`
+	win, err := windows.GetWindowsDirectory()
+	if err != nil {
+		return err
+	}
+	return shellExecuteArgs(filepath.Join(win, "explorer.exe"), `/select,"`+dir+`"`)
 }
 
 // findBrowser is the browser's exe: under Program Files, Program Files

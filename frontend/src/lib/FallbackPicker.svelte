@@ -16,7 +16,7 @@
     if (!id) return `Основной сервер — ${main ? mainText(main) : 'не выбран'}`;
     if (isGroupId(id)) return `«${profileName(id)}» (группа)`;
     const p = ui.profiles.find((x) => x.id === id);
-    if (!p) return 'удалённый сервер';
+    if (!p) return profileName(id);
     return `${hide(p.name)}${p.sourceName ? ` · ${hide(p.sourceName)}` : ''}${p.missing ? ' — нет в подписке' : ''}`;
   };
   // Compare saved assignments by ID, and effective routes by today's main.

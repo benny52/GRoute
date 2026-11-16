@@ -114,6 +114,44 @@ func waitZapret(t *testing.T, c *Controller, state string) ZapretView {
 	return ZapretView{}
 }
 
+func TestZapretPickKeepsUnselectedServices(t *testing.T) {
+	c, _ := zapFixture(t)
+	in := ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube, zapret.Discord, zapret.Sites}, Sites: []string{"site.example"}}
+	zapretCheckFunc = func(context.Context, int, []string) zapret.Result { return zapret.Result{OK: true} }
+	if err := c.SaveZapret(in); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ZapretPick(); err != nil {
+		t.Fatal(err)
+	}
+	in.Targets = []zapret.Target{zapret.YouTube, zapret.Discord}
+	in.Methods = map[zapret.Target]string{zapret.Discord: "seqovl"}
+	if err := c.SaveZapret(in); err != nil {
+		t.Fatal(err)
+	}
+	zapretCheckFunc = func(_ context.Context, _ int, urls []string) zapret.Result {
+		if !strings.Contains(urls[0], "youtube") {
+			t.Errorf("probed a service outside automatic mode: %v", urls)
+		}
+		return zapret.Result{OK: true}
+	}
+	v, err := c.ZapretPick()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Pick.Results) != 1 || v.Pick.Results[zapret.YouTube] != zapret.None {
+		t.Fatalf("unexpected targets: %+v", v.Pick.Results)
+	}
+	cfg, err := c.Store.LoadZapret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := c.zapretNetKey()
+	if cfg.Methods[zapret.Discord] != "seqovl" || cfg.Picked[key].Methods[zapret.Sites] != zapret.None || cfg.Picked[key].Methods[zapret.Discord] != zapret.None {
+		t.Fatalf("lost existing choices: %+v", cfg)
+	}
+}
+
 func TestZapretFirstEnableRequiresVerifiedComponent(t *testing.T) {
 	c, _ := zapFixture(t)
 	attempts := 0

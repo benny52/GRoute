@@ -916,12 +916,17 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 		}
 		return c.zapretInfoLocked(p, b), errors.New("выберите, что обходить")
 	}
+	targets := healTargets(cfg)
+	if len(targets) == 0 {
+		p, b, _ := c.pickState()
+		return c.zapretInfoLocked(p, b), errors.New("для подбора выберите «Автоматически» у включённого сервиса с доменным именем")
+	}
 	ctx, cancel := context.WithCancel(c.zapretLife)
 	defer cancel()
 	pick := &ZapretPickView{Running: true, Step: "Готовлю zapret2…", Total: len(zapret.Methods) + 1,
 		Results: map[zapret.Target]string{}, Diagnosis: map[zapret.Target]ZapretDiag{}, Auto: why != "", Why: why}
 	checks := map[zapret.Target][]string{}
-	for _, t := range cfg.Targets {
+	for _, t := range targets {
 		checks[t] = c.zapretChecks(t, cfg.Sites, nil)
 	}
 	c.pickMu.Lock()
@@ -974,15 +979,7 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 		return out
 	}
 
-	// Without a bypass: what is blocked, and how. A service the user sent
-	// through the VPN is not checked: its traffic may take the tunnel.
-	// Nor are own sites given only by address: nothing to check them by.
-	left := slices.DeleteFunc(slices.Clone(cfg.Targets), func(t zapret.Target) bool {
-		return cfg.Methods[t] == zapret.VPN || len(zapret.Checks(t, cfg.Sites)) == 0
-	})
-	if len(left) == 0 {
-		return finish(errors.New("подбирать нечего: выбранные сервисы идут через VPN или заданы только адресами (их подбор не проверяет)"))
-	}
+	left := slices.Clone(targets)
 	update(func(p *ZapretPickView) {
 		p.Step = "Проверяю без обхода: что блокируется и как"
 	})
@@ -1292,7 +1289,24 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 	if picked == nil {
 		picked = map[string]zapret.Picked{}
 	}
-	picked[key] = zapret.Picked{At: time.Now(), Methods: found, Working: working, SkippedSites: skipped}
+	// Preserve previous results for services outside this pick. A fixed
+	// service can return to automatic mode later on this network.
+	previous := picked[key]
+	for t, method := range previous.Methods {
+		if !slices.Contains(targets, t) {
+			found[t] = method
+		}
+	}
+	keptWorking := maps.Clone(working)
+	for t, variants := range previous.Working {
+		if !slices.Contains(targets, t) {
+			keptWorking[t] = variants
+		}
+	}
+	if !slices.Contains(targets, zapret.Sites) {
+		skipped = previous.SkippedSites
+	}
+	picked[key] = zapret.Picked{At: time.Now(), Methods: found, Working: keptWorking, SkippedSites: skipped}
 	trimPicked(picked)
 	c.zapretCfg.Picked = picked
 	if err := c.Store.SaveZapret(c.zapretCfg); err != nil {

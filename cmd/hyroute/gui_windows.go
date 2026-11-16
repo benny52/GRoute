@@ -372,11 +372,8 @@ func windowsVersion() string {
 }
 
 func windowsProductName() string {
-	if runningInstalledGRoute() {
-		return "GRoute"
-	}
 	if isPortableBuild() {
-		return "GRoute Portable"
+		return "GRoute"
 	}
 	return "HyRoute"
 }

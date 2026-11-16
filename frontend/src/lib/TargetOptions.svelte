@@ -1,15 +1,16 @@
 <script lang="ts">
   // The <option>s of a target select (rule, «Всё остальное», fallbacks,
   // proxies, the main server): the servers, then the server groups. A
-  // current value that is neither (deleted) gets an option of its own.
-  import { isGroupId, type GroupView } from '../api';
-  import { ui, hide, serverSections } from '../state.svelte';
+  // current value outside these lists (built-in bridge or deleted target)
+  // keeps its own option.
+  import type { GroupView } from '../api';
+  import { ui, hide, profileName, serverSections } from '../state.svelte';
 
   let { exclude = () => false, current = '' }: { exclude?: (id: string) => boolean; current?: string } = $props();
 
   const sections = $derived(serverSections().map((s) => ({ ...s, list: s.list.filter((p) => !exclude(p.id)) })).filter((s) => s.list.length));
   const groups = $derived(ui.groups.filter((g) => !exclude(g.id)));
-  const dangling = $derived(!!current && !exclude(current) && !ui.profiles.some((p) => p.id === current) && !ui.groups.some((g) => g.id === current));
+  const unlisted = $derived(!!current && !exclude(current) && !ui.profiles.some((p) => p.id === current) && !ui.groups.some((g) => g.id === current));
   const count = (g: GroupView) => g.members.length - g.missing;
 </script>
 
@@ -27,4 +28,4 @@
     {#each groups as g (g.id)}<option value={g.id}>«{hide(g.name)}» (группа · {count(g)})</option>{/each}
   </optgroup>
 {/if}
-{#if dangling}<option value={current}>{isGroupId(current) ? 'удалённая группа' : 'удалённый сервер'}</option>{/if}
+{#if unlisted}<option value={current}>{profileName(current)}</option>{/if}

@@ -1,4 +1,4 @@
-import { isGroupId, type Flow } from '../api';
+import { isGroupId, telegramBridgeId, type Flow } from '../api';
 
 export interface ObservedExit {
   kind: 'direct' | 'block' | 'vpn' | 'unknown';
@@ -16,7 +16,7 @@ export function observedExit(flow: Flow): ObservedExit {
   if (route === 'direct' && (outcome === 'passed' || outcome === 'relayed')) return { kind: 'direct' };
   if (route === 'tunnel' && (outcome === 'relayed' || (outcome === 'tunneled' && (flow.sent > 0 || flow.recv > 0)))) {
     // The Telegram bridge may choose its own upstream; the row does not identify it.
-    if (profile === 'telegram-ws') return { kind: 'unknown', label: 'Мост Telegram · выход неизвестен' };
+    if (profile === telegramBridgeId) return { kind: 'unknown', label: 'Мост Telegram · выход неизвестен' };
     if (profile && !isGroupId(profile)) return { kind: 'vpn', serverId: profile };
     return { kind: 'vpn', label: 'Сервер неизвестен' };
   }

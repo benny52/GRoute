@@ -5,11 +5,16 @@
   import { api, errText, type BrowserExtView } from '../api';
   import { ui, hide, settle } from '../state.svelte';
   import Icon from './Icon.svelte';
+  import BrowserPageFallback from './BrowserPageFallback.svelte';
 
   let view = $state<BrowserExtView | null>(null);
   let error = $state('');
   let ok = $state('');
   let busy = $state(false);
+  let chosen = $state('');
+  let failedBrowser = $state('');
+  const browsers = $derived(view?.browsers?.filter((browser) => browser.exe) ?? []);
+  const browser = $derived(browsers.find((b) => b.id === chosen) ?? browsers[0]);
 
   async function load() {
     try {
@@ -44,7 +49,21 @@
   }
 
   const install = () => run(() => api.InstallBrowserExt(), 'Готово. Осталось добавить расширение в браузер: шаги ниже.');
-  const open = (id: string) => run(() => api.OpenBrowserExtensions(id), 'Путь к папке скопирован.');
+  function open() {
+    if (!view || !browser || busy) return;
+    const id = browser.id;
+    failedBrowser = '';
+    const prepare = !view.installed || !browser.linked;
+    return run(async () => {
+      if (prepare) view = await api.InstallBrowserExt();
+      try {
+        await api.OpenBrowserExtensions(id);
+      } catch (e) {
+        failedBrowser = id;
+        throw e;
+      }
+    }, 'Страница расширений открыта.');
+  }
   const remove = () =>
     confirm('Отвязать браузеры от GRoute и удалить папку расширения? Само расширение уберите на странице расширений браузера.') &&
     run(() => api.RemoveBrowserExt(), 'Связь с браузерами удалена.');
@@ -85,9 +104,27 @@
         <div class="note warn small">В комплекте GRoute отсутствует {ui.portable ? 'browser/groute-browser-host.exe' : 'hyroutectl.exe'}. Распакуйте полный комплект программы.</div>
       {/if}
     {/if}
-    {#if !view.installed}
-      <button class="primary" disabled={busy || !view.host} onclick={install}><Icon name="download" size={15} /> Установить в браузер</button>
+    {#if browser}
+      <div class="picker">
+        <label>Браузер
+          <select value={browser.id} onchange={(e) => { chosen = e.currentTarget.value; failedBrowser = error = ok = ''; }} disabled={busy}>
+            {#each browsers as b (b.id)}<option value={b.id}>{b.name}</option>{/each}
+          </select>
+        </label>
+        <button class="primary" disabled={busy || !view.host} onclick={open}><Icon name="globe" size={15} /> Открыть страницу расширений</button>
+      </div>
+      {#if failedBrowser === browser.id && browser.page && view.installed}
+        <BrowserPageFallback page={browser.page} />
+      {/if}
+      {#if !view.installed || !browser.linked}
+        <p class="muted small">При открытии GRoute подготовит файлы и разрешит расширению смотреть и менять правила.</p>
+      {/if}
     {:else}
+      <p class="muted small">Поддерживаемые браузеры не найдены. Если браузер установлен в другой папке, добавьте расширение через меню управления расширениями в самом браузере.</p>
+      {#if !view.installed}<button disabled={busy || !view.host} onclick={install}>Подготовить файлы расширения</button>{/if}
+    {/if}
+    <p class="muted small">В браузере включите «Режим разработчика», нажмите «Загрузить распакованное расширение» и выберите папку расширения.</p>
+    {#if view.installed}
       <label class="check">
         <input type="checkbox" checked={view.on} disabled={busy}
           onchange={(e) => settle(e, (el) => run(() => api.SetBrowserExtOn(el.checked), el.checked ? 'Расширение включено' : 'Расширение выключено'), () => view?.on ?? false)} />
@@ -95,28 +132,11 @@
       </label>
       <p class="muted small">{view.on ? seenText(view.seen) : 'Выключено: расширение покажет, что GRoute его не пускает.'}</p>
 
-      <h3>Как добавить в браузер</h3>
-      <ol class="steps small">
-        <li>Нажмите свой браузер ниже: откроется страница расширений и папка с расширением, а путь к ней скопируется.</li>
-        <li>Включите «Режим разработчика» — переключатель вверху страницы расширений.</li>
-        <li>Перетащите папку <b>{ui.portable ? 'extension' : 'browser-extension'}</b> на страницу. Или «Загрузить распакованное расширение» → вставьте путь ({ui.mac ? '⌘V' : 'Ctrl+V'}) → «Выбор папки».</li>
-        <li>Закрепите значок GRoute: значок пазла справа от адресной строки → булавка.</li>
-      </ol>
-      {#if view.browsers.length}
-        <div class="row wrap">
-          {#each view.browsers as b (b.id)}
-            <button disabled={busy || !b.exe} onclick={() => open(b.id)} title={b.linked ? 'Связан с GRoute' : 'Не связан: нажмите «Установить заново»'}>
-              {#if b.linked}<Icon name="check" size={14} />{/if}
-              {b.name}
-            </button>
-          {/each}
-        </div>
-      {:else}
-        <p class="muted small">Браузеры на Chromium не найдены. Откройте страницу расширений вручную (chrome://extensions) и загрузите папку ниже.</p>
-      {/if}
-      <div class="row">
+      <h3>Папка расширения</h3>
+      <div class="row wrap">
         <code class="grow path">{hidePath(view.dir)}</code>
-        <button onclick={copyDir} disabled={busy}><Icon name="copy" size={15} /> Копировать</button>
+        {#if !ui.mac}<button onclick={() => run(() => api.OpenBrowserExtensionFolder(), '')} disabled={busy}>Показать папку</button>{/if}
+        <button onclick={copyDir} disabled={busy}><Icon name="copy" size={15} /> Скопировать путь к папке</button>
       </div>
       <p class="muted small">
         {#if ui.portable}
@@ -141,12 +161,18 @@
     margin: 12px 0 4px;
     font-size: 13px;
   }
-  .steps {
-    margin: 0 0 8px;
-    padding-left: 20px;
+  .picker {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0;
   }
-  .steps li {
-    margin: 2px 0;
+  .picker label {
+    display: grid;
+    gap: 4px;
+    min-width: min(180px, 100%);
+    font-size: 13px;
   }
   .path {
     overflow-wrap: anywhere;

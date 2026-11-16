@@ -1,7 +1,7 @@
 // Shared UI state: status, profiles, Privacy mode, theme.
 import { untrack } from 'svelte';
 import { maskDomains, maskHosts, maskIPs, maskURLs } from './privacy';
-import { api, isGroupId, type BackupAppearance, type BackupMsg, type GroupView, type ProfileSummary, type Rule, type Status, type SubAlert } from './api';
+import { api, isGroupId, telegramBridgeId, type BackupAppearance, type BackupMsg, type GroupView, type ProfileSummary, type Rule, type Status, type SubAlert } from './api';
 import { netUnknownName, type NetState } from './api'; // netmodes
 
 function get(k: string): string | null {
@@ -150,6 +150,7 @@ export function hide(s: string | undefined | null): string {
 // (serverLabel).
 export function profileName(id: string): string {
   if (!id) return '';
+  if (id === telegramBridgeId) return 'Обход DPI · Telegram';
   if (isGroupId(id)) return hide(ui.groups.find((g) => g.id === id)?.name ?? 'удалённая группа');
   const p = ui.profiles.find((p) => p.id === id);
   return p ? serverLabel(p) : hide('удалённый сервер');

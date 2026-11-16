@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, errText, toLists, cleanSettings, cleanFallback, isGroupId, portsText, isEditToken, plural, tokenStale, editGone, newRuleID, type Settings, type Rule, type LintIssue, type RulesetsView } from '../api';
-  import { ui, hide, profileName, serverLabel, mainTarget } from '../state.svelte';
+  import { api, errText, toLists, cleanSettings, cleanFallback, isGroupId, telegramBridgeId, portsText, isEditToken, plural, tokenStale, editGone, newRuleID, type Settings, type Rule, type LintIssue, type RulesetsView } from '../api';
+  import { ui, hide, profileName, serverLabel, mainTarget, targetText } from '../state.svelte';
   import Icon from './Icon.svelte';
   import TargetOptions from './TargetOptions.svelte';
   import BulkAssignments from './BulkAssignments.svelte';
@@ -402,14 +402,23 @@
   function routeLabel(r: { action: string; profile?: string; fallback?: string[] }): string {
     if (r.action === 'direct') return 'Напрямую';
     if (r.action === 'block') return 'Заблокировать';
+    if (r.profile === telegramBridgeId) return profileName(r.profile);
     const name = r.profile ? (isGroupId(r.profile) ? `${profileName(r.profile)} (группа)` : profileName(r.profile))
       : mainTarget() ? mainOption() : 'Ожидает основной сервер';
     const n = cleanFallback(r.fallback, r.profile, mainTarget()?.id).length;
     return n ? `${name} +${n} запасн.` : name;
   }
 
+  function routeHint(r: Rule): string {
+    if (r.action !== 'tunnel' || r.profile !== telegramBridgeId) return routeLabel(r);
+    const reserves = cleanFallback(r.fallback, r.profile).map((id) => id ? targetText(id) : 'Основной сервер');
+    return 'Соединения Telegram идут через встроенный WebSocket-мост. Локальный MTProto-прокси используется, если вы подключили его в настройках Telegram. ' +
+      (reserves.length ? 'Если мост недоступен, правило использует ' + reserves.join(' → ') + '.' : 'В правиле нет запасного сервера.');
+  }
+
   function problem(r: Rule): string {
     if (r.action !== 'tunnel' || r.enabled === false) return '';
+    if (r.profile === telegramBridgeId) return '';
     if (!r.profile) return mainTarget() ? '' : 'Ожидает основной сервер';
     if (isGroupId(r.profile)) {
       if (ui.status?.groupsNote) return 'Группы не загружены (groups.json): соединения будут отклоняться';
@@ -592,7 +601,7 @@
             </button>
           {/if}
           <Icon name="arrow" size={16} />
-          <span class="pill {r.action}" title={routeLabel(r)}>{routeLabel(r)}</span>
+          <span class="pill {r.action}" title={routeHint(r)}>{routeLabel(r)}</span>
           <div class="acts">
             <button class="icon" onclick={() => move(i, i - 1)} disabled={i === 0 || !!q} title={q ? 'Очистите поиск, чтобы менять порядок' : 'Выше'}><Icon name="up" size={16} /></button>
             <button class="icon" onclick={() => move(i, i + 1)} disabled={i === s.rules.length - 1 || !!q} title={q ? 'Очистите поиск, чтобы менять порядок' : 'Ниже'}

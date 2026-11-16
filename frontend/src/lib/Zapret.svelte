@@ -1,7 +1,7 @@
 <script lang="ts">
   // «Обход DPI»: YouTube, Discord and the user's sites without a VPN,
   // through zapret2's winws2 (internal/app/zapret.go). One switch, ticks and
-  // «Подобрать автоматически»; the methods are for the full interface.
+  // «Подобрать автоматически»; each service can also use a fixed method.
   import { onMount } from 'svelte';
   import { api, errText, onEvent, type ZapretInput, type ZapretTarget, type ZapretView } from '../api';
   import { ui, hide } from '../state.svelte';
@@ -245,6 +245,7 @@
 
   const running = $derived(view?.status.state === 'running');
   const savedOn = $derived(!!view?.settings.enabled);
+  const automaticServices = $derived(view?.targets.filter((t) => targets.includes(t.target) && !methods[t.target]).map((t) => t.name) ?? []);
   const retry = $derived(!!view?.prepareError || view?.status.state === 'error');
   const pickNow = $derived(view?.pick?.running ? view.pick : null);
   function resultText(t: ZapretTarget): string {
@@ -398,31 +399,52 @@
           <b>Обходить блокировки без VPN</b>
         </label>
       {/if}
-      <div class="tiles">
+      <div class="services">
         {#each view.targets as t (t.target)}
-          <label class="tile" class:on={targets.includes(t.target)}>
-            <input type="checkbox" checked={targets.includes(t.target)} disabled={saving || (!ui.portable && !enabled)} onchange={(e) => toggle(t.target, e.currentTarget.checked)} />
-            <span class="grow">
-              <b>{t.name}</b>
-              <span class="muted small">{hints[t.target]}</span>
-              {#if t.on && enabled}<span class="small using">Сейчас: {t.using}</span>{/if}
-              {#if t.on && enabled && t.live?.length}
-                <span class="small live">
-                  {#each t.live as l (l.what)}
-                    <span
-                      >{l.what}: «{l.method}»{l.place > 1 ? ` — ${l.place}-й из ${l.of}` : ''}{l.switches
-                        ? `, переключался ${l.switches} ${times(l.switches)}, последний в ${clock(l.at)}`
-                        : ''}</span
-                    >
-                  {/each}
-                </span>
+          {@const selected = targets.includes(t.target)}
+          <div class="service">
+            <div class="service-head">
+              <label class="service-name">
+                <input type="checkbox" checked={selected} disabled={saving || (!ui.portable && !enabled)} onchange={(e) => toggle(t.target, e.currentTarget.checked)} />
+                <span><b>{t.name}</b><span class="muted small">{hints[t.target]}</span></span>
+              </label>
+              <label class="strategy">
+                <span class="muted small">Стратегия</span>
+                <select aria-label={'Стратегия для ' + t.name} bind:value={methods[t.target]} disabled={!selected || saving || (!ui.portable && !enabled)}>
+                  <option value="">Автоматически</option>
+                  <optgroup label="Готовые стратегии">
+                    {#each view.methods.filter((m) => !m.generated) as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
+                  </optgroup>
+                  {#if view.methods.some((m) => m.generated)}
+                    <optgroup label="Стратегии генератора">
+                      {#each view.methods.filter((m) => m.generated) as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
+                    </optgroup>
+                  {/if}
+                  <option value="none">Без обхода DPI</option>
+                  <option value="vpn">Через VPN</option>
+                </select>
+              </label>
+            </div>
+            {#if selected && t.on && savedOn}
+              <div class="small using">Сейчас: {hide(t.using)}</div>
+              {#if t.live?.length}
+                <details class="service-details small">
+                  <summary>По доменам ({t.live.length})</summary>
+                  <ul>
+                    {#each t.live as l (l.what)}
+                      <li>{hide(l.what)} — {l.method}{l.place > 1 ? ` (${l.place}-й из ${l.of})` : ''}{l.switches ? `, переключался ${l.switches} ${times(l.switches)}, последний в ${clock(l.at)}` : ''}</li>
+                    {/each}
+                  </ul>
+                </details>
               {/if}
-              {#if t.on && enabled && viaVPNNow(t.target) && !dirty}
-                <button class="link small" onclick={(e) => { e.preventDefault(); viaVPN(t.target, false); }}>Вернуть обход</button>
-                <button class="link small" onclick={(e) => { e.preventDefault(); vpnFor = t.target; }}>Сервер…</button>
+              {#if viaVPNNow(t.target) && !dirty}
+                <div class="vpn">
+                  <button class="link small" onclick={() => viaVPN(t.target, false)}>Вернуть обход</button>
+                  <button class="link small" onclick={() => (vpnFor = t.target)}>Сервер…</button>
+                </div>
               {/if}
-            </span>
-          </label>
+            {/if}
+          </div>
         {/each}
       </div>
       {#if (ui.portable || enabled) && targets.includes('sites')}
@@ -431,27 +453,7 @@
         <span class="muted small">Подбор проверяет только имена, адреса получают те же методы.</span>
       {/if}
 
-      {#if ui.expert && (ui.portable || enabled) && targets.length}
-        <div class="lbl">Метод для каждого сервиса</div>
-        <div class="methods">
-          {#each view.targets.filter((t) => targets.includes(t.target)) as t (t.target)}
-            <label class="mrow"
-              ><span>{t.name}</span>
-              <select bind:value={methods[t.target]}>
-                <option value="">Автоматически (перебор, если перестал работать)</option>
-                {#each view.methods.filter((m) => !m.generated) as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
-                {#if view.methods.some((m) => m.generated)}
-                  <optgroup label="Найдены генератором в этой сети">
-                    {#each view.methods.filter((m) => m.generated) as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
-                  </optgroup>
-                {/if}
-                <option value="none">Не нужен</option>
-                <option value="vpn">Через VPN</option>
-              </select></label
-            >
-          {/each}
-        </div>
-      {/if}
+
 
       <div class="row">
         {#if ui.portable}
@@ -489,10 +491,8 @@
       <section class="card">
         <h2>Подобрать метод</h2>
         <p class="muted small">
-          У каждого провайдера работают свои методы. GRoute выяснит, как именно блокируется каждый сервис, попробует известные методы, а потом
-          сам соберёт и проверит десятки своих вариантов: рядом с теми, что сработали, а если не сработало ничего — по всем приёмам zapret2 и с фейками
-          сайтов из белого списка. Для этой сети{view.network ? ` («${hide(view.network)}»)` : ''} запомнит самый быстрый и запасные. Займёт от полуминуты до
-          трёх минут; обход при этом продолжает работать.
+          GRoute проверит готовые стратегии и варианты генератора, затем запомнит самый быстрый способ и запасные для этой сети{view.network ? ` («${hide(view.network)}»)` : ''}.
+          {automaticServices.length ? 'Сервисы с автоподбором: ' + automaticServices.join(', ') + '.' : 'Чтобы запустить подбор, выберите «Автоматически» у нужного сервиса.'}
         </p>
         {#if pickNow}
           <div class="progress"><div class="bar" style="width: {Math.round((100 * pickNow.done) / Math.max(1, pickNow.total))}%"></div></div>
@@ -500,7 +500,7 @@
           <div class="small">{pickNow.step}</div>
           <button onclick={() => api.ZapretPickCancel()}>Остановить</button>
         {:else}
-          <button class="primary" onclick={pick} disabled={picking || dirty}>
+          <button class="primary" onclick={pick} disabled={picking || dirty || !automaticServices.length}>
             <Icon name="zap" size={15} />{picking ? 'Подбираю…' : 'Подобрать автоматически'}
           </button>
           {#if dirty}<span class="muted small">Сначала сохраните изменения.</span>{/if}
@@ -599,16 +599,23 @@
   .page { display: grid; gap: 14px; }
   header h1 { margin: 0 0 4px; }
   .switch { display: flex; align-items: center; gap: 10px; font-size: 15px; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 12px; }
-  .tile { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
-  .tile.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); }
-  .tile .grow { display: grid; gap: 2px; min-width: 0; }
+  .services { display: grid; gap: 8px; margin-top: 12px; }
+  .service { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .service-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 48%); align-items: center; gap: 12px; }
+  .service-name { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; }
+  .service-name input { flex: none; }
+  .service-name span span { display: block; }
+  .strategy { min-width: 0; display: grid; gap: 3px; }
+  .strategy select { width: 100%; min-width: 0; text-overflow: ellipsis; }
   .using { color: var(--accent); }
-  .live { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; color: var(--muted); }
+  .service .using { margin-top: 6px; overflow-wrap: anywhere; }
+  .service-details { margin-top: 5px; color: var(--muted); }
+  .service-details summary { cursor: pointer; width: fit-content; color: var(--text); }
+  .service-details ul { margin: 6px 0; padding-inline-start: 20px; overflow-wrap: anywhere; }
+  @media (max-width: 760px) { .service-head { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
   .lbl { display: block; color: var(--muted); font-weight: 500; margin-top: 12px; }
   textarea { width: 100%; box-sizing: border-box; margin-top: 4px; }
-  .methods { display: grid; gap: 6px; margin-top: 4px; }
-  .mrow { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; align-items: center; }
+
   .row { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
   .state { margin-top: 10px; display: flex; align-items: center; gap: 8px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }

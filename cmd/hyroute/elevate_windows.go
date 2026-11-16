@@ -31,7 +31,7 @@ func (g *GUI) RestartForDPI() error {
 
 func (g *GUI) restartAsAdmin(available bool, launch func(string, int) error) error {
 	if !available {
-		return errors.New("перезапуск доступен в GRoute Portable при запуске с обычными правами")
+		return errors.New("перезапуск доступен в портативном режиме GRoute при запуске с обычными правами")
 	}
 	if g.quitting.Load() || !g.restartingAsAdmin.CompareAndSwap(false, true) {
 		return errors.New("перезапуск GRoute уже начат")
