@@ -3,13 +3,8 @@
   import { api, errText, fmtBytes, fmtDuration, fmtTime, actionLabel, strategyLabel, dnsRuleLabel, type Flow } from '../api';
   import { ui, hide, profileName } from '../state.svelte';
   import Icon from './Icon.svelte';
-  import { setConnNav } from './ConnMenu.svelte';
   import FlowRuleActions, { type FlowMenu } from './FlowRuleActions.svelte';
   import { every } from '../poll';
-
-  let { go }: { go: (id: string) => void } = $props();
-  // svelte-ignore state_referenced_locally
-  setConnNav(go);
 
   // «Туннель → DE1 · Авто»: the server, then the group it was chosen by.
   function routeText(f: Flow): string {
@@ -242,7 +237,6 @@
 
 <div class="wrap">
   <header>
-    <h1>Соединения</h1>
     <p class="muted sub">
       Что сейчас открывают программы и куда это ушло. Нажмите на строку, чтобы увидеть, почему; правой кнопкой или кнопкой «…» — создать правило для этой
       программы или сайта.
@@ -357,7 +351,7 @@
 <FlowRuleActions bind:menu />
 
 <style>
-  .wrap { display: flex; flex-direction: column; height: 100%; gap: 10px; }
+  .wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 10px; }
   .toolbar input { max-width: 420px; }
   .table { flex: 1; min-height: 0; overflow: auto; padding: 0; border-radius: var(--radius); outline: none; }
   table { font-size: 12.5px; }

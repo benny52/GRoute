@@ -6,13 +6,7 @@
   import { api, errText, fmtBytes, plural, statConns, statVPN, type StatCounters, type StatRow, type StatsMode, type StatsReport } from '../api';
   import { ui, hide, profileName, settle } from '../state.svelte';
   import Help from './Help.svelte';
-  import LiveTraffic from './LiveTraffic.svelte';
   import { every } from '../poll';
-  import { setConnNav } from './ConnMenu.svelte';
-
-  let { go }: { go: (id: string) => void } = $props();
-  // svelte-ignore state_referenced_locally
-  setConnNav(go);
 
   type Tab = 'apps' | 'servers' | 'groups';
   type SortKey = 'label' | 'vpn' | 'du' | 'conns' | 'f' | 'tu' | 'td' | 'fo' | 'drops';
@@ -25,8 +19,6 @@
   ];
 
   let period = $state('today');
-  let view = $state<'map' | 'table' | 'history'>('map');
-  const showNow = $derived(view !== 'history');
   let report = $state<StatsReport | null>(null);
   let error = $state('');
   let modeError = $state('');
@@ -81,7 +73,7 @@
   }
 
   function tick() {
-    if (showNow || inflight || document.hidden) return;
+    if (inflight || document.hidden) return;
     start();
   }
 
@@ -102,6 +94,7 @@
   const live = $derived(period === 'today' || period === '7d' || period === '30d' || period === thisMonth());
 
   onMount(() => {
+    tick();
     const onVisible = () => {
       if (!document.hidden) tick();
     };
@@ -110,7 +103,7 @@
   });
 
   $effect(() => {
-    if (!live || showNow) return;
+    if (!live) return;
     return every(tick, 5000);
   });
 
@@ -294,16 +287,8 @@
 <div class="page-wrap">
   <header>
     <h1>Статистика</h1>
-    <div class="seg" role="group" aria-label="Вид статистики">
-      <button class:on={view === 'map'} aria-pressed={view === 'map'} onclick={() => view = 'map'}>Карта</button>
-      <button class:on={view === 'table'} aria-pressed={view === 'table'} onclick={() => view = 'table'}>Таблица</button>
-      <button class:on={!showNow} aria-pressed={!showNow} onclick={() => { view = 'history'; tick(); }}>За период</button>
-    </div>
   </header>
 
-  {#if showNow}
-  <LiveTraffic mapView={view === 'map'} />
-  {:else}
   <Help id="stats" title="Что здесь считается">
     <p>
       Сколько трафика прошло через VPN и напрямую: по программам и серверам. Статистика хранится только на этом компьютере и никуда не
@@ -484,7 +469,6 @@
         GRoute видит только отправленное, и то примерно и не всё. Служебный трафик (DNS Windows, сам GRoute и Hysteria) не считается.
       </p>
     </section>
-  {/if}
   {/if}
 </div>
 

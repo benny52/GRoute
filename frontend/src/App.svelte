@@ -10,7 +10,7 @@
   import Rules from './lib/Rules.svelte';
   import Profiles from './lib/Profiles.svelte';
   import Subscriptions from './lib/Subscriptions.svelte';
-  import Connections from './lib/Connections.svelte';
+  import ConnectionViews from './lib/ConnectionViews.svelte';
   import Logs from './lib/Logs.svelte';
   import System from './lib/System.svelte';
   import Lists from './lib/Lists.svelte';
@@ -38,7 +38,7 @@
     { id: 'proxies', label: 'Прокси', icon: 'zap', expert: true },
     { id: 'networks', label: 'Сети', icon: 'wifi', expert: true }, // netmodes
     { id: 'lists', label: 'Списки', icon: 'database', expert: true },
-    { id: 'connections', label: 'Соединения', icon: 'activity', expert: true },
+    { id: 'connections', label: 'Соединения', icon: 'activity' },
     { id: 'stats', label: 'Статистика', icon: 'chart' }, // stats: collected in both modes, so shown in both
     { id: 'logs', label: 'Журнал', icon: 'log', expert: true },
     { id: 'settings', label: 'Настройки', icon: 'settings' },
@@ -366,9 +366,9 @@
       {:else if page === 'lists'}
         <Lists />
       {:else if page === 'connections'}
-        <Connections {go} />
+        <ConnectionViews {go} />
       {:else if page === 'stats'}
-        <Stats {go} />
+        <Stats />
       {:else if page === 'logs'}
         <Logs />
       {:else}

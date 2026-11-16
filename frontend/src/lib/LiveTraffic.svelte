@@ -72,7 +72,7 @@
 </script>
 
 {#snippet track(row: Direction)}
-  <div class="track" aria-hidden="true">
+  <div class="track" class:duplex={row.up > 0 && row.down > 0} aria-hidden="true">
     {#if row.measured && (row.exit.kind === 'vpn' || row.exit.kind === 'direct')}
       {#if row.up > 0}<i style:animation-duration={travelTime(row.up)}></i>{/if}
       {#if row.down > 0}<i class="back" style:animation-duration={travelTime(row.down)}></i>{/if}
@@ -82,7 +82,7 @@
 
 <section class="card traffic">
   <h2><Icon name="activity" size={18} /> {mapView ? 'Карта маршрутов' : 'Направления трафика'}</h2>
-  {#if !mapView}<p class="muted small">Чем выше скорость, тем быстрее движутся точки. ↑ Отправлено, ↓ получено, «—» означает, что измерения нет. Адреса видны только во время просмотра.</p>{/if}
+  {#if !mapView}<p class="muted small">Стрелки вправо показывают отправку, влево — получение. Чем выше скорость, тем быстрее они движутся. Прочерк означает, что измерения нет.</p>{/if}
   {#if error}
     <p class="note error">{hide(error)}</p>
   {:else if !ready}
@@ -130,13 +130,17 @@
   .node small { display:block; margin-top:1px; color:var(--muted); }
   .node { justify-content:flex-start; text-align:start; padding:4px; }
   .exit :global(svg) { color:var(--ink); }
-  .track { position:relative; height:9px; color:var(--ink); overflow:hidden; }
-  .track:before { content:''; position:absolute; inset:4px 0 auto; border-top:1px solid currentColor; opacity:.5; }
-  i { position:absolute; left:0; right:0; top:0; height:5px; background:radial-gradient(circle at 3px 50%, currentColor 1.7px, transparent 2.4px) repeat-x; background-size:22px 5px; animation:travel 1s linear infinite; }
-  i.back { top:auto; bottom:0; animation-direction:reverse; }
-  @keyframes travel { to {background-position-x:22px;} }
+  .track { position:relative; height:18px; color:var(--ink); overflow:hidden; }
+  .track:before { content:''; position:absolute; inset:50% 0 auto; border-top:1px solid currentColor; opacity:.35; }
+  .track i { position:absolute; inset:5px 0 auto; height:8px; animation:travel 1s linear infinite; }
+  .track i::before { content:''; display:block; width:12px; height:100%; background:currentColor; clip-path:polygon(0 37%, 58% 37%, 58% 0, 100% 50%, 58% 100%, 58% 63%, 0 63%); }
+  .track .back { animation-direction:reverse; }
+  .back::before { transform:scaleX(-1); }
+  .duplex i { top:0; }
+  .duplex .back { top:10px; }
+  @keyframes travel { from { transform:translateX(-12px); } to { transform:translateX(100%); } }
   .rates { text-align:right; font-variant-numeric:tabular-nums; font-size:12px; display:grid; gap:2px; white-space:nowrap; }
   .empty { padding:16px 0; }
-  @media (prefers-reduced-motion:reduce) { i { animation:none; } }
+  @media (prefers-reduced-motion:reduce) { .track i { animation:none; transform:translateX(calc(50% - 6px)); } }
   @media (max-width:850px) { .traffic { --grid:minmax(64px,1fr) minmax(8px,.22fr) minmax(60px,1fr) minmax(8px,.22fr) minmax(68px,1fr) auto; } .columns,li { gap:4px; } .node,.exit { gap:4px; } }
 </style>
