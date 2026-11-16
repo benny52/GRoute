@@ -368,7 +368,7 @@
       {:else if page === 'connections'}
         <Connections {go} />
       {:else if page === 'stats'}
-        <Stats />
+        <Stats {go} />
       {:else if page === 'logs'}
         <Logs />
       {:else}

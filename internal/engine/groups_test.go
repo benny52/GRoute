@@ -233,7 +233,7 @@ func TestStickyOneSiteBothPaths(t *testing.T) {
 			if name == "" {
 				src = rules.SrcNone
 			}
-			if r := g.c.RelayDecide(e, name, src); r.Profile != want.Member || r.Group != grp1 {
+			if r := g.c.RelayDecide(e, name, src, false); r.Profile != want.Member || r.Group != grp1 {
 				t.Fatalf("exact=%v SNI %q on %s, want %s", exact, name, r.Profile, want.Member)
 			}
 		}
@@ -263,7 +263,7 @@ func TestGroupCommitOnlyWhenUsed(t *testing.T) {
 		t.Fatalf("%+v", e)
 	}
 	e6 := &nat.Entry{Flow: nat.FlowKey{Dst: netip.MustParseAddrPort(R6)}, Meta: &procinfo.Info{Name: "curl.exe", Path: `C:\Tools\curl.exe`}}
-	if r := g.c.RelayDecide(e6, "a.test", rules.SrcSNI); r.Action != rules.Block {
+	if r := g.c.RelayDecide(e6, "a.test", rules.SrcSNI, false); r.Action != rules.Block {
 		t.Fatalf("%+v", r)
 	}
 	after, _ := g.rt.Peek(grp1, groups.Hint{}, g.usable)
@@ -388,8 +388,8 @@ func TestRelayDecideSticky(t *testing.T) {
 	for i := range 20 {
 		name := "s" + string(rune('a'+i)) + ".test"
 		e := &nat.Entry{Flow: nat.FlowKey{Dst: netip.MustParseAddrPort(R)}, Meta: chrome}
-		r1 := g.c.RelayDecide(e, name, rules.SrcSNI)
-		r2 := g.c.RelayDecide(e, "www."+name, rules.SrcSNI)
+		r1 := g.c.RelayDecide(e, name, rules.SrcSNI, false)
+		r2 := g.c.RelayDecide(e, "www."+name, rules.SrcSNI, false)
 		want, _ := g.rt.Peek(grp1, groups.Hint{App: `c:\chrome\chrome.exe`, Site: name}, g.usable)
 		if r1.Profile != want.Member || r2.Profile != want.Member {
 			t.Fatalf("%s: %s, %s, want %s", name, r1.Profile, r2.Profile, want.Member)

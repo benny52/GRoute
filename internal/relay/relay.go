@@ -101,7 +101,7 @@ type Server struct {
 
 	// Decide is called for SNIFF entries with the name found (or "") and
 	// must return a final result.
-	Decide func(e *nat.Entry, domain string, src rules.DomainSource) rules.Result
+	Decide func(e *nat.Entry, domain string, src rules.DomainSource, bitTorrent bool) rules.Result
 	// DialDirect opens Direct upstreams from the application's source
 	// address src, so the connection leaves through the interface the
 	// application chose, as a packet-level Direct would (default net.Dialer
@@ -416,7 +416,8 @@ func (s *Server) handle(c net.Conn) {
 			s.reject(c, &res, "no decider for sniff mode", nil)
 			return
 		}
-		d := s.Decide(e, host, src)
+		bitTorrent := sniff.IsBitTorrentTCP(head)
+		d := s.Decide(e, host, src, bitTorrent)
 		if src == rules.SrcECH && d.DomainSrc != rules.SrcSNI {
 			// Unless the decider took the outer SNI of the ECH hello for
 			// the site itself (GREASE ECH), it is a provider's public
@@ -431,6 +432,7 @@ func (s *Server) handle(c net.Conn) {
 			e.Rec.Set(func(f *flows.Fields) {
 				f.Rule, f.Route, f.Profile, f.Stage = d.Rule, d.Action.String(), d.Profile, res.Stage
 				f.Group, f.Failover = d.Group, d.Failover
+				f.BitTorrent = bitTorrent
 				f.ECH = src == rules.SrcECH // conn-rules: as sniffed, whatever the decider made of it
 				if d.Domain != "" {
 					f.Domain, f.DomainSrc = d.Domain, d.DomainSrc.String()

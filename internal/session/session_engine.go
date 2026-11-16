@@ -123,8 +123,8 @@ func Start(cfg Config) (_ *Session, err error) {
 			}
 			return eng.NAT.LookupReflect(peer.Addr(), peer.Port())
 		},
-		Decide: func(e *nat.Entry, domain string, src rules.DomainSource) rules.Result {
-			return engp.Load().RelayDecide(e, domain, src)
+		Decide: func(e *nat.Entry, domain string, src rules.DomainSource, bitTorrent bool) rules.Result {
+			return engp.Load().RelayDecide(e, domain, src, bitTorrent)
 		},
 		Tunnel: func(profile string) relay.Tunnel {
 			if e := s.mgr.Get(profile); e != nil {

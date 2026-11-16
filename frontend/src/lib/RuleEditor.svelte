@@ -206,7 +206,7 @@
   // The chips retain literal assignments. The route explanation describes
   // only the servers a new connection could try with today's main.
   const fallback = $derived(cleanFallback((r.fallback ?? []).map((id) => id || main?.id || '').filter(Boolean), r.profile || main?.id));
-  const empty = $derived(r.apps!.length === 0 && r.domains!.length === 0 && pp.ports.length === 0);
+  const empty = $derived(r.apps!.length === 0 && r.domains!.length === 0 && pp.ports.length === 0 && r.protocol !== 'bittorrent');
   const ppText = $derived(portsText({ protocol: r.protocol, ports: pp.ports.join(',') }));
   const widened = $derived(hadWho && !r.apps!.length && !r.domains!.length && pp.ports.length > 0);
   // Replies of local UDP servers go to high ports too.
@@ -244,8 +244,9 @@
     if (apps.length && sites.length) who = `${few(apps)}, когда открывает ${few(sites)}`;
     else if (apps.length) who = `Всё от ${few(apps)}`;
     else if (sites.length) who = `${few(sites)} — в любой программе,`;
+    else if (r.protocol === 'bittorrent') [who, proto] = [`Распознанный BitTorrent в любой программе${pp.ports.length ? ' (порты ' + pp.ports.join(', ') + ')' : ''}`, ''];
     else if (pp.ports.length) [who, proto] = [`Все соединения на ${ppText}`, ''];
-    else return 'Добавьте программу, сайт или порт (в «Протокол и порты»).';
+    else return 'Добавьте программу, сайт или порт либо выберите BitTorrent.';
     // A group: «группу «Авто» (самый быстрый)».
     const via = (id: string) => {
       if (!isGroupId(id)) return profileName(id);
@@ -528,6 +529,7 @@
           <button class:on={!r.protocol} onclick={() => (r.protocol = '')}>Любой</button>
           <button class:on={r.protocol === 'tcp'} onclick={() => (r.protocol = 'tcp')}>TCP</button>
           <button class:on={r.protocol === 'udp'} onclick={() => (r.protocol = 'udp')}>UDP</button>
+          {#if !ui.mac || r.protocol === 'bittorrent'}<button class:on={r.protocol === 'bittorrent'} onclick={() => (r.protocol = 'bittorrent')}>BitTorrent</button>{/if}
         </div>
       </div>
       <div class="row">
@@ -551,7 +553,9 @@
         Порт, к которому подключается программа: 443 — HTTPS и QUIC, 80 — HTTP, 22 — SSH, 3389 — удалённый рабочий стол. Несколько — через запятую,
         диапазон — через дефис: 27000-27100. Пусто — любые порты.
       </div>
-      <div class="hint">TCP — сайты и большинство программ, UDP — игры, звонки, QUIC. Если не уверены — «Любой».</div>
+      {#if r.protocol === 'bittorrent'}
+        <div class="hint">GRoute распознаёт BitTorrent по началу соединения. Зашифрованная раздача может остаться нераспознанной. Чтобы весь трафик клиента шёл одним маршрутом, добавьте отдельное правило по программе.</div>
+      {:else}<div class="hint">TCP — сайты и большинство программ, UDP — игры, звонки, QUIC. Если не уверены — «Любой».</div>{/if}
     </details>
 
     <div class="summary"><Icon name="info" size={16} /> {sentence}</div>

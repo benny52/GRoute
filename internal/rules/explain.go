@@ -306,6 +306,9 @@ func nameRule(c Config, name string) bool {
 
 func (r *compiled) explain(p *procinfo.Info, pathKnown bool, proto uint8, port uint16, domain string, ip netip.Addr) (bool, string) {
 	var why []string
+	if r.bitTorrent {
+		return false, "BitTorrent определяется по первым данным реального соединения"
+	}
 	if r.proto != 0 {
 		if proto != 0 && r.proto != proto {
 			return false, fmt.Sprintf("протокол: правило только для %s", protoName(r.proto))
@@ -506,7 +509,7 @@ func LintWith(c Config, o LintOptions) []Issue {
 
 // covers reports whether every connection matching b also matches r.
 func (r *compiled) covers(b *compiled) bool {
-	if r.proto != 0 && r.proto != b.proto {
+	if r.bitTorrent && !b.bitTorrent || r.proto != 0 && r.proto != b.proto {
 		return false
 	}
 	if len(r.ports) > 0 && !portsCover(r.ports, b.ports) {

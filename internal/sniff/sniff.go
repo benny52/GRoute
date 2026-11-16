@@ -18,9 +18,10 @@ const (
 	Unknown Kind = iota
 	TLS
 	HTTP
+	BitTorrent
 )
 
-func (k Kind) String() string { return [...]string{"unknown", "tls", "http"}[k] }
+func (k Kind) String() string { return [...]string{"unknown", "tls", "http", "bittorrent"}[k] }
 
 const (
 	// MaxTLS bounds ClientHello reassembly (post-quantum key shares make it
@@ -49,6 +50,12 @@ func Parse(buf []byte) Result {
 	if len(buf) == 0 {
 		return Result{}
 	}
+	if buf[0] == 19 {
+		if IsBitTorrentTCP(buf) {
+			return Result{Kind: BitTorrent, Done: true}
+		}
+		return Result{Done: !strings.HasPrefix(peerHeader, string(buf))}
+	}
 	if buf[0] == 0x16 {
 		return parseTLS(buf)
 	}
@@ -56,6 +63,43 @@ func Parse(buf []byte) Result {
 		return parseHTTP(buf)
 	}
 	return Result{Done: true}
+}
+
+// BEP 3: pstrlen followed by the unencrypted protocol identifier.
+const peerHeader = "\x13BitTorrent protocol"
+
+func IsBitTorrentTCP(head []byte) bool { return bytes.HasPrefix(head, []byte(peerHeader)) }
+
+// IsUTPSyn recognizes the initial uTP v1 SYN (BEP 29). Check the whole
+// control packet to avoid routing ordinary UDP with the same first byte.
+func IsUTPSyn(b []byte) bool {
+	if len(b) < 20 || b[0] != 0x41 || binary.BigEndian.Uint32(b[8:12]) != 0 {
+		return false
+	}
+	ext, rest := b[1], b[20:]
+	for ext != 0 {
+		if len(rest) < 2 {
+			return false
+		}
+		n := int(rest[1])
+		switch ext {
+		case 1: // selective ACK bit mask
+			if n < 4 || n%4 != 0 {
+				return false
+			}
+		case 2: // extension bits
+			if n != 8 {
+				return false
+			}
+		default:
+			return false
+		}
+		if len(rest) < 2+n {
+			return false
+		}
+		ext, rest = rest[0], rest[2+n:]
+	}
+	return len(rest) == 0
 }
 
 var methods = []string{"GET ", "POST ", "HEAD ", "PUT ", "DELETE ", "OPTIONS ", "PATCH ", "CONNECT ", "TRACE "}

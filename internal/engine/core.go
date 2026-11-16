@@ -23,6 +23,7 @@ import (
 	"github.com/lardan099/hyroute/internal/procinfo"
 	"github.com/lardan099/hyroute/internal/relay"
 	"github.com/lardan099/hyroute/internal/rules"
+	"github.com/lardan099/hyroute/internal/sniff"
 	"github.com/lardan099/hyroute/internal/socks5"
 )
 
@@ -534,7 +535,7 @@ func (c *Core) tcpOut(p *packet.Packet, addr *divert.Address) {
 		c.untrackedOut(p, addr, key, now)
 		return
 	}
-	c.newFlow(p, addr, packet.ProtoTCP, key)
+	c.newFlow(p, addr, packet.ProtoTCP, key, false)
 }
 
 // untrackedOut handles a segment (not a SYN) of a connection the engine
@@ -687,7 +688,7 @@ func (c *Core) udpRoute(p *packet.Packet, addr *divert.Address) {
 			c.injectDirect(p, addr)
 			return
 		}
-		c.newFlow(p, addr, packet.ProtoUDP, key)
+		c.newFlow(p, addr, packet.ProtoUDP, key, sniff.IsUTPSyn(p.Payload()))
 		return
 	}
 	if uf.route == rules.Tunnel && !c.usable(uf.profile, true) && c.retargetDue(uf, now) && c.udpRetarget(uf, key) {
@@ -701,7 +702,7 @@ func (c *Core) udpRoute(p *packet.Packet, addr *divert.Address) {
 		}
 		c.mu.Unlock()
 		c.Flows.Close(uf.rec, now)
-		c.newFlow(p, addr, packet.ProtoUDP, key)
+		c.newFlow(p, addr, packet.ProtoUDP, key, uf.sub.BitTorrent)
 		return
 	}
 	c.udpApply(uf, p, addr, key)
@@ -755,7 +756,7 @@ func (c *Core) udpApply(uf *udpFlow, p *packet.Packet, addr *divert.Address, key
 
 // newFlow attributes the flow and decides, parking the first packets while
 // the owner is unknown.
-func (c *Core) newFlow(p *packet.Packet, addr *divert.Address, proto uint8, key nat.FlowKey) {
+func (c *Core) newFlow(p *packet.Packet, addr *divert.Address, proto uint8, key nat.FlowKey, bitTorrent bool) {
 	pk := pendKey{proto, key}
 	size, orig := pendSize(p)
 	c.mu.Lock()
@@ -783,13 +784,13 @@ func (c *Core) newFlow(p *packet.Packet, addr *divert.Address, proto uint8, key 
 		c.pending[pk] = pf
 		c.mu.Unlock()
 		defer c.dropParked(pk, pf) // after a panic too
-		c.decide(p, addr, proto, key, pid, true, "packet")
+		c.decide(p, addr, proto, key, pid, true, "packet", bitTorrent)
 		c.unpark(pk, pf, 0)
 		return
 	}
 	if ok {
 		c.mu.Unlock()
-		c.decide(p, addr, proto, key, pid, true, "packet")
+		c.decide(p, addr, proto, key, pid, true, "packet", bitTorrent)
 		return
 	}
 	parked := false
@@ -812,7 +813,7 @@ func (c *Core) newFlow(p *packet.Packet, addr *divert.Address, proto uint8, key 
 				stage = "iphelper"
 			}
 		}
-		c.decide(p, addr, proto, key, pid, ok, stage)
+		c.decide(p, addr, proto, key, pid, ok, stage, bitTorrent)
 		return
 	}
 	pf := &pendingFlow{pkts: []pendingPkt{{append([]byte(nil), p.Buf...), *addr, orig}}, bytes: size}
@@ -835,7 +836,7 @@ func (c *Core) newFlow(p *packet.Packet, addr *divert.Address, proto uint8, key 
 			if first.orig != nil {
 				fp.Orig = first.orig
 			}
-			c.decide(&fp, &first.addr, proto, key, pid, ok, stage)
+			c.decide(&fp, &first.addr, proto, key, pid, ok, stage, bitTorrent)
 		}
 		c.unpark(pk, pf, 1)
 	}()
@@ -901,7 +902,7 @@ func (c *Core) waitOwner(proto uint8, key nat.FlowKey) (uint32, bool, string) {
 	}
 }
 
-func (c *Core) decide(p *packet.Packet, addr *divert.Address, proto uint8, key nat.FlowKey, pid uint32, known bool, stage string) {
+func (c *Core) decide(p *packet.Packet, addr *divert.Address, proto uint8, key nat.FlowKey, pid uint32, known bool, stage string, bitTorrent bool) {
 	var proc *procinfo.Info
 	if known {
 		proc = c.Procs.Get(pid)
@@ -913,7 +914,7 @@ func (c *Core) decide(p *packet.Packet, addr *divert.Address, proto uint8, key n
 		rec.Process, rec.Path = proc.Name, proc.Path
 		rec.Parents = parentChain(proc) // conn-rules
 	}
-	sub := rules.Subject{Proc: proc, Proto: proto, Dst: key.Dst}
+	sub := rules.Subject{BitTorrent: bitTorrent, Proc: proc, Proto: proto, Dst: key.Dst}
 	set := c.Rules.Load()
 	if proto == packet.ProtoTCP && key.Dst.Port() == 53 && c.dnsTCP(p, addr, key, pid, known, proc, rec) {
 		return // dns: a DNS-mode connection (or a private server's, as before)
@@ -930,8 +931,15 @@ func (c *Core) decide(p *packet.Packet, addr *divert.Address, proto uint8, key n
 		res = rules.Result{Action: rules.Block, Rule: dnspolicy.RuleBrowserDoH}
 		c.DNSDoH.Add(1)
 	} else if excluded == "" {
-		res = set.EvaluateSites(sub, c.packetSitesOf(set, proto, key.Dst, sites))
-		res, pk = c.pick(res, proto == packet.ProtoUDP, c.hint(res, proc, "", key.Dst.Addr()))
+		knownSites := c.packetSitesOf(set, proto, key.Dst, sites)
+		if proto == packet.ProtoTCP {
+			res = set.EvaluateTCPSYN(sub, knownSites)
+		} else {
+			res = set.EvaluateSites(sub, knownSites)
+		}
+		if !res.NeedsPayload {
+			res, pk = c.pick(res, proto == packet.ProtoUDP, c.hint(res, proc, "", key.Dst.Addr()))
+		}
 	}
 	// Our own sockets (the relay's Direct dials, Hysteria's control
 	// traffic) are not shown: the relayed flow already describes them.
@@ -940,6 +948,7 @@ func (c *Core) decide(p *packet.Packet, addr *divert.Address, proto uint8, key n
 		c.Flows.Open(rec)
 	}
 	rec.Set(func(f *flows.Fields) {
+		f.BitTorrent = sub.BitTorrent
 		f.Attrib, f.Stage, f.Rule, f.Domain, f.DomainSrc = stage, "packet", res.Rule, res.Domain, res.DomainSrc.String()
 		f.Profile = res.Profile
 		f.Group, f.Failover = res.Group, res.Failover
@@ -1022,7 +1031,7 @@ func (c *Core) finish(rec *flows.Record, route rules.Action, outcome string) {
 func (c *Core) applyTCP(p *packet.Packet, addr *divert.Address, key nat.FlowKey, pid uint32, proc *procinfo.Info,
 	sub rules.Subject, set *rules.Set, res rules.Result, pk groups.Pick, rec *flows.Record) (closed bool) {
 	now := time.Now()
-	if res.NeedsDomain && p.IPv6 && c.Opt.BlockIPv6Tunnel && c.mayTunnel(sub, set) && (c.IPv4Route == nil || c.IPv4Route()) {
+	if (res.NeedsDomain || res.NeedsPayload) && p.IPv6 && c.Opt.BlockIPv6Tunnel && c.mayTunnel(sub, set) && (c.IPv4Route == nil || c.IPv4Route()) {
 		// The relay would learn the domain only once the connection is up,
 		// and a Tunnel decision then resets it: the application does not
 		// fall back to IPv4 for a connection it has. A refused SYN makes
@@ -1036,7 +1045,7 @@ func (c *Core) applyTCP(p *packet.Packet, addr *divert.Address, key nat.FlowKey,
 		c.rejectSYN(p, addr, key, now)
 		return true
 	}
-	if res.NeedsDomain {
+	if res.NeedsDomain || res.NeedsPayload {
 		ent, err := c.NAT.Insert(&nat.Entry{Flow: key, PID: pid, Mode: nat.Sniff, Rec: rec, Meta: proc}, now)
 		if err == nil {
 			c.NAT.TouchPacket(ent, p, true, addr, now)
@@ -1246,6 +1255,14 @@ func (c *Core) resetApp(p *packet.Packet, addr *divert.Address) {
 // refused (an IPv6-only site sent Direct stays reachable), and should its
 // SNI still go to the tunnel, RelayDecide blocks it.
 func (c *Core) mayTunnel(sub rules.Subject, set *rules.Set) bool {
+	if c.mayTunnelKnownProtocol(sub, set) {
+		return true
+	}
+	sub.BitTorrent = true
+	return c.mayTunnelKnownProtocol(sub, set)
+}
+
+func (c *Core) mayTunnelKnownProtocol(sub rules.Subject, set *rules.Set) bool {
 	if !set.MayTunnel(sub) {
 		return false
 	}
@@ -1320,13 +1337,13 @@ func parentChain(proc *procinfo.Info) []string {
 }
 
 // RelayDecide is the relay's Decide callback for SNIFF entries.
-func (c *Core) RelayDecide(e *nat.Entry, domain string, src rules.DomainSource) rules.Result {
+func (c *Core) RelayDecide(e *nat.Entry, domain string, src rules.DomainSource, bitTorrent bool) rules.Result {
 	proc, _ := e.Meta.(*procinfo.Info)
 	if domain != "" && c.dohBlocked(proc, packet.ProtoTCP, e.Flow.Dst, domain) { // dns: SNI seen in the relay
 		c.DNSDoH.Add(1)
 		return rules.Result{Action: rules.Block, Rule: dnspolicy.RuleBrowserDoH, Domain: rules.NormalizeDomain(domain), DomainSrc: rules.SrcSNI}
 	}
-	sub := rules.Subject{Proc: proc, Proto: packet.ProtoTCP, Dst: e.Flow.Dst}
+	sub := rules.Subject{BitTorrent: bitTorrent, Proc: proc, Proto: packet.ProtoTCP, Dst: e.Flow.Dst}
 	set := c.Rules.Load()
 	var res rules.Result
 	if src == rules.SrcECH {

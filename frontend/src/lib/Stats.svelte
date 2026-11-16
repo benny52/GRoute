@@ -8,6 +8,11 @@
   import Help from './Help.svelte';
   import LiveTraffic from './LiveTraffic.svelte';
   import { every } from '../poll';
+  import { setConnNav } from './ConnMenu.svelte';
+
+  let { go }: { go: (id: string) => void } = $props();
+  // svelte-ignore state_referenced_locally
+  setConnNav(go);
 
   type Tab = 'apps' | 'servers' | 'groups';
   type SortKey = 'label' | 'vpn' | 'du' | 'conns' | 'f' | 'tu' | 'td' | 'fo' | 'drops';

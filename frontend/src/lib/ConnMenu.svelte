@@ -44,7 +44,7 @@
   // is still the active one.
   function openRule(res: ConnRuleResult, ref: RuleRef) {
     if (res.ruleset === (ui.status?.ruleset?.token ?? '')) {
-      ui.focusRule = { ...ref, rev: res.rev };
+      ui.focusRule = { ...ref, rev: res.rev, ruleset: res.ruleset };
       nav('rules');
       return;
     }
@@ -128,6 +128,9 @@
   let {
     flow,
     anchor,
+    appOnly = false,
+    choices = [],
+    onchoose,
     returnFocus = null,
     onclose,
     onedit,
@@ -135,6 +138,9 @@
   }: {
     flow: Flow;
     anchor: { x: number; y: number };
+    appOnly?: boolean;
+    choices?: Flow[];
+    onchoose?: (flow: Flow) => void;
     returnFocus?: HTMLElement | null;
     onclose: () => void;
     onedit: (draft: Rule, facts: ConnFacts, ruleset: string) => void;
@@ -293,6 +299,7 @@
   }
 
   function onkey(e: KeyboardEvent, inSub: boolean) {
+    if (e.target instanceof HTMLSelectElement && e.key !== 'Escape') return;
     const list = items(inSub ? subEl : menuEl);
     const at = list.indexOf(document.activeElement as HTMLElement);
     const move = (i: number) => list[(i + list.length) % list.length]?.focus();
@@ -365,7 +372,21 @@
   const curTarget = $derived(info?.current.action === 'tunnel' ? info.current.profile : '');
 
   function editDraft(): Rule {
+    if (appOnly && info?.app) return { name: '', apps: [{ pattern: info.app, inheritChildren: false }], action: 'direct' };
     return { name: '', apps: [], domains: scope ? [scope.pattern] : [], action: 'tunnel', profile: '' };
+  }
+
+  function editCurrent() {
+    const r = info?.current.rule;
+    if (!info || !r || ruleOff) return;
+    if (info.ruleset !== (ui.status?.ruleset?.token ?? '')) {
+      close();
+      toast({ tone: 'info', text: () => 'Профиль правил сменился. Откройте меню ещё раз.' });
+      return;
+    }
+    ui.focusRule = { id: r.id ?? '', index: info.current.index, rule: r, ruleset: info.ruleset };
+    close(false);
+    nav('rules');
   }
 
   async function quick(kind: 'dest' | 'app', action: Action, profile = '') {
@@ -379,13 +400,14 @@
       what = scopeWhat(scope);
     } else {
       if (appOff) return;
-      rule = { name: '', apps: [{ pattern: i.app, inheritChildren: !i.appLauncher }], action, profile };
+      const children = !appOnly && !i.appLauncher;
+      rule = { name: '', apps: [{ pattern: i.app, inheritChildren: children }], action, profile };
       const app = i.app;
-      what = i.appLauncher ? () => `только сам ${app}` : () => `${app} и программы, запущенные из него`;
+      what = children ? () => `${app} и программы, запущенные из него` : () => `только сам ${app}`;
       if (i.appSystem) {
         const where = whereText({ action, profile });
         let q = `${app} — часть Windows: через этот процесс работают многие службы. Всё равно направить весь его трафик ${where}?`;
-        if (!i.appLauncher) q += ` Правило распространится и на все программы, запущенные из ${app}.`;
+        if (children) q += ` Правило распространится и на все программы, запущенные из ${app}.`;
         if (!confirm(q)) return;
       }
     }
@@ -465,14 +487,23 @@
   onkeydown={(e) => onkey(e, false)}
 >
   <div class="head">
-    <div class="h1">{f.process || `PID ${f.pid}`} → {dest}</div>
+    <div class="h1">{hide(f.process) || `PID ${f.pid}`} → {dest}</div>
+    {#if choices.length > 1}
+      <label>Соединение
+        <select value={choices.indexOf(f)} onchange={(e) => onchoose?.(choices[Number(e.currentTarget.value)])}>
+          {#each choices as choice, i}
+            <option value={i}>{hide(choice.process)} · {hide(choice.domain || choice.dst)} · {choice.proto} · {hide(choice.rule || 'Всё остальное')}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
     {#if info}<div class="h2">{currentLine(info)}</div>{/if}
   </div>
   {#if !info && !loadErr}<div class="hint">Загрузка…</div>{/if}
   {#if loadErr}<div class="hint err">{hide(loadErr)}</div>{/if}
   {#if info?.blocked}<div class="hint err">{hide(info.blocked)}</div>{/if}
 
-  {#if info && scopes.length > 1}
+  {#if !appOnly && info && scopes.length > 1}
     <div class="sep"></div>
     <div class="lbl">К чему относится</div>
     {#each scopes as s, i (s.pattern)}
@@ -481,7 +512,7 @@
       </div>
     {/each}
   {/if}
-  {#if info}
+  {#if !appOnly && info}
     {#if info.nameless && scopes.some((s) => s.kind !== 'ip')}
       <div class="hint">
         В QUIC (UDP 443) GRoute не видит имя сайта: правило по сайту это соединение не поймает, но сработает, когда браузер перейдёт на TCP. Для самого QUIC — «Только IP».
@@ -510,12 +541,14 @@
     {/if}
   {/if}
 
+  {#if !appOnly}
   <div class="sep"></div>
   <div bind:this={destBtn} class="wrap">
     {@render item('Всегда через', destOff || (noTargets ? 'Нет серверов — добавьте на странице «Серверы»' : ''), () => {}, { sub: 'dest' })}
   </div>
   {@render item('Всегда напрямую', destOff, () => quick('dest', 'direct'))}
   {@render item(`Блокировать этот ${noun}`, destOff, () => quick('dest', 'block'), { danger: true })}
+  {/if}
 
   <div class="sep"></div>
   {#if info?.appNote}
@@ -530,12 +563,15 @@
         { sub: 'app' },
       )}
     </div>
-    {@render item(info?.appLauncher ? `Только сам ${app} напрямую` : `Всё приложение ${app} напрямую`, appOff, () => quick('app', 'direct'))}
+    {@render item(appOnly ? `${app} → Напрямую` : info?.appLauncher ? `Только сам ${app} напрямую` : `Всё приложение ${app} напрямую`, appOff, () => quick('app', 'direct'))}
     {#if info?.appLauncher}<div class="hint">{app} запускает другие программы: правило не распространяется на них.</div>{/if}
   {/if}
 
   <div class="sep"></div>
-  {@render item('Настроить правило…', ruleOff, edit)}
+  {#if info?.current.rule && !ruleOff}
+    {@render item(`Редактировать «${ruleTitle(info.current.rule)}»…`, '', editCurrent)}
+  {/if}
+  {@render item(appOnly ? 'Создать правило для программы…' : 'Настроить правило…', appOnly ? appOff : ruleOff, edit)}
   {@render item('Проверить адрес', '', explain)}
 </div>
 
@@ -598,6 +634,7 @@
   .head { padding: 6px 10px 4px; display: grid; gap: 2px; }
   .h1 { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .h2 { color: var(--muted); font-size: 12px; }
+  .head select { width: 100%; min-width: 0; }
   .lbl { padding: 4px 10px 2px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
   .mi {
     display: flex;

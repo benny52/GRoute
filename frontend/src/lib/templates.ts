@@ -5,8 +5,9 @@
 // rule with both matches only when those programs open those sites, and a
 // program such as Discord (voice by IP) or Telegram needs all its traffic
 // through the VPN.
-import { cleanSettings, newRuleID, type Action, type Rule, type RulesConfig, type Settings } from '../api';
+import { cleanRule, cleanSettings, newRuleID, type Action, type Rule, type RulesConfig, type Settings } from '../api';
 import { ui } from '../state.svelte';
+import { sortedJSON } from '../ruletitle';
 
 export interface Template {
   id: string;
@@ -15,6 +16,7 @@ export interface Template {
   apps?: string[];
   domains: string[];
   action?: Action; // default: tunnel
+  protocol?: string;
   group: 'Сервисы' | 'Россия' | 'Полезное';
   windows?: boolean; // of use on Windows only: not offered on macOS
 }
@@ -79,6 +81,7 @@ export const templates: Template[] = [
   },
 
   { id: 'lan', name: 'Локальная сеть', hint: 'роутер, принтер, NAS → напрямую', domains: ['geoip:private'], action: 'direct', group: 'Полезное' },
+  { id: 'torrent', name: 'Торренты — напрямую', hint: 'BitTorrent в любой программе и, по желанию, весь трафик выбранных клиентов', protocol: 'bittorrent', domains: [], action: 'direct', group: 'Полезное', windows: true },
   { id: 'ads', name: 'Реклама', hint: 'рекламные сети → блок', domains: ['geosite:category-ads-all'], action: 'block', group: 'Полезное' },
   { id: 'telemetry', name: 'Телеметрия Windows', hint: 'сбор данных Microsoft → блок', domains: ['geosite:win-spy'], action: 'block', group: 'Полезное', windows: true },
 ];
@@ -91,8 +94,35 @@ export function ruleFromTemplate(t: Template): Rule {
     domains: [...t.domains],
     action: t.action ?? 'tunnel',
     profile: '',
-    protocol: '',
+    protocol: t.protocol ?? '',
   };
+}
+
+// Program rules precede sniffing: an explicitly selected client uses DIRECT
+// even when its first bytes are encrypted or it talks to an HTTPS tracker.
+export function torrentRules(programs: string[]): Rule[] {
+  const protocol = ruleFromTemplate(templates.find((t) => t.id === 'torrent')!);
+  if (!programs.length) return [protocol];
+  return [{
+    id: newRuleID(), name: 'Торрент-клиенты — напрямую', action: 'direct',
+    apps: [...programs].sort().map((pattern) => ({ pattern })),
+  }, protocol];
+}
+
+// Reapplying a template promotes the existing identical rule, preserving its ID.
+export function prependRules(added: Rule[], old: Rule[], mainID?: string): Rule[] {
+  function key(r: Rule): string {
+    const c = cleanRule(r, mainID);
+    delete c.id;
+    return sortedJSON(c);
+  }
+  const rest = [...old];
+  const top = added.map((r) => {
+    const wanted = key(r);
+    const at = rest.findIndex((x) => key(x) === wanted);
+    return at < 0 ? r : rest.splice(at, 1)[0];
+  });
+  return [...top, ...rest];
 }
 
 // A scheme is a whole setup: several rules plus "everything else".

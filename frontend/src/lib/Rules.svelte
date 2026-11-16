@@ -16,7 +16,8 @@
   import RulesetBar, { showSwitchResult, showRulesetError } from './RulesetBar.svelte';
   import RulesetDialog from './RulesetDialog.svelte';
   import TidyDialog from './TidyDialog.svelte';
-  import { shownTemplates, tplApps, tplHint, ruleFromTemplate, schemes, applyScheme, schemeTemplates, type Scheme } from './templates';
+  import { shownTemplates, tplApps, tplHint, ruleFromTemplate, torrentRules, prependRules, schemes, applyScheme, schemeTemplates, type Scheme } from './templates';
+  import TorrentPrograms from './TorrentPrograms.svelte';
   import { itemLabel, loadGeo, geo } from '../geo.svelte';
   import { ruleTitle as title, appLabel, siteLabel, locateRule, sameRule } from '../ruletitle';
   import { toast } from '../toast.svelte';
@@ -41,6 +42,9 @@
   const editError = $derived(rsView?.list.find((r) => r.id === editId)?.error ?? '');
   const activeName = $derived(ui.status?.ruleset?.name || 'Основной');
   let picking = $state(false);
+  let torrentToken = $state<string | null>(null);
+  let torrentPrograms = $state<string[]>([]);
+  let torrentError = $state('');
   let asText = $state(false);
   let importing = $state(false); // «Импорт»: rules of another program
   let wizard = $state(false);
@@ -77,7 +81,7 @@
   // it sends.
   function found(r: Rule): boolean {
     if (!q) return true;
-    return has(title(r)) || has(routeLabel(r)) || (r.domains ?? []).some((d) => has(d) || has(siteLabel(d))) || (r.apps ?? []).some((a) => has(a.pattern));
+    return has(title(r)) || has(portsText(r)) || has(routeLabel(r)) || (r.domains ?? []).some((d) => has(d) || has(siteLabel(d))) || (r.apps ?? []).some((a) => has(a.pattern));
   }
 
   // hitsFirst: a rule shows its first few items; the ones the search
@@ -166,7 +170,7 @@
   // a network rule) also reloads; in edit mode the profile list's revision
   // does (the edited profile was edited elsewhere, switched to or deleted).
   $effect(() => {
-    if (!s || pending || editing || asText || importing || wizard || bulk || tidying || dragFrom !== null || reloading) return;
+    if (!s || pending || editing || torrentToken !== null || asText || importing || wizard || bulk || tidying || dragFrom !== null || reloading) return;
     const r = ui.status?.ruleset;
     if (editId) {
       if (!r || r.rev <= editRev || r.rev <= triedEditAt) return;
@@ -239,6 +243,18 @@
   }
 
   const tplGroups = ['Россия', 'Сервисы', 'Полезное'] as const;
+
+  async function addTorrentTemplate() {
+    if (torrentToken === null || staleFor(torrentToken) || pending) return;
+    const next = clone();
+    next.ruleset = torrentToken;
+    next.rules = prependRules(torrentRules(torrentPrograms), next.rules, mainTarget()?.id);
+    torrentError = '';
+    try {
+      await persist(next);
+      torrentToken = null;
+    } catch (e) { torrentError = errText(e); }
+  }
 
   // missingLists: the template's lists that the database in use lacks.
   function missingLists(domains: string[]): string {
@@ -327,6 +343,10 @@
     }
     const want = ui.focusRule!;
     ui.focusRule = null;
+    if (want.ruleset !== undefined && want.ruleset !== (s!.ruleset ?? '')) {
+      toast({ tone: 'info', text: () => 'Активный профиль правил изменился. Откройте меню соединения ещё раз.' });
+      return;
+    }
     const i = locateRule(s!.rules, want);
     if (i < 0) {
       toast({ tone: 'info', text: () => 'Правило не найдено: список правил изменился.' });
@@ -775,7 +795,11 @@
                 class="tpl"
                 onclick={() => {
                   picking = false;
-                  openEditor(-1, ruleFromTemplate(t), `Новое правило: ${t.name}`);
+                  if (t.id === 'torrent') {
+                    torrentToken = s!.ruleset ?? '';
+                    torrentPrograms = [];
+                    torrentError = '';
+                  } else openEditor(-1, ruleFromTemplate(t), `Новое правило: ${t.name}`);
                 }}
               >
                 <b>{t.name}</b><span class="muted small">{tplHint(t)}</span>
@@ -785,6 +809,21 @@
             {/each}
           </div>
         {/each}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if torrentToken !== null}
+  <div class="backdrop" role="presentation">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="torrent-title">
+      <h2 id="torrent-title">Торренты — напрямую</h2>
+      <TorrentPrograms bind:programs={torrentPrograms} />
+      <p class="muted small">Правило по протоколу добавится в начало списка. Если выбрать программы, перед ним появится отдельное правило для этих клиентов.</p>
+      {#if staleFor(torrentToken) || torrentError}<p class="note error small" role="alert">{staleFor(torrentToken) || torrentError}</p>{/if}
+      <div class="actions">
+        <button disabled={!!pending} onclick={() => (torrentToken = null)}>Отмена</button>
+        <button class="primary" disabled={!!pending || !!staleFor(torrentToken)} onclick={addTorrentTemplate}>Применить</button>
       </div>
     </div>
   </div>

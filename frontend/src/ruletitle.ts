@@ -28,13 +28,13 @@ export function ruleTitle(r: Rule): string {
   if (r.name) return hide(r.name);
   const a = (r.apps ?? []).map((x) => appLabel(x.pattern));
   const d = (r.domains ?? []).map((x) => (itemLabel(x)?.geo ? siteLabel(x) : hide(siteLabel(x))));
-  return [...a, ...d].slice(0, 2).join(', ') + (a.length + d.length > 2 ? '…' : '') || (r.ports ? portsText(r) : '') || 'Правило';
+  return [...a, ...d].slice(0, 2).join(', ') + (a.length + d.length > 2 ? '…' : '') || (r.ports || r.protocol === 'bittorrent' ? portsText(r) : '') || 'Правило';
 }
 
 // ==== conn-rules ====
 
 // sortedJSON is JSON with object keys sorted (a stable form to compare).
-function sortedJSON(v: unknown): string {
+export function sortedJSON(v: unknown): string {
   return JSON.stringify(v, (_k, x) =>
     x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x,
   );

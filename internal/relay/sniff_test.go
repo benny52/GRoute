@@ -36,7 +36,7 @@ type decision struct {
 func sniffFixture(t *testing.T, action rules.Action) (*fixture, chan decision) {
 	f := newFixture(t)
 	ch := make(chan decision, 4)
-	f.relay.Decide = func(e *nat.Entry, domain string, src rules.DomainSource) rules.Result {
+	f.relay.Decide = func(e *nat.Entry, domain string, src rules.DomainSource, bitTorrent bool) rules.Result {
 		ch <- decision{domain, src}
 		return rules.Result{Action: action, Rule: "r", Domain: domain, DomainSrc: src}
 	}
@@ -226,8 +226,8 @@ func TestSniffECHOuterName(t *testing.T) {
 		f, ch := sniffFixture(t, rules.Tunnel)
 		f.relay.PreferRemoteDNS = true
 		decide := f.relay.Decide
-		f.relay.Decide = func(e *nat.Entry, domain string, src rules.DomainSource) rules.Result {
-			r := decide(e, domain, src)
+		f.relay.Decide = func(e *nat.Entry, domain string, src rules.DomainSource, bitTorrent bool) rules.Result {
+			r := decide(e, domain, src, bitTorrent)
 			r.DomainSrc = decided
 			if decided == rules.SrcDNS {
 				r.Domain = "site.example"
@@ -274,7 +274,7 @@ func TestProxyRequest(t *testing.T) {
 // stats: the decider's failover reaches the record with the route.
 func TestSniffDecisionFailover(t *testing.T) {
 	f := newFixture(t)
-	f.relay.Decide = func(e *nat.Entry, domain string, src rules.DomainSource) rules.Result {
+	f.relay.Decide = func(e *nat.Entry, domain string, src rules.DomainSource, bitTorrent bool) rules.Result {
 		return rules.Result{Action: rules.Tunnel, Profile: "nl", Group: "grp-000000000001", Failover: true, Rule: "r", Domain: domain, DomainSrc: src}
 	}
 	rec := &flows.Record{}
@@ -383,5 +383,33 @@ func TestSilentSetBounded(t *testing.T) {
 	s.add(k, now)
 	if !s.has(k, now.Add(silentTTL-time.Second)) || s.has(k, now.Add(silentTTL+time.Second)) {
 		t.Fatal("ttl")
+	}
+}
+
+func TestBitTorrentSplitGreeting(t *testing.T) {
+	f := newFixture(t)
+	f.relay.Decide = func(e *nat.Entry, domain string, src rules.DomainSource, bitTorrent bool) rules.Result {
+		if bitTorrent {
+			return rules.Result{Action: rules.Direct}
+		}
+		return rules.Result{Action: rules.Block}
+	}
+	rec := &flows.Record{}
+	conn := f.dialEntry(t, &nat.Entry{Mode: nat.Sniff, Rec: rec})
+	defer conn.Close()
+	head := []byte("\x13BitTorrent protocol\x00\x00")
+	if _, err := conn.Write(head[:4]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write(head[4:]); err != nil {
+		t.Fatal(err)
+	}
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	got := make([]byte, len(head))
+	if _, err := io.ReadFull(conn, got); err != nil || string(got) != string(head) {
+		t.Fatalf("greeting echo %q: %v", got, err)
+	}
+	if v := rec.View(time.Now()); !v.BitTorrent || v.Route != "direct" {
+		t.Fatalf("observed %+v", v)
 	}
 }

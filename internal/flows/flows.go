@@ -60,12 +60,13 @@ type Record struct {
 
 // Fields are the mutable descriptive fields.
 type Fields struct {
-	Domain    string `json:"domain"`
-	DomainSrc string `json:"domainSrc"` // sni | host | dns | unknown
-	Rule      string `json:"rule"`
-	Route     string `json:"route"`   // tunnel | direct | block | pending
-	Profile   string `json:"profile"` // profile ID for tunnel
-	Outcome   string `json:"outcome"` // reflected | passed | rst: ... | dropped: ...
+	BitTorrent bool   `json:"bitTorrent,omitempty"`
+	Domain     string `json:"domain"`
+	DomainSrc  string `json:"domainSrc"` // sni | host | dns | unknown
+	Rule       string `json:"rule"`
+	Route      string `json:"route"`   // tunnel | direct | block | pending
+	Profile    string `json:"profile"` // profile ID for tunnel
+	Outcome    string `json:"outcome"` // reflected | passed | rst: ... | dropped: ...
 	// Attrib says how the owner process was found:
 	// packet | pending | iphelper | pending-timeout | pending-full.
 	Attrib string `json:"attrib"`

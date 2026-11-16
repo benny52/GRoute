@@ -192,3 +192,37 @@ func TestHTTPHost(t *testing.T) {
 		t.Fatal("oversized head must give up")
 	}
 }
+
+func TestBitTorrentSignatures(t *testing.T) {
+	for _, prefix := range []string{"\x13", "\x13Bit", "\x13BitTorrent protoco"} {
+		if got := Parse([]byte(prefix)); got.Done {
+			t.Fatalf("premature decision for %q", prefix)
+		}
+	}
+	for _, head := range []string{"\x13BitTorrent protocol", "\x13BitTorrent protocolpeer"} {
+		if got := Parse([]byte(head)); !got.Done || got.Kind != BitTorrent {
+			t.Fatalf("missed %q", head)
+		}
+	}
+	for _, head := range []string{"\x13BitX", "opaque encrypted peer handshake", "BitTorrent protocol"} {
+		if got := Parse([]byte(head)); got.Kind == BitTorrent || !got.Done {
+			t.Fatalf("false positive %q", head)
+		}
+	}
+	syn := make([]byte, 20)
+	syn[0] = 0x41
+	extension := append(append([]byte(nil), syn...), 0, 8, 0, 0, 0, 0, 0, 0, 0, 0)
+	extension[1] = 2
+	if !IsUTPSyn(syn) || !IsUTPSyn(extension) {
+		t.Fatal("valid SYN missed")
+	}
+	for _, b := range [][]byte{syn[:19], append(append([]byte(nil), syn...), 1), extension[:24]} {
+		if IsUTPSyn(b) {
+			t.Fatal("malformed datagram recognized")
+		}
+	}
+	syn[9] = 1
+	if IsUTPSyn(syn) {
+		t.Fatal("SYN with timestamp difference matched")
+	}
+}

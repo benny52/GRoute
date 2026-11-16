@@ -167,7 +167,7 @@ func parseRulesText(text string, ts []target) RulesTextResult {
 		}
 		o, oerrs := parseLineOptions(opts)
 		lhs = strings.TrimSpace(lhs)
-		if lhs == "*" && !o.portOpt && !o.localNetworks {
+		if lhs == "*" && !o.portOpt && !o.localNetworks && o.proto != "bittorrent" {
 			if section != nil {
 				fail(n, "«* -> …» (всё остальное) пишется вне блока программы, после [*]; с портом — правило для этой программы: * -> vpn | udp 443")
 				continue
@@ -212,7 +212,7 @@ func parseRulesText(text string, ts []target) RulesTextResult {
 		}
 		items, quoted := splitQuoted(lhs)
 		emptyNetworks := o.localNetworks && o.off && strings.TrimSpace(lhs) == "*" && len(r.Apps) == 0 && len(r.Ports) == 0 && r.Protocol == ""
-		if strings.TrimSpace(lhs) == "*" && (len(r.Ports) > 0 || emptyNetworks) {
+		if strings.TrimSpace(lhs) == "*" && (len(r.Ports) > 0 || r.Protocol == "bittorrent" || emptyNetworks) {
 			items, quoted = nil, nil // a rule with ports only
 		}
 		if msg := unpairedQuote(items, quoted); msg != "" {
@@ -273,7 +273,7 @@ func parseRulesText(text string, ts []target) RulesTextResult {
 		}
 		// A line whose items were refused is not left as a rule with
 		// ports only: that would widen it to every program and site.
-		if !emptyNetworks && len(r.Apps) == 0 && len(r.Domains) == 0 && (len(r.Ports) == 0 || len(res.Errors) > errsBefore) {
+		if !emptyNetworks && len(r.Apps) == 0 && len(r.Domains) == 0 && ((len(r.Ports) == 0 && r.Protocol != "bittorrent") || len(res.Errors) > errsBefore) {
 			if len(res.Errors) == errsBefore { // not when its items were refused
 				fail(n, "не указано, что направлять")
 			}
@@ -857,7 +857,7 @@ func (c *Controller) RulesText() string {
 func formatRulesText(cfg rules.Config, ts []target) string {
 	var b strings.Builder
 	b.WriteString("# Одна строка — одно правило: что -> куда. Проверяются сверху вниз.\n")
-	b.WriteString("# Куда: vpn (основной), имя сервера, группа:Имя, напрямую, блок. Опции после |: tcp, udp, порты (tcp 443), выкл.\n\n")
+	b.WriteString("# Куда: vpn (основной), имя сервера, группа:Имя, напрямую, блок. Опции после |: tcp, udp, bittorrent, порты (tcp 443), выкл.\n\n")
 	writeRuleLines(&b, cfg.Rules, ts)
 	b.WriteString("\n# Всё остальное\n* -> " + targetWords(cfg.DefaultAction, cfg.DefaultProfile, cfg.DefaultFallback, ts) + "\n")
 	return b.String()
@@ -899,10 +899,10 @@ func writeRuleLines(b *strings.Builder, rs []rules.Rule, ts []target) {
 		}
 		line := strings.Join(items, " ")
 		name := nameText(r.Name)
-		if line == "*" && (name == "" || len(r.Ports) > 0) {
+		if line == "*" && (name == "" || len(r.Ports) > 0 || r.Protocol == "bittorrent") {
 			line = "app:*" // "* ->" alone is everything else, "* -> … | порт" a rule with ports only
 		}
-		if line == "" && (len(r.Ports) > 0 || r.LocalNetworks && !r.On()) {
+		if line == "" && (len(r.Ports) > 0 || r.Protocol == "bittorrent" || r.LocalNetworks && !r.On()) {
 			line = "*" // no items, but ports: a rule with ports only
 		}
 		if name != "" {

@@ -220,7 +220,7 @@ func TestAmneziaWGPeerFailover(t *testing.T) {
 			core.Conns.Connect(attrib.Key5{Proto: packet.ProtoUDP, Local: src, Remote: echoAddr}, 424242, 1, time.Now())
 			exchange := func(want string, fallback bool) {
 				t.Helper()
-				r := core.RelayDecide(&nat.Entry{Flow: nat.FlowKey{Dst: echoAddr}}, "echo.test", rules.SrcSNI)
+				r := core.RelayDecide(&nat.Entry{Flow: nat.FlowKey{Dst: echoAddr}}, "echo.test", rules.SrcSNI, false)
 				if r.Profile != want || r.Failover != fallback || r.Action != rules.Tunnel {
 					t.Fatalf("TCP decision = %+v", r)
 				}

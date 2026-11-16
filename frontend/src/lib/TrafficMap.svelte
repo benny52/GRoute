@@ -5,7 +5,7 @@
   import Icon from './Icon.svelte';
   import Help from './Help.svelte';
 
-  let { rows }: { rows: Direction[] } = $props();
+  let { rows, onmenu }: { rows: Direction[]; onmenu: (event: MouseEvent | KeyboardEvent, rows: Direction[], appOnly: boolean) => void } = $props();
   type Point = { key: string; label: string; icon: string };
   type Route = { key: string; nodes: Point[]; up: number; down: number; observed: boolean };
   type Wire = { from: number; to: number; layer: number; up: number; down: number };
@@ -125,6 +125,11 @@
     selected = '';
     limit = pageSize;
   }
+  function nodeMenu(event: MouseEvent | KeyboardEvent, node: Point, column: number) {
+    if (column > 1) return;
+    const directions = rows.filter(r => column === 0 ? 'app:' + r.source.toLowerCase() === node.key : 'rule:' + r.rule === node.key);
+    onmenu(event, directions, column === 0);
+  }
 </script>
 
 <div class="tools">
@@ -137,6 +142,7 @@
 </div>
 <Help id="traffic-map" title="Как читать карту">
   <p>Слева направо идёт отправка, справа налево — получение. Чем выше скорость, тем быстрее движутся пакеты. Нажмите приложение, правило или выход, чтобы оставить только его пути. «Все маршруты» добавляет назначения из правил и запасные серверы.</p>
+  <p>Нажмите правой кнопкой на приложение или правило текущего соединения, чтобы создать или изменить правило.</p>
 </Help>
 {#if showAll && settingsError}<p class="note warn">Не удалось прочитать настройки маршрутов: {hide(settingsError)}</p>{/if}
 {#if !routes.length}
@@ -159,7 +165,10 @@
         {#each graph.columns as column, index}
           <div class="column" style:padding-top={columnOffsets[index] + 'px'}>
             {#each column as n (n.key)}
-              <button class="node" aria-pressed={graph.focus === n.key} title={n.label} onclick={() => selected = selected === n.key ? '' : n.key}>
+              <button class="node" aria-pressed={graph.focus === n.key} title={n.label}
+                oncontextmenu={(e) => nodeMenu(e, n, index)}
+                onkeydown={(e) => { if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) nodeMenu(e, n, index); }}
+                onclick={() => selected = selected === n.key ? '' : n.key}>
                 <Icon name={n.icon} size={16} /><span>{n.label}</span>
               </button>
             {/each}

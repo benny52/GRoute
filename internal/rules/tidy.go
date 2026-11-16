@@ -289,7 +289,7 @@ func mergeKey(row *tidyRow) (string, bool) {
 		prof = cr.profile
 	}
 	return strings.Join([]string{kind, fmt.Sprint(uint8(cr.action)), prof, strings.Join(cr.fallback, ","),
-		fmt.Sprint(cr.proto), fmt.Sprint(cr.ports), strings.ToLower(strings.TrimSpace(row.r.Name))}, "\x00"), true
+		fmt.Sprint(cr.proto), fmt.Sprint(cr.bitTorrent), fmt.Sprint(cr.ports), strings.ToLower(strings.TrimSpace(row.r.Name))}, "\x00"), true
 }
 
 // CanMoveUp reports whether rule j of c can be put right below rule base

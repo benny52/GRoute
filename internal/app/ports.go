@@ -101,7 +101,7 @@ func inspectPort(tport uint16, scheme string) uint16 {
 // lineOpts are the options of a rules text line (after "|").
 type lineOpts struct {
 	localNetworks bool
-	proto         string   // "", "tcp", "udp"
+	proto         string   // "", "tcp", "udp", "bittorrent"
 	ports         []string // canonical; nil = none
 	portOpt       bool     // a port option was written (even a bad one)
 	off           bool
@@ -109,7 +109,7 @@ type lineOpts struct {
 }
 
 // portKeywords start a port option, longest first: "порты 80, 443".
-var portKeywords = []string{"порты", "ports", "порт", "port", "tcp", "udp"}
+var portKeywords = []string{"порты", "ports", "порт", "port", "bittorrent", "tcp", "udp"}
 
 // parseLineOptions reads the options of a line; errs are messages for the
 // line (nothing of the line is used then).
@@ -126,7 +126,7 @@ func parseLineOptions(opts string) (o lineOpts, errs []string) {
 		t := strings.TrimSpace(raw)
 		switch low := strings.ToLower(t); low {
 		case "":
-		case "tcp", "udp":
+		case "tcp", "udp", "bittorrent":
 			setProto(low)
 		case "выкл", "off", "disabled":
 			o.off = true
@@ -140,7 +140,7 @@ func parseLineOptions(opts string) (o lineOpts, errs []string) {
 		default:
 			kw, rest, ok := portOption(low)
 			if !ok {
-				errs = append(errs, fmt.Sprintf("непонятная опция %q (есть: tcp, udp, tcp 443, порты 80, 443, выкл, без дочерних)", t))
+				errs = append(errs, fmt.Sprintf("непонятная опция %q (есть: tcp, udp, bittorrent, tcp 443, порты 80, 443, выкл, без дочерних)", t))
 				continue
 			}
 			o.portOpt = true
@@ -166,7 +166,7 @@ func parseLineOptions(opts string) (o lineOpts, errs []string) {
 				}
 			}
 			o.ports = ports
-			if kw == "tcp" || kw == "udp" {
+			if kw == "tcp" || kw == "udp" || kw == "bittorrent" {
 				setProto(kw)
 			}
 		}

@@ -16,9 +16,10 @@ import (
 
 // Flow is an observed connection a rule is made from.
 type Flow struct {
-	Proc  *procinfo.Info // nil = owner unknown; Parent chain as recorded
-	Proto uint8          // 6 | 17; 0 = unknown (a DNS-query row: the connection is still to come)
-	Dst   netip.AddrPort // invalid = unknown (DNS-query row): IP items never match, port unknown
+	BitTorrent bool
+	Proc       *procinfo.Info // nil = owner unknown; Parent chain as recorded
+	Proto      uint8          // 6 | 17; 0 = unknown (a DNS-query row: the connection is still to come)
+	Dst        netip.AddrPort // invalid = unknown (DNS-query row): IP items never match, port unknown
 	// Name is the exact name the engine decided by (SNI, Host, the outer
 	// SNI it took for the site, a DNS query's name); "" = none. Normalized.
 	Name string
@@ -53,7 +54,9 @@ func (f Flow) Names() []string {
 	return out
 }
 
-func (f Flow) subject() Subject { return Subject{Proc: f.Proc, Proto: f.Proto, Dst: f.Dst} }
+func (f Flow) subject() Subject {
+	return Subject{BitTorrent: f.BitTorrent, Proc: f.Proc, Proto: f.Proto, Dst: f.Dst}
+}
 
 // decisionNames are the names the engine decides f by: Names, none when
 // f.Nameless.
@@ -101,6 +104,9 @@ func (ix indexed) index(k int) int {
 // mayBase is base for a flow whose protocol or port may be unknown (a
 // DNS-query row): an unknown one satisfies any condition on it.
 func (r *compiled) mayBase(sub Subject) bool {
+	if r.bitTorrent && sub.Proto != 0 && !sub.BitTorrent {
+		return false
+	}
 	if r.proto != 0 && sub.Proto != 0 && r.proto != sub.Proto {
 		return false
 	}
@@ -378,12 +384,12 @@ func RepeatKey(r Rule) string {
 	if r.Action == Tunnel {
 		route += "\x00" + r.Profile
 	}
-	return strings.Join([]string{route, fmt.Sprint(x.proto), fmt.Sprint(x.ports),
+	return strings.Join([]string{route, fmt.Sprint(x.proto), fmt.Sprint(x.bitTorrent), fmt.Sprint(x.ports),
 		strings.Join(x.appKeys(), "\x01"), strings.Join(x.destKeys(), "\x01")}, "\x00")
 }
 
 func (r *compiled) sameMatch(y *compiled) bool {
-	return r.proto == y.proto && slices.Equal(r.ports, y.ports) &&
+	return r.bitTorrent == y.bitTorrent && r.proto == y.proto && slices.Equal(r.ports, y.ports) &&
 		slices.Equal(r.appKeys(), y.appKeys()) && slices.Equal(r.destKeys(), y.destKeys())
 }
 

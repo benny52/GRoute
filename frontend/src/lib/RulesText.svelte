@@ -572,9 +572,9 @@ instagram.com -> vpn`);
         <p><b>Для одной программы:</b> строка <code>[chrome.exe]</code>, под ней правила только для Chrome. <code>[*]</code> — снова для всех.</p>
         <p><b>Всё остальное:</b> <code>* -&gt; vpn</code> (только в «Все правила»)</p>
         <p>
-          <b>Опции</b> после <code>|</code>: <code>tcp</code>, <code>udp</code>, порты — <code>tcp 443</code>, <code>udp 27000-27100</code>,
-          <code>порты 80, 443</code>; <code>выкл</code>, <code>без дочерних</code>. <b>Только по порту:</b> <code>* -&gt; напрямую | tcp 22</code> (без
-          порта <code>* -&gt;</code> — это «всё остальное»).
+          После <code>|</code> можно указать <code>tcp</code>, <code>udp</code>, <code>tcp 443</code>, <code>udp 27000-27100</code>,
+          <code>порты 80, 443</code>, <code>выкл</code> или <code>без дочерних</code>. Для одного порта используйте <code>* -&gt; напрямую | tcp 22</code>.
+          {#if !ui.mac}Для распознанного BitTorrent используйте <code>* -&gt; напрямую | bittorrent</code>.{/if}
         </p>
         <p><b>Название:</b> <code>YouTube: youtube.com -&gt; vpn</code>. Строки с <code>#</code> — комментарии.</p>
       </div>

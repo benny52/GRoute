@@ -72,7 +72,7 @@ func TestRelayDecideECH(t *testing.T) {
 	h := newHarness(t, cfg, Options{})
 	decide := func(dst, outer string) rules.Result {
 		e := &nat.Entry{Flow: nat.FlowKey{Src: netip.MustParseAddrPort(L), Dst: netip.MustParseAddrPort(dst)}}
-		return h.c.RelayDecide(e, outer, rules.SrcECH)
+		return h.c.RelayDecide(e, outer, rules.SrcECH, false)
 	}
 	// Nothing cached (DoH): the outer name is the site.
 	if r := decide("198.51.100.50:443", "www.youtube.com"); r.Action != rules.Tunnel || r.Domain != "www.youtube.com" || r.DomainSrc != rules.SrcSNI {

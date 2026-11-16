@@ -61,7 +61,7 @@ func TestParsePortOptions(t *testing.T) {
 		"ssh.exe -> блок | tcp ;":    "не указан ни один порт",
 		"* -> блок | порт ,":         "не указан ни один порт",
 		"a.com -> vpn | порт 100-50": "наоборот",
-		"a.com -> vpn | tcp22":       "непонятная опция \"tcp22\" (есть: tcp, udp, tcp 443, порты 80, 443, выкл, без дочерних)",
+		"a.com -> vpn | tcp22":       "непонятная опция \"tcp22\" (есть: tcp, udp, bittorrent, tcp 443, порты 80, 443, выкл, без дочерних)",
 		"* -> vpn | tcp":             "Правило только по порту пишется с портом: * -> напрямую | tcp 22",
 		"* -> vpn | порт x":          "неверный порт «x»",
 		"[chrome.exe]\n* -> vpn":     "с портом — правило для этой программы: * -> vpn | udp 443",
@@ -131,7 +131,7 @@ func TestRulesTextPortsRoundTrip(t *testing.T) {
 	for _, want := range []string{"Discord: discord.exe -> 🇩🇪 DE up to 10 Gb/s | udp 50000-65535", "Web: a.com -> vpn | порты 80, 443", "b.com -> блок | порт 8443",
 		"SSH: * -> напрямую | tcp 22", "\n* -> vpn | порт 53", "app:* -> блок | порт 25", "Glob: app:* -> блок | порт 26", "[chrome.exe]\nx.com -> блок | udp 443",
 		"Off: c.com -> напрямую | порты 1-1024 | выкл", "Odd: d.com -> напрямую | порты 443, 80",
-		"Опции после |: tcp, udp, порты (tcp 443), выкл."} {
+		"Опции после |: tcp, udp, bittorrent, порты (tcp 443), выкл."} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in\n%s", want, text)
 		}

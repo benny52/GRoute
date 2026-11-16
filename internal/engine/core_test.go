@@ -329,15 +329,15 @@ func TestTCPNeedsDomainGoesToSniff(t *testing.T) {
 	if e == nil || e.Mode != nat.Sniff || e.Rec == nil {
 		t.Fatalf("entry %+v", e)
 	}
-	if r := h.c.RelayDecide(e, "music.youtube.com", rules.SrcSNI); r.Action != rules.Tunnel || r.Rule != "yt" {
+	if r := h.c.RelayDecide(e, "music.youtube.com", rules.SrcSNI, false); r.Action != rules.Tunnel || r.Rule != "yt" {
 		t.Fatalf("%+v", r)
 	}
-	if r := h.c.RelayDecide(e, "", rules.SrcNone); r.Action != rules.Direct {
+	if r := h.c.RelayDecide(e, "", rules.SrcNone, false); r.Action != rules.Direct {
 		t.Fatalf("no name: %+v", r)
 	}
 	// SNI decision for IPv6 destination to the tunnel becomes Block.
 	e6 := &nat.Entry{Flow: nat.FlowKey{Dst: netip.MustParseAddrPort(R6)}}
-	if r := h.c.RelayDecide(e6, "www.youtube.com", rules.SrcSNI); r.Action != rules.Block {
+	if r := h.c.RelayDecide(e6, "www.youtube.com", rules.SrcSNI, false); r.Action != rules.Block {
 		t.Fatalf("ipv6: %+v", r)
 	}
 }
@@ -680,11 +680,11 @@ func TestExactWebIgnoresDNSCacheForWeb(t *testing.T) {
 		t.Fatal("web flow with a cached name must go to the relay")
 	}
 	e := h.c.NAT.LookupFlow(nat.FlowKey{Src: netip.MustParseAddrPort("192.168.1.5:41000"), Dst: netip.MustParseAddrPort("198.51.100.20:443")})
-	if r := h.c.RelayDecide(e, "allowed.example", rules.SrcSNI); r.Action != rules.Direct {
+	if r := h.c.RelayDecide(e, "allowed.example", rules.SrcSNI, false); r.Action != rules.Direct {
 		t.Fatalf("SNI must win over the cache: %+v", r)
 	}
 	// No SNI: the cache is the fallback.
-	if r := h.c.RelayDecide(e, "", rules.SrcNone); r.Action != rules.Block || r.DomainSrc != rules.SrcDNS {
+	if r := h.c.RelayDecide(e, "", rules.SrcNone, false); r.Action != rules.Block || r.DomainSrc != rules.SrcDNS {
 		t.Fatalf("no SNI must fall back to DNS: %+v", r)
 	}
 
@@ -959,7 +959,7 @@ func TestFallback(t *testing.T) {
 	// The relay's decision for a sniffed flow picks the fallback too.
 	nl.up.Store(true)
 	e := &nat.Entry{Flow: nat.FlowKey{Src: netip.MustParseAddrPort("192.168.1.5:41004"), Dst: netip.MustParseAddrPort(R)}}
-	if r := h.c.RelayDecide(e, "a.test", rules.SrcSNI); r.Profile != "nl" {
+	if r := h.c.RelayDecide(e, "a.test", rules.SrcSNI, false); r.Profile != "nl" {
 		t.Fatalf("relay decision %+v", r)
 	}
 }

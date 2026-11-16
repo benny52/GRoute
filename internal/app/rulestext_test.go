@@ -177,6 +177,25 @@ DNS: * -> напрямую | udp 53
 	}
 }
 
+func TestBitTorrentTextRoundTrip(t *testing.T) {
+	for _, rule := range []rules.Rule{
+		{Protocol: "bittorrent", Action: rules.Direct},
+		{Name: "Раздача", Protocol: "bittorrent", Ports: rules.PortList{"5000"}, Action: rules.Direct},
+		{Protocol: "bittorrent", Apps: []rules.AppMatch{{Pattern: "*"}}, Action: rules.Direct},
+	} {
+		cfg := rules.Config{DefaultAction: rules.Tunnel, Rules: []rules.Rule{rule}}
+		text := formatRulesText(cfg, nil)
+		res := parseRulesText(text, nil)
+		if len(res.Errors) > 0 || len(res.Rules) != 1 || res.DefaultAction != rules.Tunnel {
+			t.Fatalf("не удалось восстановить правило из %q: %+v", text, res)
+		}
+		got := res.Rules[0]
+		if got.Protocol != rule.Protocol || got.Action != rule.Action || !slices.Equal(got.Ports, rule.Ports) || len(got.Apps) != len(rule.Apps) {
+			t.Fatalf("исходное правило %+v, из текста %+v", rule, got)
+		}
+	}
+}
+
 func TestApplyRulesText(t *testing.T) {
 	c, _ := newCtl(t)
 	c.ImportURIs(link)

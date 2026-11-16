@@ -4,10 +4,10 @@
   // «Пошагово» button on the Rules page. The user chooses everything; the
   // steps only put it into rules in a working order.
   import { onMount } from 'svelte';
-  import { api, errText, plural, cleanSettings, cleanFallback, cleanRule, newRuleID, type Action, type Rule, type Settings, type RunningApp } from '../api';
+  import { api, errText, plural, cleanSettings, cleanFallback, newRuleID, type Action, type Rule, type Settings, type RunningApp } from '../api';
   import { defaultNetworks, readNetworks, wizardNetworkRule } from './localNetworks';
   import { ui, hide, mainTarget, mainText, targetText } from '../state.svelte';
-  import { templates, ruleFromTemplate, tplHint, type Template } from './templates';
+  import { templates, ruleFromTemplate, tplHint, torrentRules, prependRules, type Template } from './templates';
   import { itemLabel, isSpecial, isAddress, shortLabel, loadGeo } from '../geo.svelte';
   import { appLabel } from '../ruletitle';
   import Icon from './Icon.svelte';
@@ -15,6 +15,7 @@
   import GeoPicker from './GeoPicker.svelte';
   import TargetOptions from './TargetOptions.svelte';
   import FallbackPicker from './FallbackPicker.svelte';
+  import TorrentPrograms from './TorrentPrograms.svelte';
 
   // onkeep: the setup's way past this step that leaves the rules as they are.
   let { onback, ondone, onkeep }: { onback: () => void; ondone: (summary: string) => void; onkeep?: () => void } = $props();
@@ -29,6 +30,8 @@
   let apps = $state<{ pattern: string; label: string; way: Way }[]>([]);
   let sites = $state<{ item: string; way: Way }[]>([]);
   let blocks = $state<string[]>([]);
+  let torrents = $state(false);
+  let torrentPrograms = $state<string[]>([]);
   let lanID = $state(newRuleID());
   let lanWay = $state<Way>('direct');
   let lanInput = $state(defaultNetworks.join('\n'));
@@ -200,6 +203,7 @@
       key: 'lan', title: 'Локальные сети',
       rules: [{ id: lanID, name: 'Локальные сети', localNetworks: true, domains: lan.cidrs, action: lanWay, enabled: lan.cidrs.length > 0 }],
     }];
+    if (torrents) g.push({ key: 'torrent', title: 'Торренты — напрямую', rules: torrentRules(torrentPrograms) });
     for (const w of ['tunnel', 'direct'] as Way[]) {
       const ss = sites.filter((x) => x.way === w);
       if (ss.length) g.push({ key: 'sites-' + w, title: `Мои сайты ${tunnelWord(w)}`, rules: [{ name: `Мои сайты ${tunnelWord(w)}`, apps: [], domains: ss.map((x) => x.item), action: w, profile: '' }] });
@@ -262,6 +266,7 @@
   // What a rule takes, in words: a template's hint, else its items.
   function ruleText(r: Rule): string {
     if (r.localNetworks) return r.domains?.length ? r.domains.join(', ') : 'Подсети не заданы · правило выключено';
+    if (r.protocol === 'bittorrent') return 'По протоколу BitTorrent в любой программе';
     const t = [...templates, aiSites].find((x) => x.name === r.name && x.hint);
     if (t) return tplHint(t).replace(/ → .*$/, '');
     return [...(r.apps ?? []).map((a) => appLabel(a.pattern)), ...(r.domains ?? []).map((d) => (itemLabel(d)?.geo ? `«${itemLabel(d)!.text}»` : hide(shortLabel(d))))].join(', ');
@@ -309,20 +314,6 @@
     return names.join(', ') || 'ничего';
   }
 
-  // What a rule does, whatever its ID and field order: the same key, the
-  // same rule. A literal server ID stays distinct from inheritance.
-  function ruleKey(r: Rule): string {
-    const sorted = (v: unknown): unknown =>
-      Array.isArray(v)
-        ? v.map(sorted)
-        : v && typeof v === 'object'
-          ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])]))
-          : v;
-    const c = cleanRule(r, main?.id);
-    delete c.id;
-    return JSON.stringify(sorted(c));
-  }
-
   // The new rules go on top. An old rule that is the same as a new one
   // moves up to its place (keeping its ID) instead of staying below as a
   // copy that never matches: the setup run again adds no second
@@ -332,13 +323,7 @@
     const previous = old.findIndex((r) => r.id === lanID && wizardNetworkRule(r));
     const i = previous >= 0 ? previous : old.findIndex((r) => !r.id && wizardNetworkRule(r));
     if (i >= 0) rest.splice(i, 1);
-    const top = added.map((r) => {
-      if (r.localNetworks) return r;
-      const k = ruleKey(r);
-      const i = rest.findIndex((x) => ruleKey(x) === k);
-      return i < 0 ? r : rest.splice(i, 1)[0];
-    });
-    return [...top, ...rest];
+    return [...added.filter((r) => r.localNetworks), ...prependRules(added.filter((r) => !r.localNetworks), rest, main?.id)];
   }
 
   async function save() {
@@ -534,6 +519,10 @@
           </button>
         {/each}
       </div>
+      {#if !ui.mac}
+        <label class="torrent-option"><input type="checkbox" bind:checked={torrents} /> Торренты — напрямую</label>
+        {#if torrents}<TorrentPrograms bind:programs={torrentPrograms} />{/if}
+      {/if}
     {:else if step === 'servers'}
       <h1>Через какие серверы?</h1>
       <p class="lead">
@@ -643,6 +632,7 @@
 {/if}
 
 <style>
+  .torrent-option { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-weight: 600; }
   .wz { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .body { flex: 1; overflow: auto; width: 100%; max-width: 760px; margin: 0 auto; padding: 8px 28px 20px; display: flex; flex-direction: column; gap: 12px; user-select: text; }
   .body h1 { font-size: 26px; margin-bottom: 2px; }

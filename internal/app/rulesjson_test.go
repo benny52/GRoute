@@ -215,3 +215,33 @@ func TestParseRulesAutoDetect(t *testing.T) {
 		t.Fatalf("%+v", st.Config)
 	}
 }
+
+func TestBitTorrentJSONRoundTrip(t *testing.T) {
+	c, _ := newCtl(t)
+	st := c.Settings()
+	st.Rules = []rules.Rule{{Name: "Торренты", Protocol: "bittorrent", Action: rules.Direct}}
+	if _, err := c.SaveSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.RulesJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, result, err := c.ApplyRulesTextAs(string(b), "auto", true, EditGuard{}); err != nil {
+		t.Fatal(err, result.Errors)
+	}
+	got := c.Settings().Config
+	if len(got.Rules) != 1 || got.Rules[0].Protocol != "bittorrent" {
+		t.Fatalf("JSON round trip: %+v", got)
+	}
+	set, err := rules.Compile(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, matched := range []bool{true, false} {
+		res := set.EvaluateNoDomain(rules.Subject{Proto: 6, BitTorrent: matched})
+		if (res.Rule == "Торренты") != matched {
+			t.Fatalf("matching after reload: %+v", res)
+		}
+	}
+}

@@ -55,7 +55,7 @@ func (s *Set) EvaluateName(sub Subject, domain string, src DomainSource) NameRes
 				continue
 			}
 		}
-		if r.proto != 0 || len(r.ports) > 0 {
+		if r.proto != 0 || r.bitTorrent || len(r.ports) > 0 {
 			cond |= CondProto
 		}
 		switch {

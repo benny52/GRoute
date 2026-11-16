@@ -1049,7 +1049,7 @@ func TestBrowserDoHBlock(t *testing.T) {
 	rst("untracked")
 	// SNI seen in the relay.
 	e := &nat.Entry{Flow: nat.FlowKey{Src: netip.MustParseAddrPort(L), Dst: netip.MustParseAddrPort("203.0.113.60:443")}, Meta: r.c.Procs.Get(200)}
-	if res := r.c.RelayDecide(e, "mozilla.cloudflare-dns.com", rules.SrcSNI); res.Action != rules.Block || res.Rule != dnspolicy.RuleBrowserDoH {
+	if res := r.c.RelayDecide(e, "mozilla.cloudflare-dns.com", rules.SrcSNI, false); res.Action != rules.Block || res.Rule != dnspolicy.RuleBrowserDoH {
 		t.Fatalf("%+v", res)
 	}
 	// The option off: not blocked.

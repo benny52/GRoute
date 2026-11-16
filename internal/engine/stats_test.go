@@ -38,7 +38,7 @@ func TestIPv6BlockClearsPick(t *testing.T) {
 	}
 	// A sniffed IPv6 flow.
 	e6 := &nat.Entry{Flow: nat.FlowKey{Dst: netip.MustParseAddrPort(R6)}, Meta: &procinfo.Info{Name: "curl.exe", Path: `C:\Tools\curl.exe`}}
-	if r := g.c.RelayDecide(e6, "a.test", rules.SrcSNI); r.Action != rules.Block || r.Failover || r.Group != "" {
+	if r := g.c.RelayDecide(e6, "a.test", rules.SrcSNI, false); r.Action != rules.Block || r.Failover || r.Group != "" {
 		t.Fatalf("RelayDecide: %+v", r)
 	}
 }

@@ -395,6 +395,7 @@ export interface Status {
 }
 
 export interface Flow {
+  bitTorrent?: boolean;
   id: number;
   pid: number;
   process: string;
@@ -1141,7 +1142,7 @@ export function portItems(text: string | undefined): string[] {
 // "порты 80, 443". max > 0 shows that many items and "…". '' when neither
 // is set.
 export function portsText(r: Pick<Rule, 'protocol' | 'ports'>, max = 0): string {
-  const proto = r.protocol && r.protocol !== 'any' ? r.protocol.toUpperCase() : '';
+  const proto = r.protocol === 'bittorrent' ? 'BitTorrent' : r.protocol && r.protocol !== 'any' ? r.protocol.toUpperCase() : '';
   const raw = portItems(r.ports);
   const ports = canonPorts(raw) ?? raw;
   if (!ports.length) return proto;
@@ -1692,6 +1693,7 @@ interface GUI {
 
 // A Connections row as Go needs it to find the flow's record (app.ConnFacts).
 export interface ConnFacts {
+  bitTorrent?: boolean;
   id: number;
   process: string;
   path: string;
@@ -1788,6 +1790,7 @@ interface GUI {
 // connFacts copies the fields Go needs from a row.
 export function connFacts(f: Flow): ConnFacts {
   return {
+    bitTorrent: f.bitTorrent,
     id: f.id,
     process: f.process,
     path: f.path,

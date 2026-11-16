@@ -7,12 +7,25 @@
   import { sampleDirections, type Direction, type DirectionSample } from './liveDirections';
 
   import TrafficMap from './TrafficMap.svelte';
+  import FlowRuleActions, { type FlowMenu } from './FlowRuleActions.svelte';
 
   let { mapView }: { mapView: boolean } = $props();
   let rows = $state.raw<Direction[]>([]);
   let ready = $state(false);
   let error = $state('');
   let limit = $state(20);
+  let menu = $state.raw<FlowMenu | null>(null);
+
+  function openMenu(event: MouseEvent | KeyboardEvent, directions: Direction[], appOnly: boolean) {
+    if (!directions.length) return;
+    event.preventDefault();
+    const el = event.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    const anchor = event instanceof MouseEvent && (event.clientX || event.clientY)
+      ? { x: event.clientX, y: event.clientY } : { x: rect.left, y: rect.bottom };
+    const choices = directions.map(row => row.flow);
+    menu = { flow: choices[0], choices, anchor, el, appOnly };
+  }
 
   onMount(() => {
     let previous: DirectionSample | null = null;
@@ -75,15 +88,15 @@
   {:else if !ready}
     <p class="muted">Ожидание данных…</p>
   {:else if mapView}
-    <TrafficMap {rows} />
+    <TrafficMap {rows} onmenu={openMenu} />
   {:else if !rows.length}
     <p class="empty muted">{ui.status?.state === 'disconnected' ? 'GRoute отключён.' : 'Сейчас нет наблюдаемых соединений.'}</p>
   {:else}
     <div class="columns small muted" aria-hidden="true"><span>Процесс</span><span>Правило · адрес</span><span>Выход</span><span>Скорость</span></div>
     <ul>
       {#each rows.slice(0, limit) as row (row.key)}
-        <li class="flow-{row.exit.kind}">
-          <span class="node"><Icon name="app" size={16} /><span><b>{hide(row.process) || 'Неизвестный процесс'}</b>{#if row.pid}<small>PID {row.pid}</small>{/if}</span></span>
+        <li class="flow-{row.exit.kind}" oncontextmenu={(e) => openMenu(e, [row], false)}>
+          <button class="node ghost" title="Действия с соединением" aria-haspopup="menu" onclick={(e) => openMenu(e, [row], false)}><Icon name="app" size={16} /><span><b>{hide(row.process) || 'Неизвестный процесс'}</b>{#if row.pid}<small>PID {row.pid}</small>{/if}</span></button>
           {@render track(row)}
           <span class="address"><b>{hide(row.rule)}</b><br />{ui.privacy ? 'Адрес скрыт' : row.destination || 'Адрес неизвестен'}</span>
           {@render track(row)}
@@ -97,6 +110,7 @@
     {/if}
   {/if}
 </section>
+<FlowRuleActions bind:menu />
 
 <style>
   .traffic { --grid: minmax(80px, 1.2fr) minmax(15px, .35fr) minmax(75px, 1.2fr) minmax(15px, .35fr) minmax(114px, 1.15fr) minmax(80px, .7fr); }
@@ -114,6 +128,7 @@
   .node, .address, .exit { min-width:0; overflow-wrap:anywhere; font-size:13px; }
   .node :global(svg), .exit :global(svg) { flex:none; }
   .node small { display:block; margin-top:1px; color:var(--muted); }
+  .node { justify-content:flex-start; text-align:start; padding:4px; }
   .exit :global(svg) { color:var(--ink); }
   .track { position:relative; height:9px; color:var(--ink); overflow:hidden; }
   .track:before { content:''; position:absolute; inset:4px 0 auto; border-top:1px solid currentColor; opacity:.5; }

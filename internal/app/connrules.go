@@ -60,18 +60,19 @@ type connUndo struct {
 // record whenever the registry still has it (resolveFlow), and the row's
 // own fields are only the fallback.
 type ConnFacts struct {
-	ID        uint64 `json:"id"`      // flow ID: the record is looked up in the registry
-	Process   string `json:"process"` // lower-case exe name, "" = unknown
-	Path      string `json:"path"`
-	PID       uint32 `json:"pid"`
-	Proto     string `json:"proto"`     // tcp | udp
-	Dst       string `json:"dst"`       // ip:port
-	Domain    string `json:"domain"`    // one name, or DNS names joined by ","
-	DomainSrc string `json:"domainSrc"` // sni | host | dns | unknown | query (a DNS row)
-	ECH       bool   `json:"ech"`       // flows.Fields.ECH
-	Excluded  string `json:"excluded"`  // flows.Fields.Excluded
-	Attrib    string `json:"attrib"`    // flows.Fields.Attrib (dnscache | packet | … for DNS rows)
-	Stage     string `json:"stage"`     // flows.Fields.Stage; flows.StageDNS = a DNS row
+	BitTorrent bool   `json:"bitTorrent,omitempty"`
+	ID         uint64 `json:"id"`      // flow ID: the record is looked up in the registry
+	Process    string `json:"process"` // lower-case exe name, "" = unknown
+	Path       string `json:"path"`
+	PID        uint32 `json:"pid"`
+	Proto      string `json:"proto"`     // tcp | udp
+	Dst        string `json:"dst"`       // ip:port
+	Domain     string `json:"domain"`    // one name, or DNS names joined by ","
+	DomainSrc  string `json:"domainSrc"` // sni | host | dns | unknown | query (a DNS row)
+	ECH        bool   `json:"ech"`       // flows.Fields.ECH
+	Excluded   string `json:"excluded"`  // flows.Fields.Excluded
+	Attrib     string `json:"attrib"`    // flows.Fields.Attrib (dnscache | packet | … for DNS rows)
+	Stage      string `json:"stage"`     // flows.Fields.Stage; flows.StageDNS = a DNS row
 }
 
 type ConnScope struct {
@@ -209,6 +210,7 @@ func (c *Controller) resolveFlow(f ConnFacts) (connFlow, error) {
 	if v, ok := c.lookupFlow(f); ok {
 		// The engine's own facts: the WebView cannot make a service flow
 		// look like an ordinary one, and the DNS grouping is the engine's.
+		f.BitTorrent = v.BitTorrent
 		f.Excluded, f.ECH, f.Stage, f.Attrib, f.Domain, f.DomainSrc = v.Excluded, v.ECH, v.Stage, v.Attrib, v.Domain, v.DomainSrc
 		parents, sites, partial, nameless, found = v.Parents, v.Sites, v.SitesPartial, v.Nameless, true
 	}
@@ -308,6 +310,7 @@ func buildFlow(f ConnFacts, parents []string, sites [][]string, partial bool) (c
 		return fl, errors.New("неверный адрес соединения")
 	}
 	fl.Dst = netip.AddrPortFrom(dst.Addr().Unmap().WithZone(""), dst.Port())
+	fl.BitTorrent = f.BitTorrent
 	fl.ECHMarker, fl.Excluded, fl.DomainSrc, fl.Attrib = f.ECH, f.Excluded, f.DomainSrc, f.Attrib
 	fl.Process, fl.Path, fl.parents = f.Process, f.Path, parents
 	switch f.DomainSrc {
@@ -584,7 +587,7 @@ func normalizeNewRule(r rules.Rule, source string) (rules.Rule, error) {
 	if source == "quick" {
 		out.Name = ""
 	}
-	if len(out.Apps) == 0 && len(out.Domains) == 0 && len(out.Ports) == 0 {
+	if len(out.Apps) == 0 && len(out.Domains) == 0 && len(out.Ports) == 0 && !strings.EqualFold(out.Protocol, "bittorrent") {
 		return out, errConnRuleEmpty
 	}
 	return out, nil

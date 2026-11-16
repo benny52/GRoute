@@ -66,7 +66,7 @@ type Rule struct {
 	Domains  []string     `json:"domains,omitempty"`
 	App      *AppMatch    `json:"app,omitempty"`
 	Domain   *DomainMatch `json:"domain,omitempty"`
-	Protocol string       `json:"protocol,omitempty"` // any|tcp|udp
+	Protocol string       `json:"protocol,omitempty"` // any|tcp|udp|bittorrent
 	// Ports: destination ports ("443", "8000-8100"); empty = any. With
 	// Protocol they narrow the rule; a rule may have ports only. Stored in
 	// the v1.2.0 string form "80,443,27000-27200" (PortList).
@@ -139,17 +139,19 @@ func (s DomainSource) String() string {
 
 // Subject is what the engine knows about a new flow.
 type Subject struct {
-	Proc  *procinfo.Info // nil when the owner is unknown
-	Proto uint8          // 6 or 17
-	Dst   netip.AddrPort
+	BitTorrent bool           // peer handshake or uTP SYN identified in this connection
+	Proc       *procinfo.Info // nil when the owner is unknown
+	Proto      uint8          // 6 or 17
+	Dst        netip.AddrPort
 }
 
 // Result is the outcome of an evaluation.
 type Result struct {
 	// NeedsDomain: rules disagree depending on a domain that is not known
 	// yet; Action is meaningless.
-	NeedsDomain bool
-	Action      Action
+	NeedsDomain  bool
+	NeedsPayload bool // TCP must reach the relay before its BitTorrent condition can be decided
+	Action       Action
 	// Profile is the resolved profile ID when Action is Tunnel ("" when
 	// there is no main profile: the flow is refused).
 	Profile string
@@ -233,16 +235,17 @@ func (d *domPat) alt(name string) (string, bool) {
 }
 
 type compiled struct {
-	src      Rule
-	name     string
-	apps     []appPat // empty = any application
-	doms     []domPat // names; with ips: the destinations (any = none)
-	ips      []ipPat  // addresses
-	warns    []string // unusable geosite:/geoip: items
-	proto    uint8    // 0 any
-	action   Action
-	profile  string   // "" = main
-	fallback []string // "" = main
+	src        Rule
+	name       string
+	apps       []appPat // empty = any application
+	doms       []domPat // names; with ips: the destinations (any = none)
+	ips        []ipPat  // addresses
+	warns      []string // unusable geosite:/geoip: items
+	proto      uint8    // 0 any
+	bitTorrent bool
+	action     Action
+	profile    string   // "" = main
+	fallback   []string // "" = main
 	// ports: destination ports, sorted and merged; empty = any port.
 	ports []PortRange
 	// dns
@@ -266,6 +269,7 @@ func (r *compiled) matchIP(ip netip.Addr) bool {
 
 // Set is an immutable compiled rule set.
 type Set struct {
+	hasBitTorrent bool
 	privateRoutes []netip.Prefix
 	rules         []compiled
 	def           Action
@@ -353,6 +357,7 @@ func compileWith(c Config, g Geo) (*Set, error) {
 		for _, w := range cr.warns {
 			s.Warnings = append(s.Warnings, cr.name+": "+w)
 		}
+		s.hasBitTorrent = s.hasBitTorrent || cr.bitTorrent
 		s.rules = append(s.rules, cr)
 	}
 	return s, nil
@@ -439,7 +444,7 @@ func parseDomainPattern(p string) (domPat, error) {
 func compileRule(i int, r Rule, g Geo) (compiled, error) {
 	cr := compiled{src: r, name: ruleName(i, r), action: r.Action, profile: r.Profile, fallback: r.Fallback}
 	apps, doms := r.AllApps(), r.AllDomains()
-	if len(apps) == 0 && len(doms) == 0 && len(r.Ports) == 0 {
+	if len(apps) == 0 && len(doms) == 0 && len(r.Ports) == 0 && !strings.EqualFold(r.Protocol, "bittorrent") {
 		return cr, fmt.Errorf("%s: укажите программу, сайт или порт", cr.name)
 	}
 	for _, a := range apps {
@@ -492,6 +497,8 @@ func compileRule(i int, r Rule, g Geo) (compiled, error) {
 		cr.proto = 6
 	case "udp":
 		cr.proto = 17
+	case "bittorrent":
+		cr.bitTorrent = true
 	default:
 		return cr, fmt.Errorf("%s: неизвестный протокол %q", cr.name, r.Protocol)
 	}
@@ -634,6 +641,9 @@ func runeLen(s string) int {
 }
 
 func (r *compiled) base(sub Subject) bool {
+	if r.bitTorrent && !sub.BitTorrent {
+		return false
+	}
 	if r.proto != 0 && r.proto != sub.Proto {
 		return false
 	}
@@ -816,6 +826,23 @@ func (s *Set) EvaluateDomain(sub Subject, domain string, src DomainSource) Resul
 	res := s.result(s.firstMatch(sub, domain))
 	res.Domain, res.DomainSrc = domain, src
 	return res
+}
+
+// EvaluateTCPSYN decides before any application bytes have arrived. Only
+// inspect the payload if recognizing a peer could change its route. In
+// particular, ordinary direct traffic stays on the native Windows path when
+// both the torrent rule and the rest of the rules send it there.
+func (s *Set) EvaluateTCPSYN(sub Subject, sites [][]string) Result {
+	result := s.EvaluateSites(sub, sites)
+	if !s.hasBitTorrent {
+		return result
+	}
+	sub.BitTorrent = true
+	peer := s.EvaluateSites(sub, sites)
+	if result.NeedsDomain != peer.NeedsDomain || (!result.NeedsDomain && !sameRoute(result, peer)) {
+		return Result{NeedsPayload: true}
+	}
+	return result
 }
 
 // EvaluateNoDomain decides as if no domain rule can match: the fallback

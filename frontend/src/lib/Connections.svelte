@@ -1,12 +1,10 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { api, errText, fmtBytes, fmtDuration, fmtTime, actionLabel, strategyLabel, cleanRule, dnsRuleLabel, type Flow, type Rule, type ConnFacts } from '../api';
-  import { ui, hide, profileName, mainTarget } from '../state.svelte';
+  import { api, errText, fmtBytes, fmtDuration, fmtTime, actionLabel, strategyLabel, dnsRuleLabel, type Flow } from '../api';
+  import { ui, hide, profileName } from '../state.svelte';
   import Icon from './Icon.svelte';
-  import ConnMenu, { showConnResult, setConnNav } from './ConnMenu.svelte';
-  import RuleEditor from './RuleEditor.svelte';
-  import Explain from './Explain.svelte';
-  import { ruleTitle } from '../ruletitle';
+  import { setConnNav } from './ConnMenu.svelte';
+  import FlowRuleActions, { type FlowMenu } from './FlowRuleActions.svelte';
   import { every } from '../poll';
 
   let { go }: { go: (id: string) => void } = $props();
@@ -36,9 +34,7 @@
   // conn-rules: the menu of a row works on a snapshot of it (the table may
   // refresh or drop the row meanwhile); the rule editor and «Проверить
   // адрес» open from it as dialogs.
-  let menu = $state<{ flow: Flow; anchor: { x: number; y: number }; el: HTMLElement | null } | null>(null);
-  let draft = $state<{ rule: Rule; facts: ConnFacts; ruleset: string; udp: boolean } | null>(null);
-  let explainQ = $state<{ app: string; target: string; proto: string; port: number; note: string; observed: Flow } | null>(null);
+  let menu = $state<FlowMenu | null>(null);
   // Roving tabindex: one tab stop for the table (the selected row, else the
   // first); the arrows move between rows.
   let tbody = $state<HTMLElement>();
@@ -140,21 +136,6 @@
   // contextmenu event for the ContextMenu key and Shift+F10, which must not
   // open it a second time.
   let keyMenuAt = 0;
-  // explainRet: the element that gets the focus back when «Проверить адрес»
-  // closes.
-  let explainRet: HTMLElement | null = null;
-  let explainEl = $state<HTMLElement>();
-
-  $effect(() => {
-    if (explainQ && explainEl) explainEl.focus();
-  });
-
-  function closeExplain() {
-    explainQ = null;
-    if (explainRet?.isConnected) explainRet.focus();
-    explainRet = null;
-  }
-
   function openMenu(f: Flow, anchor: { x: number; y: number }, el: HTMLElement | null) {
     selected = f;
     menu = { flow: JSON.parse(JSON.stringify(f)), anchor, el };
@@ -239,14 +220,6 @@
     if (el) el.focus();
     else tableEl?.focus();
   });
-
-  async function saveDraft(r: Rule) {
-    const d = draft!;
-    const res = await api.AddConnRule({ facts: d.facts, rule: cleanRule(r, mainTarget()?.id), source: 'editor', ruleset: d.ruleset });
-    draft = null;
-    const saved = res.rule;
-    showConnResult(res, () => hide(ruleTitle(saved)), d.udp);
-  }
 
   const srcName: Record<string, string> = { sni: 'по SNI (имя сайта в HTTPS)', host: 'по заголовку Host (HTTP)', dns: 'по кэшу DNS', query: 'из DNS-запроса', unknown: '' };
 
@@ -381,38 +354,7 @@
   {/if}
 </div>
 
-{#if menu}
-  {#key menu}
-    <ConnMenu
-      flow={menu.flow}
-      anchor={menu.anchor}
-      returnFocus={menu?.el ?? null}
-      onclose={() => (menu = null)}
-      onedit={(rule, facts, ruleset) => (draft = { rule, facts, ruleset, udp: facts.proto.toLowerCase() === 'udp' })}
-      onexplain={(q) => {
-        explainRet = menu?.el ?? null;
-        if (menu) explainQ = { ...q, observed: menu.flow };
-      }}
-    />
-  {/key}
-{/if}
-
-{#if draft}
-  <RuleEditor rule={draft.rule} title="Новое правило из соединения" onsave={saveDraft} onclose={() => (draft = null)} />
-{/if}
-
-{#if explainQ}
-  <div
-    class="backdrop"
-    role="presentation"
-    onclick={(e) => e.target === e.currentTarget && closeExplain()}
-    onkeydown={(e) => e.key === 'Escape' && closeExplain()}
-  >
-    <div class="dialog explain" role="dialog" aria-label="Проверить адрес" tabindex="-1" bind:this={explainEl}>
-      <Explain initial={explainQ} current={() => null} onclose={closeExplain} />
-    </div>
-  </div>
-{/if}
+<FlowRuleActions bind:menu />
 
 <style>
   .wrap { display: flex; flex-direction: column; height: 100%; gap: 10px; }
@@ -455,5 +397,4 @@
   .more { width: 24px; height: 22px; padding: 0; opacity: 0.55; }
   tr:hover .more,
   tr.sel .more { opacity: 1; }
-  .explain { width: min(820px, 94vw); padding: 0; }
 </style>

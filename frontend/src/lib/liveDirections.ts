@@ -2,6 +2,7 @@ import type { Connections, Flow } from '../api';
 import { observedExit, type ObservedExit } from './flowRoute';
 
 export interface Direction {
+  flow: Flow;
   key: string;
   process: string;
   pid: number;
@@ -59,7 +60,7 @@ export function sampleDirections(connections: Connections, previous: DirectionSa
     const key = JSON.stringify([flow.pid, source, destination, rule, exit.kind, exit.serverId, exit.label]);
     let row = grouped.get(key);
     if (!row) {
-      row = { key, process: flow.process, pid: flow.pid, source, rule, destination, exit, up: 0, down: 0, hasDown: true, measured: false };
+      row = { flow, key, process: flow.process, pid: flow.pid, source, rule, destination, exit, up: 0, down: 0, hasDown: true, measured: false };
       grouped.set(key, row);
     }
     if (flow.recv < 0) row.hasDown = false;

@@ -630,3 +630,21 @@ func TestRepeatKey(t *testing.T) {
 		t.Error("a rule that does not compile has a key")
 	}
 }
+
+func TestPlaceObservedBitTorrent(t *testing.T) {
+	cfg := Config{Rules: []Rule{{Protocol: "bittorrent", Action: Direct}}}
+	f := Flow{Proto: 6}
+	if Place(cfg, f) != 1 {
+		t.Fatal("ordinary TCP mistaken for BitTorrent")
+	}
+	if i, _ := Winner(cfg, f); i != -1 {
+		t.Fatal("ordinary TCP matched peer rule")
+	}
+	f.BitTorrent = true
+	if Place(cfg, f) != 0 {
+		t.Fatal("recognized peer rule missed")
+	}
+	if i, _ := Winner(cfg, f); i != 0 {
+		t.Fatal("observed BitTorrent did not identify its rule")
+	}
+}

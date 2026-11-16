@@ -50,7 +50,7 @@ export const ui = $state({
   scrollTo: '',
   // conn-rules: a rule «Правила» opens in its editor when shown (a toast's
   // «Открыть правило»); located by locateRule.
-  focusRule: null as { id: string; index: number; rule: Rule; rev?: number } | null,
+  focusRule: null as { id: string; index: number; rule: Rule; rev?: number; ruleset?: string } | null,
   // backup: the restore dialog is open; the page re-mounts when reloadKey
   // grows (after a restore); editors with unsaved edits (trackUnsaved).
   restore: false,
