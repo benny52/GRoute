@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -43,6 +44,133 @@ func (r *stubRunner) UDPAssociate(ctx context.Context) (*socks5.UDPAssoc, error)
 	return r.c.UDPAssociate(ctx)
 }
 func (r *stubRunner) SOCKS() socks5.Client { return r.c }
+
+type batchTestRunner struct {
+	stubRunner
+	id      string
+	started chan<- string
+	probes  chan<- string
+	finish  <-chan struct{}
+}
+
+func (r *batchTestRunner) Start() error {
+	r.started <- r.id
+	return r.stubRunner.Start()
+}
+
+func (r *batchTestRunner) Dial(ctx context.Context, dst socks5.Addr) (net.Conn, error) {
+	r.probes <- r.id
+	select {
+	case <-r.finish:
+		return nil, errors.New("synthetic TCP failure")
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestBatchParallelPreparationAndSerialProbes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		room int // -1: no routing session
+		want int
+	}{{"standalone", -1, 6}, {"limited session", 4, 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newCtl(t)
+			const count = 9
+			var links []string
+			for i := range count {
+				links = append(links, fmt.Sprintf("hy2://test@server%d.invalid:443", i))
+			}
+			profiles, err := c.ImportURIs(strings.Join(links, "\n"))
+			if err != nil || len(profiles.Added) != count {
+				t.Fatal("test profiles", err)
+			}
+			started, probes := make(chan string, count), make(chan string, count)
+			finish := make(chan struct{}, 1)
+			c.Runners = func(p hysteria.Profile, _ tunnels.Hooks) tunnels.Runner {
+				return &batchTestRunner{id: p.ID, started: started, probes: probes, finish: finish}
+			}
+			if tc.room >= 0 {
+				c.sess = &liveSession{mgr: &tunnels.Manager{New: c.Runners}, room: tc.room}
+			}
+			token := c.BeginCheckBatch()
+			results := make(chan error, count)
+			var workers sync.WaitGroup
+			defer func() { c.EndCheckBatch(token); workers.Wait() }()
+			for _, p := range profiles.Added {
+				workers.Go(func() {
+					_, err := c.CheckBatchProfile(token, p.ID)
+					results <- err
+				})
+			}
+			for range tc.want {
+				select {
+				case <-started:
+				case <-time.After(2 * time.Second):
+					t.Fatal("too few parallel preparations")
+				}
+			}
+			select {
+			case <-probes:
+			case <-time.After(2 * time.Second):
+				t.Fatal("missing first probe")
+			}
+			select {
+			case id := <-started:
+				t.Fatalf("started extra runner %s", id)
+			case id := <-probes:
+				t.Fatalf("overlapping TCP measurement %s", id)
+			case <-time.After(100 * time.Millisecond):
+			}
+			finish <- struct{}{}
+			select {
+			case err := <-results:
+				if err != nil {
+					t.Fatalf("first result: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("first check did not finish")
+			}
+			select {
+			case <-started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("next server did not use the freed slot")
+			}
+			c.EndCheckBatch(token)
+			for range count - 1 {
+				select {
+				case err := <-results:
+					if !errors.Is(err, context.Canceled) {
+						t.Fatalf("cancel: %v", err)
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("cancel did not reach every wait")
+				}
+			}
+		})
+	}
+}
+
+func TestBatchFullSessionStillChecksRoutingServer(t *testing.T) {
+	c, _ := newCtl(t)
+	routing, idle, _ := servers(t, c)
+	m := &tunnels.Manager{New: func(hysteria.Profile, tunnels.Hooks) tunnels.Runner {
+		return &ctlRunner{dialErr: errors.New("synthetic TCP failure")}
+	}}
+	p, _ := c.Profile(routing)
+	m.Sync([]hysteria.Profile{p})
+	defer m.StopAll()
+	c.sess = &liveSession{mgr: m, room: 0}
+	token := c.BeginCheckBatch()
+	defer c.EndCheckBatch(token)
+	if _, err := c.CheckBatchProfile(token, idle); err == nil || !strings.Contains(err.Error(), "слишком много") {
+		t.Fatalf("missing exclusion limit: %v", err)
+	}
+	result, err := c.CheckBatchProfile(token, routing)
+	if err != nil || len(result.Steps) != 2 || !result.Steps[0].OK || !m.Get(routing).Available() {
+		t.Fatalf("routing server was not checked in place: %+v, %v", result, err)
+	}
+}
 
 type waitingCheckRunner struct {
 	stubRunner

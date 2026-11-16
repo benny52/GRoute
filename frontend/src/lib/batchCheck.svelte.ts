@@ -1,7 +1,8 @@
 import { api, errText, formatResponseMs } from '../api';
 
 export const batch = $state({
-  running: false, done: 0, total: 0, current: '',
+  running: false, done: 0, total: 0,
+  states: {} as Record<string, 'queued' | 'checking'>,
   stopping: false, cancelled: false, error: '',
   results: {} as Record<string, { ok: boolean; label: string }>,
 });
@@ -33,23 +34,29 @@ export async function checkAll(ids: string[]) {
   batch.error = '';
   try {
     token = await api.BeginCheckBatch();
-    for (const id of ids) {
-      if (batch.stopping) break;
-      batch.current = id;
-      try {
-        const result = await api.CheckBatchProfile(token, id);
-        if (batch.stopping) break;
-        const failed = result.steps?.find(step => !step.ok && !step.skip);
-        const detail = failed?.detail || failed?.name || 'соединение не прошло проверку';
-        batch.results[id] = { ok: result.ok, label: result.ok
-          ? 'Работает' + (result.responseMs != null ? ' · отклик ' + formatResponseMs(result.responseMs) : '')
-          : 'Ошибка: ' + detail };
-      } catch (error) {
-        if (batch.stopping) break;
-        batch.results[id] = { ok: false, label: 'Ошибка: ' + errText(error) };
+    batch.states = Object.fromEntries(ids.map(id => [id, 'queued' as const]));
+    let next = 0;
+    async function worker() {
+      while (!batch.stopping && next < ids.length) {
+        const id = ids[next++];
+        batch.states[id] = 'checking';
+        try {
+          const result = await api.CheckBatchProfile(token, id);
+          if (batch.stopping) return;
+          const failed = result.steps?.find(step => !step.ok && !step.skip);
+          const detail = failed?.detail || failed?.name || 'соединение не прошло проверку';
+          batch.results[id] = { ok: result.ok, label: result.ok
+            ? 'Работает' + (result.responseMs != null ? ' · отклик ' + formatResponseMs(result.responseMs) : '')
+            : 'Ошибка: ' + detail };
+        } catch (error) {
+          if (batch.stopping) return;
+          batch.results[id] = { ok: false, label: 'Ошибка: ' + errText(error) };
+        }
+        delete batch.states[id];
+        batch.done++;
       }
-      batch.done++;
     }
+    await Promise.all(Array.from({ length: Math.min(ids.length, 6) }, worker));
   } catch (error) {
     batch.error = errText(error);
   } finally {
@@ -58,7 +65,7 @@ export async function checkAll(ids: string[]) {
     ending = undefined;
     batch.cancelled = batch.stopping;
     batch.stopping = false;
-    batch.current = '';
+    batch.states = {};
     batch.running = false;
   }
 }

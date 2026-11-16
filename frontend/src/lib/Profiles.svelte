@@ -285,7 +285,7 @@
           <div class="name ellipsis">{hide(p.name)}</div>
           <div class="meta">
             <span class="mono ellipsis">{hide(p.server)}</span>
-            {#if p.source}<span class="badge"><Icon name="rss" size={11} />{hide(p.sourceName)}</span>{/if}
+            {#if p.source}<span class="badge" title={hide(p.sourceName)}><Icon name="rss" size={11} /><span>{hide(p.sourceName)}</span></span>{/if}
             {#if p.missing}<span class="badge warn-b" title="Сервер пропал из подписки, но его используют правила">нет в подписке</span>{/if}
             {#if p.duplicateOf && p.duplicateSub && !p.source}
               <span class="badge warn-b" title="Тот же адрес, пароль и настройки, что у «{hide(p.duplicateOf)}» из подписки «{hide(p.duplicateSub)}»: та копия обновляется вместе с подпиской">есть в подписке «{hide(p.duplicateSub)}»</span>
@@ -297,7 +297,8 @@
             {#if p.obfs}<span class="badge">{p.obfs}</span>{/if}
             {#if p.pinned}<span class="badge" title="Сертификат проверяется по отпечатку">pin</span>{:else if p.insecure}<span class="badge warn-b" title="Сертификат не проверяется">insecure</span>{/if}
           </div>
-          {#if batch.current === p.id}<span class="small muted">Проверяем…</span>
+          {#if batch.states[p.id] === 'checking'}<span class="small muted">Проверяем…</span>
+          {:else if batch.states[p.id] === 'queued'}<span class="small muted">В очереди</span>
           {:else if batch.results[p.id]}
             {@const result = batch.results[p.id]}
             <strong class="check-result" class:ok={result.ok}><Icon name={result.ok ? 'check' : 'x'} size={15} />{hide(result.label)}</strong>
@@ -397,9 +398,11 @@
   .skipped { margin: 4px 0 0; padding-left: 18px; }
   .star { color: var(--warn); }
   .star :global(svg) { fill: currentColor; }
-  .info { display: grid; gap: 3px; }
+  .info { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
   .name { font-weight: 650; font-size: 14.5px; }
   .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .meta .badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .meta .badge :global(svg) { flex: none; }
   .warn-b { color: var(--warn); }
   .state { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
   .acts { display: flex; }

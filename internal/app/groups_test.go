@@ -29,6 +29,32 @@ import (
 
 const threeServers = "hy2://a@de1.example:443#DE1\nhy2://a@de2.example:443#DE2\nhy2://a@nl1.example:443#NL1"
 
+func TestGroupTimeoutNamesProfileEngine(t *testing.T) {
+	for _, tc := range []struct{ protocol, engine string }{
+		{"vless", "Xray"}, {"amneziawg", "AmneziaWG"}, {"hysteria2", "Hysteria"},
+	} {
+		t.Run(tc.protocol, func(t *testing.T) {
+			c, _ := newCtl(t)
+			var runner *ctlRunner
+			c.Runners = func(_ hysteria.Profile, hooks tunnels.Hooks) tunnels.Runner {
+				runner = &ctlRunner{h: hooks}
+				return runner
+			}
+			ep, release := c.acquire(hysteria.Profile{ID: "test", Protocol: tc.protocol})
+			defer release()
+			runner.reconnect()
+			_, err := waitConnectedCtx(context.Background(), ep, 0)
+			if err == nil || !strings.Contains(err.Error(), tc.engine) {
+				t.Fatalf("expected %s timeout, got %v", tc.engine, err)
+			}
+			runner.set(false)
+			if _, err := waitConnectedCtx(context.Background(), ep, 0); err == nil || err.Error() != "down" {
+				t.Fatalf("lost diagnostic from engine: %v", err)
+			}
+		})
+	}
+}
+
 // servers imports three manual servers and returns their IDs.
 func servers(t *testing.T, c *Controller) (de1, de2, nl1 string) {
 	t.Helper()

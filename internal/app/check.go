@@ -53,7 +53,20 @@ var (
 // CheckProfile starts the profile (or uses its running Hysteria), then
 // checks TCP through it, the external IP, latency and UDP.
 func (c *Controller) CheckProfile(id string) (CheckResult, error) {
-	return c.checkProfile(context.Background(), id)
+	return c.checkProfile(context.Background(), id, nil)
+}
+
+// Shared across batches so a replacement run also waits for any cancelled
+// cores to finish stopping. The frontend uses the same six-worker limit.
+const batchCheckWorkers = 6
+
+type checkPool struct {
+	workers chan struct{}
+	probe   chan struct{}
+	// Temporary cores in a routing session may still be resolving their
+	// server addresses. Both fields are protected by Controller.mu.
+	temporary int
+	released  chan struct{}
 }
 
 // Register the batch before issuing its first check. A cancel arriving
@@ -63,6 +76,13 @@ func (c *Controller) BeginCheckBatch() uint64 {
 	defer c.mu.Unlock()
 	if c.checkBatchCancel != nil {
 		c.checkBatchCancel()
+	}
+	if c.checkPool == nil {
+		c.checkPool = &checkPool{
+			workers:  make(chan struct{}, batchCheckWorkers),
+			probe:    make(chan struct{}, 1),
+			released: make(chan struct{}),
+		}
 	}
 	c.checkBatchID++
 	c.checkBatchCtx, c.checkBatchCancel = context.WithCancel(context.Background())
@@ -80,19 +100,25 @@ func (c *Controller) EndCheckBatch(token uint64) {
 
 func (c *Controller) CheckBatchProfile(token uint64, id string) (CheckResult, error) {
 	c.mu.Lock()
-	ctx, current := c.checkBatchCtx, c.checkBatchID
+	ctx, current, pool := c.checkBatchCtx, c.checkBatchID, c.checkPool
 	c.mu.Unlock()
 	if token != current || ctx == nil {
 		return CheckResult{}, context.Canceled
 	}
-	res, err := c.checkProfile(ctx, id)
+	select {
+	case pool.workers <- struct{}{}:
+		defer func() { <-pool.workers }()
+	case <-ctx.Done():
+		return CheckResult{}, ctx.Err()
+	}
+	res, err := c.checkProfile(ctx, id, pool)
 	if ctx.Err() != nil {
 		return CheckResult{}, ctx.Err()
 	}
 	return res, err
 }
 
-func (c *Controller) checkProfile(ctx context.Context, id string) (CheckResult, error) {
+func (c *Controller) checkProfile(ctx context.Context, id string, pool *checkPool) (CheckResult, error) {
 	if err := ctx.Err(); err != nil {
 		return CheckResult{}, err
 	}
@@ -101,8 +127,20 @@ func (c *Controller) checkProfile(ctx context.Context, id string) (CheckResult, 
 		return CheckResult{}, err
 	}
 	res := CheckResult{Profile: p.Name}
-	ep, release := c.acquire(p)
+	var ep *tunnels.Endpoint
+	var release func()
+	if pool != nil {
+		ep, release, err = c.acquireBatch(ctx, p, pool)
+		if err != nil {
+			return res, err
+		}
+	} else {
+		ep, release = c.acquire(p)
+	}
 	defer release()
+	if ep == nil {
+		return res, errors.New("сервер не запустился")
+	}
 
 	// 1. Hysteria (Xray for VLESS) connects. Xray is up once a request
 	// went through the server, and the first may take a few tries.
@@ -121,6 +159,20 @@ func (c *Controller) checkProfile(ctx context.Context, id string) (CheckResult, 
 	}
 	step.OK, step.Detail = true, "подключено"
 	res.Steps = append(res.Steps, step)
+
+	// Preparation may overlap. After connecting, take one turn for all
+	// traffic measurements (TCP, external IP, HTTP response and UDP).
+	if pool != nil {
+		select {
+		case pool.probe <- struct{}{}:
+			defer func() { <-pool.probe }()
+		case <-ctx.Done():
+			return res, ctx.Err()
+		}
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+	}
 
 	// 2. TCP: a CONNECT through the tunnel (latency) and HTTPS for the
 	// external IP.
@@ -205,8 +257,16 @@ func (c *Controller) checkProfile(ctx context.Context, id string) (CheckResult, 
 // Hysteria.
 func (c *Controller) acquire(p hysteria.Profile) (*tunnels.Endpoint, func()) {
 	c.mu.Lock()
-	sess := c.sess
-	if sess == nil && c.checkMgr == nil {
+	acquire := c.checkAcquirerLocked()
+	c.mu.Unlock()
+	return acquire(p)
+}
+
+func (c *Controller) checkAcquirerLocked() func(hysteria.Profile) (*tunnels.Endpoint, func()) {
+	if c.sess != nil {
+		return c.sess.Acquire
+	}
+	if c.checkMgr == nil {
 		f := c.Runners
 		if f == nil {
 			base := c.Base
@@ -215,12 +275,54 @@ func (c *Controller) acquire(p hysteria.Profile) (*tunnels.Endpoint, func()) {
 		}
 		c.checkMgr = &tunnels.Manager{New: f, Log: c.Log, LogLine: c.hysteriaLine}
 	}
-	mgr := c.checkMgr
-	c.mu.Unlock()
-	if sess != nil {
-		return sess.Acquire(p)
+	return c.checkMgr.Acquire
+}
+
+func (c *Controller) acquireBatch(ctx context.Context, p hysteria.Profile, pool *checkPool) (*tunnels.Endpoint, func(), error) {
+	for {
+		c.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			c.mu.Unlock()
+			return nil, nil, err
+		}
+		sess := c.sess
+		if sess != nil {
+			if ep := sess.Endpoint(p.ID); ep != nil && hysteria.SameConnection(ep.Profile, p) {
+				c.mu.Unlock()
+				return ep, func() {}, nil
+			}
+			// As in group probes, reserve up to four addresses per
+			// temporary core until the session has removed its exclusions.
+			if sess.ServerIPRoom() < 4*(pool.temporary+1) {
+				active, released := pool.temporary, pool.released
+				c.mu.Unlock()
+				if active == 0 {
+					return nil, nil, errors.New("не проверен: запущено слишком много серверов")
+				}
+				select {
+				case <-released:
+					continue
+				case <-ctx.Done():
+					return nil, nil, ctx.Err()
+				}
+			}
+			pool.temporary++
+		}
+		acquire := c.checkAcquirerLocked()
+		c.mu.Unlock()
+		ep, release := acquire(p)
+		if sess == nil {
+			return ep, release, nil
+		}
+		return ep, func() {
+			release()
+			c.mu.Lock()
+			pool.temporary--
+			close(pool.released)
+			pool.released = make(chan struct{})
+			c.mu.Unlock()
+		}, nil
 	}
-	return mgr.Acquire(p)
 }
 
 func waitConnected(ctx context.Context, ep *tunnels.Endpoint, timeout time.Duration, core string) (hysteria.Status, error) {

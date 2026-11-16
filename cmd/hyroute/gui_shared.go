@@ -406,6 +406,11 @@ func (g *GUI) SwitchRulesetFromTray(id string) error {
 	return err
 }
 
+// ZapretBrief and SetZapretEnabled: the bypass as the tray and the panel
+// show and switch it.
+func (g *GUI) ZapretBrief() app.ZapretBrief   { return g.ctl.ZapretBrief() }
+func (g *GUI) SetZapretEnabled(on bool) error { return g.ctl.SetZapretEnabled(on) }
+
 func (g *GUI) TidyRules(s settings.Settings, accept []string) app.TidyView {
 	return g.ctl.TidyRules(s, accept)
 }
