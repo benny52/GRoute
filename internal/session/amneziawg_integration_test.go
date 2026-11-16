@@ -12,6 +12,10 @@ import (
 	"io"
 	"log/slog"
 	"net/netip"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -172,12 +176,24 @@ func newTestPeer(t *testing.T, version string) (hysteria.Profile, func()) {
 }
 
 func TestAmneziaWGPeerFailover(t *testing.T) {
+	var helperDir string
+	if runtime.GOOS == "windows" {
+		helperDir = os.Getenv("GROUTE_TEST_AWG_DIR")
+		if helperDir == "" {
+			helperDir = t.TempDir()
+			cmd := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go.exe"), "build", "-o", filepath.Join(helperDir, "groute-awg.exe"), "./cmd/groute-awg")
+			cmd.Dir = "../.."
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("build helper: %v\n%s", err, out)
+			}
+		}
+	}
 	for _, order := range [][]string{{"2.0", "3.1"}, {"3.1", "2.0"}} {
 		t.Run(strings.Join(order, "-to-"), func(t *testing.T) {
 			t.Parallel()
 			primary, cut := newTestPeer(t, order[0])
 			spare, _ := newTestPeer(t, order[1])
-			mgr := &tunnels.Manager{New: RunnerFactory(Config{Log: slog.Default()})}
+			mgr := &tunnels.Manager{New: RunnerFactory(Config{Dir: helperDir, Log: slog.Default()})}
 			t.Cleanup(mgr.StopAll)
 			mgr.Sync([]hysteria.Profile{primary, spare})
 			waitFor := func(label string, deadline time.Duration, ok func() bool) {

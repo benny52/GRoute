@@ -49,7 +49,13 @@ try {
     Set-BuildEnvironment 'GOOS' 'windows'
     Set-BuildEnvironment 'GOARCH' 'amd64'
     Set-BuildEnvironment 'CGO_ENABLED' '0'
-    $ldflags = '-H windowsgui -X main.portableBuild=true -X main.version=v0.0.0-dev -X main.updateRepo='
+    $helper = Join-Path $stage 'groute-awg.exe'
+    & $go build -trimpath -buildvcs=false -o $helper ./cmd/groute-awg
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to build groute-awg.exe' }
+    $awgHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $helper).Hash
+    $pins['groute-awg.exe'] = $awgHash
+    $files['groute-awg.exe'] = $helper
+    $ldflags = "-H windowsgui -X main.portableBuild=true -X main.version=v0.0.0-dev -X main.updateRepo= -X main.bundledAWGSHA256=$awgHash"
     & $go build -trimpath -buildvcs=false -tags desktop,production -ldflags $ldflags -o $exe ./cmd/hyroute
     if ($LASTEXITCODE -ne 0) { throw 'Failed to build GRoute.exe' }
     # Apply resources only to the staged executable. Existing .syso resources

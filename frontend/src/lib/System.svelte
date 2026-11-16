@@ -177,6 +177,7 @@
   });
 
   const offline = $derived(!status || status.state === 'disconnected' || status.state === 'error');
+  const checkedUpdates = $derived(updates?.checked && !updates.checked.startsWith('0001'));
   const updateMode = $derived(prefs.updateCheck || (updates?.dev ? 'manual' : 'auto'));
 
   // dns: Home's «Настройки DNS» asks to be shown a card (ui.scrollTo).
@@ -248,29 +249,34 @@
     <Backup undoOnly />
   {/if}
 
-  {#if !ui.portable}
   <section class="card">
-    <h2><Icon name="download" size={17} /> Обновления</h2>
+    <h2><Icon name="download" size={17} /> {ui.portable ? 'Обновления ядер' : 'Обновления'}</h2>
     {#if updates}
       <div class="kv">
-        <span class="muted">HyRoute</span>
-        <span>
-          <b>{updates.current}</b>
-          {#if updates.app}
-            → доступна <b>{updates.app.version}</b>
-            {#if updates.appStage === 'downloading'}(загрузка {Math.round(updates.appProgress * 100)}%){/if}
-          {:else if updates.checked && !updates.checked.startsWith('0001') && !updates.appError}
-            <span class="muted">— последняя версия</span>
-          {/if}
-          {#if updates.dev}<span class="muted"> (сборка без релизного тега)</span>{/if}
-        </span>
-        {#if updates.appError}<span></span><span class="err">{updates.appError}</span>{/if}
+        {#if !ui.portable}
+          <span class="muted">GRoute</span>
+          <span>
+            <b>{updates.current}</b>
+            {#if updates.app}
+              → доступна <b>{updates.app.version}</b>
+              {#if updates.appStage === 'downloading'}(загрузка {Math.round(updates.appProgress * 100)}%){/if}
+            {:else if checkedUpdates && !updates.appError}
+              <span class="muted">— последняя версия</span>
+            {/if}
+            {#if updates.dev}<span class="muted"> (сборка без релизного тега)</span>{/if}
+          </span>
+          {#if updates.appError}<span></span><span class="err">{updates.appError}</span>{/if}
+        {/if}
 
         <span class="muted">Ядро Hysteria</span>
         <span>
           <b>{updates.core.version}</b>
-          <span class="muted">{updates.core.updated ? '(обновлённое)' : '(встроенное)'}</span>
-          {#if updates.coreUpdate}→ доступно <b>{updates.coreUpdate.version}</b>{/if}
+          <span class="muted">{updates.core.updated ? '(обновлённое)' : '(из комплекта)'}</span>
+          {#if updates.coreUpdate && !updates.coreError}
+            → доступно <b>{updates.coreUpdate.version}</b>
+          {:else if ui.portable && checkedUpdates && !updates.coreError}
+            <span class="muted">— обновлений нет</span>
+          {/if}
           {#if updates.coreBusy}(загрузка {Math.round(updates.coreProgress * 100)}%){/if}
         </span>
         {#if updates.core.error}<span></span><span class="err">{updates.core.error}</span>{/if}
@@ -280,8 +286,12 @@
           <span class="muted">Ядро Xray (VLESS)</span>
           <span>
             <b>{updates.xray.info.version}</b>
-            <span class="muted">{updates.xray.info.updated ? '(обновлённое)' : '(встроенное)'}</span>
-            {#if updates.xray.update}→ доступно <b>{updates.xray.update.version}</b>{/if}
+            <span class="muted">{updates.xray.info.updated ? '(обновлённое)' : '(из комплекта)'}</span>
+            {#if updates.xray.update && !updates.xray.error}
+              → доступно <b>{updates.xray.update.version}</b>
+            {:else if ui.portable && checkedUpdates && !updates.xray.error}
+              <span class="muted">— обновлений нет</span>
+            {/if}
             {#if updates.xray.busy}(загрузка и проверка {Math.round(updates.xray.progress * 100)}%){/if}
           </span>
           {#if updates.xray.info.error}<span></span><span class="err">{updates.xray.info.error}</span>{/if}
@@ -300,54 +310,60 @@
         <button class="primary" onclick={() => run(() => api.CheckUpdates(), '')} disabled={updates.checking}>
           {updates.checking ? 'Проверка…' : 'Проверить обновления'}
         </button>
-        {#if updates.app}
-          <button onclick={oninstall}>Установить HyRoute {updates.app.version}…</button>
-        {/if}
-        {#if updates.coreUpdate}
-          <button onclick={() => run(installCore, 'Ядро Hysteria обновлено')} disabled={updates.coreBusy || coreInstalling}>Обновить ядро Hysteria</button>
-        {/if}
-        {#if updates.core.previous}
-          <button onclick={() => confirm(`Вернуть ядро ${updates!.core.previous}?`) && run(() => api.RollbackCore(), 'Ядро возвращено')}>
-            Откатить ядро ({updates.core.previous})
-          </button>
-        {/if}
-        {#if updates.xray?.update}
-          <button
-            onclick={() => run(() => api.InstallXray(), 'Ядро Xray обновлено')}
-            disabled={updates.xray.busy}
-            title="Перед переключением новое ядро проверяет настройки ваших серверов VLESS: если оно их не принимает, остаётся прежнее"
-            >Обновить ядро Xray</button
-          >
-        {/if}
-        {#if updates.xray?.info.previous}
-          <button onclick={() => confirm(`Вернуть ядро Xray ${updates!.xray.info.previous}?`) && run(() => api.RollbackXray(), 'Ядро Xray возвращено')}>
-            Откатить Xray ({updates.xray.info.previous})
-          </button>
+        {#if !ui.portable}
+          {#if updates.app}
+            <button onclick={oninstall}>Установить HyRoute {updates.app.version}…</button>
+          {/if}
+          {#if updates.coreUpdate}
+            <button onclick={() => run(installCore, 'Ядро Hysteria обновлено')} disabled={updates.coreBusy || coreInstalling}>Обновить ядро Hysteria</button>
+          {/if}
+          {#if updates.core.previous}
+            <button onclick={() => confirm(`Вернуть ядро ${updates!.core.previous}?`) && run(() => api.RollbackCore(), 'Ядро возвращено')}>
+              Откатить ядро ({updates.core.previous})
+            </button>
+          {/if}
+          {#if updates.xray?.update}
+            <button
+              onclick={() => run(() => api.InstallXray(), 'Ядро Xray обновлено')}
+              disabled={updates.xray.busy}
+              title="Перед переключением новое ядро проверяет настройки ваших серверов VLESS: если оно их не принимает, остаётся прежнее"
+              >Обновить ядро Xray</button
+            >
+          {/if}
+          {#if updates.xray?.info.previous}
+            <button onclick={() => confirm(`Вернуть ядро Xray ${updates!.xray.info.previous}?`) && run(() => api.RollbackXray(), 'Ядро Xray возвращено')}>
+              Откатить Xray ({updates.xray.info.previous})
+            </button>
+          {/if}
         {/if}
       </div>
-      <div class="opts">
-        <label class="check"><input type="radio" name="upd" value="auto" checked={updateMode === 'auto'} disabled={!prefsLoaded} onchange={(e) => settle(e, () => savePrefs({ updateCheck: 'auto' }), () => updateMode)} /> Проверять автоматически</label>
-        <span class="muted">При запуске и раз в 12 часов. Устанавливается только после вашего подтверждения.</span>
-        <label class="check"><input type="radio" name="upd" value="manual" checked={updateMode === 'manual'} disabled={!prefsLoaded} onchange={(e) => settle(e, () => savePrefs({ updateCheck: 'manual' }), () => updateMode)} /> Только вручную</label>
-        <span class="muted">По кнопке «Проверить обновления».</span>
-        <label for="chan">Канал</label>
-        <select id="chan" disabled title="Канал Beta появится позже"><option>Stable</option></select>
-      </div>
-      <p class="muted small">
-        Обновления берутся из GitHub Releases ({updates.repo || 'не задан'}; ядро — apernet/hysteria) и проверяются по SHA256.
-        GRoute устанавливает новую версию отдельной программой после выхода и возвращает прежнюю, если новая не запустилась.
-      </p>
+      {#if ui.portable}
+        <p class="muted small">Проверка сравнивает установленные версии с официальными выпусками apernet/hysteria и XTLS/Xray-core. Новые версии этих ядер поставляются в ZIP GRoute.</p>
+      {:else}
+        <div class="opts">
+          <label class="check"><input type="radio" name="upd" value="auto" checked={updateMode === 'auto'} disabled={!prefsLoaded} onchange={(e) => settle(e, () => savePrefs({ updateCheck: 'auto' }), () => updateMode)} /> Проверять автоматически</label>
+          <span class="muted">При запуске и раз в 12 часов. Устанавливается только после вашего подтверждения.</span>
+          <label class="check"><input type="radio" name="upd" value="manual" checked={updateMode === 'manual'} disabled={!prefsLoaded} onchange={(e) => settle(e, () => savePrefs({ updateCheck: 'manual' }), () => updateMode)} /> Только вручную</label>
+          <span class="muted">По кнопке «Проверить обновления».</span>
+          <label for="chan">Канал</label>
+          <select id="chan" disabled title="Канал Beta появится позже"><option>Stable</option></select>
+        </div>
+        <p class="muted small">
+          Обновления берутся из GitHub Releases ({updates.repo || 'не задан'}; ядро — apernet/hysteria) и проверяются по SHA256.
+          GRoute устанавливает новую версию отдельной программой после выхода и возвращает прежнюю, если новая не запустилась.
+        </p>
+      {/if}
     {/if}
   </section>
 
   <section class="card">
-    <h2><Icon name="power" size={17} /> Запуск</h2>
+    <h2><Icon name="power" size={17} /> {ui.portable ? 'Трей' : 'Запуск'}</h2>
     {#if ui.mac}
       <p class="muted small">
         Служба GRoute запускается вместе с Mac всегда и подключается сама, если включено «Подключаться сразу после запуска». Окно GRoute можно
         закрыть: подключение остаётся.
       </p>
-    {:else if autostart}
+    {:else if !ui.portable && autostart}
       <label class="check">
         <input type="checkbox" checked={autostart.enabled} disabled={!autostart.allowed && !autostart.enabled}
           onchange={(e) => settle(e, (el) => run(() => api.SetAutostart(el.checked), 'Сохранено'), () => autostart?.enabled)} />
@@ -376,8 +392,9 @@
       <input type="checkbox" checked={prefs.closeToTray ?? true} disabled={!prefsLoaded} onchange={(e) => settle(e, (el) => savePrefs({ closeToTray: el.checked }), () => prefs.closeToTray ?? true)} />
       Кнопка × сворачивает GRoute в трей
     </label>
-    <p class="muted small">Окно открывается щелчком по значку в трее. Выйти из программы — «Выход» в меню значка (правая кнопка мыши).</p>
+    <p class="muted small">Щелчок по значку открывает панель GRoute. Чтобы завершить программу, нажмите значок правой кнопкой мыши и выберите «Выход».</p>
     {/if}
+    {#if !ui.portable}
     <label class="check">
       <input type="checkbox" checked={prefs.autoConnect ?? false} disabled={!prefsLoaded} onchange={(e) => settle(e, (el) => savePrefs({ autoConnect: el.checked }), () => prefs.autoConnect ?? false)} />
       Подключаться сразу после запуска
@@ -387,8 +404,10 @@
       перезагрузка снимает его блокировку. Если включены «Сети», при запуске сначала действует правило текущей сети; эта настройка — когда правило
       говорит «не менять» или сети ещё нет.
     </p>
+    {/if}
   </section>
 
+  {#if !ui.portable}
   <BrowserExtension />
 
   {#if ui.expert}<CLISettings />{/if}

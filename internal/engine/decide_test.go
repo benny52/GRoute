@@ -203,6 +203,8 @@ func TestExclusionKinds(t *testing.T) {
 		{501, true, &procinfo.Info{Name: "hysteria.exe", Parent: &procinfo.Info{PID: 1}}, ""},
 		{502, true, &procinfo.Info{Name: "xray.exe", Parent: &procinfo.Info{PID: 999}}, "hysteria"},
 		{503, true, &procinfo.Info{Name: "xray.exe", Parent: &procinfo.Info{PID: 1}}, ""},
+		{504, true, &procinfo.Info{Name: "groute-awg.exe", Parent: &procinfo.Info{PID: 999}}, "hysteria"},
+		{505, true, &procinfo.Info{Name: "groute-awg.exe", Parent: &procinfo.Info{PID: 1}}, ""},
 		{300, true, nil, "system-dns"},
 		{100, true, nil, ""},
 	} {

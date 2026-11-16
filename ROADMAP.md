@@ -1,5 +1,7 @@
 # План развития GRoute
 
+На проверке в портативной версии — [отдельное ядро AmneziaWG для Windows](openspec/changes/prototype-amneziawg-outbounds/tasks.md).
+
 В `dev` для проверки — [прямой маршрут для торрентов и редактирование правил из статистики](openspec/changes/route-torrents-and-edit-live-rules/tasks.md).
 
 ## На будущее

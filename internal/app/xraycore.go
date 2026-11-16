@@ -42,7 +42,7 @@ func (c *Controller) checkXray(ctx context.Context) {
 // Running VLESS servers keep their process; new starts use the new core.
 func (c *Controller) InstallXray() error {
 	u := c.Updater
-	if u == nil || u.Xray == nil {
+	if u == nil || u.CheckOnly || u.Xray == nil {
 		return errors.New("обновление Xray недоступно")
 	}
 	u.mu.Lock()
@@ -83,7 +83,7 @@ func (c *Controller) InstallXray() error {
 // RollbackXray returns to the previous Xray core.
 func (c *Controller) RollbackXray() error {
 	u := c.Updater
-	if u == nil || u.Xray == nil {
+	if u == nil || u.CheckOnly || u.Xray == nil {
 		return errors.New("обновление Xray недоступно")
 	}
 	if err := u.Xray.Rollback(); err != nil {

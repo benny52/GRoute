@@ -6,7 +6,7 @@
   import Help from './Help.svelte';
 
   let { rows, onmenu }: { rows: Direction[]; onmenu: (event: MouseEvent | KeyboardEvent, rows: Direction[], appOnly: boolean) => void } = $props();
-  type Point = { key: string; label: string; icon: string };
+  type Point = { key: string; label: string; icon: string; hint?: string };
   type Route = { key: string; nodes: Point[]; up: number; down: number; observed: boolean };
   type Wire = { from: number; to: number; layer: number; up: number; down: number };
   const headings = ['Приложения', 'Правила', 'Выходы'];
@@ -15,6 +15,7 @@
   let limit = $state(pageSize);
   let selected = $state('');
   let paused = $state(false);
+  let boardWidth = $state(0);
   let settings = $state.raw<Settings | null>(null);
   let settingsError = $state('');
   $effect(() => {
@@ -45,6 +46,7 @@
         { key: 'rule:' + row.rule, label: row.rule === 'default' ? 'Всё остальное' : hide(row.rule), icon: 'rules' },
         { key: JSON.stringify([exit.kind, exit.serverId, exit.label]), label: exit.serverId ? profileName(exit.serverId) :
           exit.label || (exit.kind === 'direct' ? 'Напрямую' : 'Заблокировано'),
+          hint: exit.hint,
           icon: exit.kind === 'vpn' ? 'server' : exit.kind === 'direct' ? 'globe' : exit.kind === 'block' ? 'ban' : 'info' },
       ];
       const key = JSON.stringify(nodes.map(n => n.key));
@@ -112,8 +114,8 @@
   const height = $derived(Math.max(...graph.columns.map(c => c.length)) * spacing);
   const columnOffsets = $derived(graph.columns.map(column => (height - column.length * spacing) / 2));
   function path(wire: Wire) {
-    const x = wire.layer * stepPercent + columnPercent;
-    const end = (wire.layer + 1) * stepPercent;
+    const x = (wire.layer * stepPercent + columnPercent) * boardWidth / 100;
+    const end = (wire.layer + 1) * stepPercent * boardWidth / 100;
     const mid = (x + end) / 2;
     const y = columnOffsets[wire.layer] + (wire.from + 0.5) * spacing;
     const yy = columnOffsets[wire.layer + 1] + (wire.to + 0.5) * spacing;
@@ -141,7 +143,7 @@
   <button class="pause ghost" aria-pressed={paused} onclick={() => paused = !paused}>{paused ? 'Возобновить движение' : 'Приостановить движение'}</button>
 </div>
 <Help id="traffic-map" title="Как читать карту">
-  <p>Слева направо идёт отправка, справа налево — получение. Чем выше скорость, тем быстрее движутся пакеты. Нажмите приложение, правило или выход, чтобы оставить только его пути. «Все маршруты» добавляет назначения из правил и запасные серверы.</p>
+  <p>Стрелки вправо показывают отправку, влево — получение. Чем выше скорость, тем быстрее движутся стрелки. Нажмите приложение, правило или выход, чтобы оставить только его пути. «Все маршруты» добавляет назначения из правил и запасные серверы.</p>
   <p>Нажмите правой кнопкой на приложение или правило текущего соединения, чтобы создать или изменить правило.</p>
 </Help>
 {#if showAll && settingsError}<p class="note warn">Не удалось прочитать настройки маршрутов: {hide(settingsError)}</p>{/if}
@@ -151,21 +153,29 @@
   <div class="viewport">
     <div class="diagram" style:--column-width={columnPercent + '%'}>
       <div class="head">{#each headings as h}<strong>{h}</strong>{/each}</div>
-      <div class="board" style:height={height + 'px'} style:--row={spacing + 'px'}>
-        <svg class="wires" aria-hidden="true" class:paused width="100%" height="100%" viewBox={'0 0 100 ' + height} preserveAspectRatio="none">
+      <div class="board" bind:clientWidth={boardWidth} style:height={height + 'px'} style:--row={spacing + 'px'}>
+        <svg class="wires" aria-hidden="true" class:paused width="100%" height="100%">
           {#each graph.wires as w (w.key)}
             {@const d = path(w)}
             <g class="wire" class:active={w.up > 0 || w.down > 0}>
               <path {d} class="rim" /><path {d} class="bore" />
-              {#if w.up > 0}<path {d} class="packet" style:animation-duration={speed(w.up)} transform={w.down ? 'translate(0 -2)' : undefined} />{/if}
-              {#if w.down > 0}<path {d} class="packet reverse" style:animation-duration={speed(w.down)} transform={w.up ? 'translate(0 2)' : undefined} />{/if}
+              {#if w.up > 0}
+                <g transform={w.down ? 'translate(0 -2)' : undefined}>
+                  <path d="M-4 -3 L3 0 L-4 3 L-2 0 Z" class="packet" style:offset-path={"path('" + d + "')"} style:animation-duration={speed(w.up)} />
+                </g>
+              {/if}
+              {#if w.down > 0}
+                <g transform={w.up ? 'translate(0 2)' : undefined}>
+                  <path d="M-4 -3 L3 0 L-4 3 L-2 0 Z" class="packet reverse" style:offset-path={"path('" + d + "')"} style:animation-duration={speed(w.down)} />
+                </g>
+              {/if}
             </g>
           {/each}
         </svg>
         {#each graph.columns as column, index}
           <div class="column" style:padding-top={columnOffsets[index] + 'px'}>
             {#each column as n (n.key)}
-              <button class="node" aria-pressed={graph.focus === n.key} title={n.label}
+              <button class="node" aria-pressed={graph.focus === n.key} title={n.hint ? n.label + '. ' + n.hint : n.label}
                 oncontextmenu={(e) => nodeMenu(e, n, index)}
                 onkeydown={(e) => { if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) nodeMenu(e, n, index); }}
                 onclick={() => selected = selected === n.key ? '' : n.key}>
@@ -190,16 +200,16 @@
   .head strong { padding-inline:9px; }
   .board { position:relative; isolation:isolate; }
   .wires { position:absolute; inset:0; z-index:-1; pointer-events:none; }
-  .wire path { fill:none; vector-effect:non-scaling-stroke; }
+  .rim,.bore { fill:none; }
   .rim { stroke:color-mix(in srgb,var(--muted) 50%,var(--border)); stroke-width:12; }
   .bore { stroke:var(--surface); stroke-width:9; }
   .active .rim { stroke:color-mix(in srgb,var(--accent) 48%,var(--muted)); }
   .active .bore { stroke:color-mix(in srgb,var(--accent) 7%,var(--surface)); }
-  .packet { stroke:var(--accent); stroke-width:2.8; stroke-linecap:round; stroke-dasharray:12 38; animation:run linear infinite; }
-  .reverse { stroke:var(--direct); animation-direction:reverse; }
+  .packet { fill:var(--accent); offset-anchor:0 0; offset-rotate:auto; animation:run linear infinite; }
+  .reverse { fill:var(--direct); offset-rotate:auto 180deg; animation-direction:reverse; }
   .paused .packet { animation-play-state:paused; }
-  @keyframes run { from { stroke-dashoffset:50; } to { stroke-dashoffset:0; } }
-  @media (prefers-reduced-motion:reduce) { .packet { animation:none; } }
+  @keyframes run { from { offset-distance:0%; } to { offset-distance:100%; } }
+  @media (prefers-reduced-motion:reduce) { .packet { animation:none; offset-distance:40%; } .reverse { offset-distance:60%; } }
   .column { display:grid; grid-template-columns:minmax(0,1fr); align-content:start; grid-auto-rows:var(--row); align-items:center; min-width:0; }
   .node { display:flex; justify-content:flex-start; align-items:center; gap:7px; width:100%; height:38px; padding:0 9px; border:1px solid var(--border); border-radius:7px; background:var(--surface); text-align:left; }
   .node:hover,.node[aria-pressed=true] { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 7%,var(--surface)); }

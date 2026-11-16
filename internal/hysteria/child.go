@@ -14,3 +14,9 @@ type Child interface {
 func StartChild(exe string, args, env []string, out io.Writer) (Child, error) {
 	return startProcess(exe, args, env, out)
 }
+
+// StartChildWithIO runs a managed core with a private stdin/stdout channel.
+// Stderr is discarded so diagnostics cannot corrupt the protocol or leak keys.
+func StartChildWithIO(exe string, args []string, stdin io.Reader, stdout io.Writer) (Child, error) {
+	return startProcessIO(exe, args, nil, stdin, stdout, nil)
+}

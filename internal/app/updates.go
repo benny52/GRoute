@@ -16,6 +16,9 @@ import (
 
 // Updater wires the release checks into the controller.
 type Updater struct {
+	// CheckOnly is used by portable builds with pinned runtime files.
+	// They can compare core versions, but cannot replace the running package.
+	CheckOnly bool
 	// Repo is HyRoute's GitHub repository ("owner/name"); empty disables
 	// self-update.
 	Repo string
@@ -150,6 +153,9 @@ func (c *Controller) CheckUpdates() UpdatesState {
 	}()
 	go func() {
 		defer wg.Done()
+		if u.CheckOnly {
+			return
+		}
 		if u.Repo == "" {
 			u.set(func(s *UpdatesState) {
 				s.AppError = "в этой сборке не задан репозиторий обновлений"
@@ -219,7 +225,7 @@ func (c *Controller) channel() string {
 // profiles keep their process; new starts use the new core.
 func (c *Controller) InstallCore() error {
 	u := c.Updater
-	if u == nil || u.Core == nil {
+	if u == nil || u.CheckOnly || u.Core == nil {
 		return errors.New("обновление ядра недоступно")
 	}
 	u.mu.Lock()
@@ -262,7 +268,7 @@ func (c *Controller) InstallCore() error {
 // RollbackCore returns to the previous Hysteria core.
 func (c *Controller) RollbackCore() error {
 	u := c.Updater
-	if u == nil || u.Core == nil {
+	if u == nil || u.CheckOnly || u.Core == nil {
 		return errors.New("обновление ядра недоступно")
 	}
 	if err := u.Core.Rollback(); err != nil {
@@ -302,7 +308,7 @@ func (c *Controller) refreshKillSwitchApps() {
 // DownloadAppUpdate downloads and verifies the offered HyRoute package.
 func (c *Controller) DownloadAppUpdate() error {
 	u := c.Updater
-	if u == nil {
+	if u == nil || u.CheckOnly {
 		return errors.New("обновление недоступно")
 	}
 	u.mu.Lock()
@@ -349,7 +355,7 @@ func (c *Controller) DownloadAppUpdate() error {
 // ReadyUpdate returns the verified staging directory and its version.
 func (c *Controller) ReadyUpdate() (dir, version string, err error) {
 	u := c.Updater
-	if u == nil {
+	if u == nil || u.CheckOnly {
 		return "", "", errors.New("обновление недоступно")
 	}
 	u.mu.Lock()

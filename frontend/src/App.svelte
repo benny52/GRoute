@@ -316,7 +316,7 @@
           <button onclick={ksRelease}>Открыть интернет</button>
         </div>
       {/if}
-      {#if updates?.coreUpdate && !coreLater}
+      {#if !ui.portable && updates?.coreUpdate && !coreLater}
         <div class="note info row">
           <Icon name="download" size={16} />
           <span class="grow">Доступно ядро Hysteria <b>{updates.coreUpdate.version}</b> (сейчас {updates.core.version}).{online ? ' Текущие соединения не прервутся.' : ''}</span>
@@ -326,7 +326,7 @@
           <button class="ghost" onclick={() => (coreLater = true)}>Позже</button>
         </div>
       {/if}
-      {#if updates?.xray?.update && hasVLESS && !xrayLater}
+      {#if !ui.portable && updates?.xray?.update && hasVLESS && !xrayLater}
         <div class="note info row">
           <Icon name="download" size={16} />
           <span class="grow"

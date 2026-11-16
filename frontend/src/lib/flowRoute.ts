@@ -4,6 +4,7 @@ export interface ObservedExit {
   kind: 'direct' | 'block' | 'vpn' | 'unknown';
   serverId?: string;
   label?: string;
+  hint?: string;
 }
 
 // A profile is also recorded for failed and still pending attempts. Only
@@ -20,7 +21,7 @@ export function observedExit(flow: Flow): ObservedExit {
     return { kind: 'vpn', label: 'Сервер неизвестен' };
   }
   if (outcome.startsWith('rst:') || outcome.startsWith('dropped:') || outcome.startsWith('aborted')) {
-    return { kind: 'unknown', label: 'Соединение не установлено' };
+    return { kind: 'unknown', label: 'Соединение не установлено', hint: 'Попытка завершилась сбросом, отбрасыванием или прерыванием. Данных об использованном выходе нет.' };
   }
-  return { kind: 'unknown', label: 'Выход пока неизвестен' };
+  return { kind: 'unknown', label: 'Выход пока неизвестен', hint: 'Попытка зарегистрирована. Движок ещё не подтвердил, через какой выход прошёл трафик.' };
 }

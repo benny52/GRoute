@@ -171,7 +171,7 @@ func (c *Core) dnsHold(a netip.Addr) bool {
 	return d == dnsMain || d == dnsSecondary
 }
 
-// ownHysteria: a hysteria.exe or xray.exe (VLESS) HyRoute started.
+// ownHysteria recognizes a tunnel core launched by this client.
 func (c *Core) ownHysteria(proc *procinfo.Info) bool {
 	return c.SelfPID != 0 && proc != nil && ownCoreName(proc.Name) && proc.Parent != nil && proc.Parent.PID == c.SelfPID
 }
@@ -923,7 +923,7 @@ func (c *Core) maintainDNS(now time.Time) {
 // macOS).
 func ownCoreName(name string) bool {
 	switch name {
-	case "hysteria.exe", "xray.exe", "hysteria", "xray":
+	case "hysteria.exe", "xray.exe", "groute-awg.exe", "hysteria", "xray":
 		return true
 	}
 	return false

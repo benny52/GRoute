@@ -9,7 +9,6 @@ import (
 	"net"
 	"path/filepath"
 
-	"github.com/lardan099/hyroute/internal/awg"
 	"github.com/lardan099/hyroute/internal/dnspolicy"
 	"github.com/lardan099/hyroute/internal/flows"
 	"github.com/lardan099/hyroute/internal/groups"
@@ -45,7 +44,7 @@ func (cfg *Config) XrayPath() string {
 func RunnerFactory(cfg Config) tunnels.Factory {
 	return func(p hysteria.Profile, h tunnels.Hooks) tunnels.Runner {
 		if p.IsAmneziaWG() {
-			return awg.NewRunner(p, h)
+			return newAWGRunner(cfg, p, h)
 		}
 		exe, path := cfg.HysteriaPath(), cfg.HysteriaPath
 		if p.IsVLESS() {
@@ -78,7 +77,9 @@ type Config struct {
 	// start). Nil = Dir\hysteria.exe.
 	Hysteria func() string
 	// Xray is the same for xray.exe (an updated core). Nil = Dir\xray.exe.
-	Xray   func() string
+	Xray func() string
+	// AWG returns the trusted groute-awg.exe for this launch.
+	AWG    func() (string, error)
 	RunDir string
 	// Profiles are the profiles the rules use; each gets its own Hysteria.
 	Profiles []hysteria.Profile

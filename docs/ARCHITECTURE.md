@@ -64,7 +64,7 @@ switch (pf) у него свои — [macos.md](architecture/macos.md). Подр
 | `HyRoute.exe` | администратор | трей, движок WinDivert, relay, kill switch, контроллер |
 | `HyRoute.exe --window` | как у HyRoute | окно (Wails + WebView2): живёт, пока окно открыто; вызовы страницы передаёт основному процессу ([app](architecture/app.md)) |
 | `hysteria.exe` | как у HyRoute | по одному на используемый сервер Hysteria 2, в Job Object с `KILL_ON_JOB_CLOSE` |
-| AmneziaWG | внутри GRoute.exe | Для каждого активного профиля отдельный loopback SOCKS5 с паролем, amneziawg-go и сетевой стек в памяти. Внешний транспорт peer использует UDP. |
+| `groute-awg.exe` | как у GRoute | Отдельный процесс для каждого активного профиля AmneziaWG. Движок открывает локальный SOCKS5 с паролем и передаёт трафик через amneziawg-go и сетевой стек в памяти. Внешний транспорт peer использует UDP. |
 | `xray.exe` | как у HyRoute | то же для сервера VLESS (Xray-core): SOCKS5 → VLESS ([servers](architecture/servers.md#vless-профиль-конфиг-xray-проверка)) |
 | `hyroute-updater.exe` | администратор | заменяет файлы при обновлении и откатывает их, если новая версия не запустилась |
 | `hyroutectl.exe` | пользователь | командная строка, говорит с HyRoute через именованный канал |

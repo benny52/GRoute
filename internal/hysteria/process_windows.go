@@ -54,6 +54,10 @@ func (p execProcess) Wait() error { return p.cmd.Wait() }
 func (p execProcess) Kill() error { return p.cmd.Process.Kill() }
 
 func startProcess(exe string, args, env []string, out io.Writer) (process, error) {
+	return startProcessIO(exe, args, env, nil, out, out)
+}
+
+func startProcessIO(exe string, args, env []string, in io.Reader, out, diagnostic io.Writer) (process, error) {
 	j, err := killOnCloseJob()
 	if err != nil {
 		return nil, fmt.Errorf("job object: %w", err)
@@ -61,7 +65,8 @@ func startProcess(exe string, args, env []string, out io.Writer) (process, error
 	cmd := exec.Command(exe, args...)
 	cmd.Env = env
 	cmd.Stdout = out
-	cmd.Stderr = out
+	cmd.Stderr = diagnostic
+	cmd.Stdin = in
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW,
 		HideWindow:    true,

@@ -41,6 +41,40 @@ func coreUpdated(t *testing.T) *core.Manager {
 	}}
 }
 
+func TestPortableCoreVersionCheck(t *testing.T) {
+	hits := make(chan string, 3)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits <- r.URL.Path
+		tag := "v2.1.0"
+		if strings.Contains(r.URL.Path, "hysteria") {
+			tag = "app/" + tag
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"tag_name": tag}})
+	}))
+	defer api.Close()
+	h, x := coreUpdated(t), coreUpdated(t)
+	x.Kind = core.Xray
+	cl := &release.Client{API: api.URL, HTTP: api.Client()}
+	h.Client, x.Client = cl, cl
+	c, _ := newCtl(t)
+	c.Updater = &Updater{Core: h, Xray: x, Repo: "example/client", Client: cl, CheckOnly: true}
+	st := c.CheckUpdates()
+	if st.AppError != "" || st.CoreError != "" || st.Xray.Error != "" || st.Checked.IsZero() {
+		t.Fatalf("core release check: %+v", st)
+	}
+	close(hits)
+	checked := map[string]int{}
+	for path := range hits {
+		checked[path]++
+	}
+	if len(checked) != 2 || checked["/repos/apernet/hysteria/releases"] != 1 || checked["/repos/XTLS/Xray-core/releases"] != 1 {
+		t.Fatalf("unexpected requests: %v", checked)
+	}
+	if c.InstallCore() == nil || c.InstallXray() == nil || c.RollbackCore() == nil || c.RollbackXray() == nil || c.DownloadAppUpdate() == nil {
+		t.Fatal("portable check allowed an installation or rollback")
+	}
+}
+
 // "Ядро обновлено, переподключитесь" lasts only while the session that
 // ran during the core change does.
 func TestCoreReconnectNoticeClears(t *testing.T) {

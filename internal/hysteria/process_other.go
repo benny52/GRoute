@@ -16,10 +16,15 @@ func (p execProcess) Wait() error { return p.cmd.Wait() }
 func (p execProcess) Kill() error { return p.cmd.Process.Kill() }
 
 func startProcess(exe string, args, env []string, out io.Writer) (process, error) {
+	return startProcessIO(exe, args, env, nil, out, out)
+}
+
+func startProcessIO(exe string, args, env []string, in io.Reader, out, diagnostic io.Writer) (process, error) {
 	cmd := exec.Command(exe, args...)
 	cmd.Env = env
 	cmd.Stdout = out
-	cmd.Stderr = out
+	cmd.Stderr = diagnostic
+	cmd.Stdin = in
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

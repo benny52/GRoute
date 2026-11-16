@@ -213,6 +213,7 @@ func main() {
 		return s, nil
 	}, session.Config{
 		Dir:                   runtimeDir,
+		AWG:                   awgExecutable(dir, runtimeDir, bundledAWGSHA256, approvedAWGHash, protect),
 		Exe:                   exe,
 		RunDir:                filepath.Join(dataDir, "run"),
 		Stub:                  *stub,
@@ -319,10 +320,12 @@ func main() {
 		}
 	}
 	ctl.ProxyFirewall = func(tcp, udp []int) error { return fwrule.SetProxyPorts(exe, tcp, udp) }
+	ctl.Updater = &app.Updater{Core: coreMgr, Xray: xrayMgr, Client: coreMgr.Client, CheckOnly: portable}
 	if !portable {
 		ctl.LegacyProxyUDP = fwrule.LegacyProxyUDP
 		ctl.KeepV12ProxyUDP() // before the window can show a proxy
-		ctl.Updater = &app.Updater{Repo: updateRepo, Dir: filepath.Join(paths.components, "updates"), Core: coreMgr, Xray: xrayMgr, Client: coreMgr.Client}
+		ctl.Updater.Repo = updateRepo
+		ctl.Updater.Dir = filepath.Join(paths.components, "updates")
 		cleanUpdates(ctl.Updater.Dir)
 	}
 
