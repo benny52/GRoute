@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/lardan099/hyroute/internal/core"
 	"github.com/lardan099/hyroute/internal/store"
@@ -12,6 +14,15 @@ import (
 var portableBuild = "false"
 
 func isPortableBuild() bool { return portableBuild == "true" }
+
+func installedGRoute(exe string) bool {
+	return strings.EqualFold(filepath.Clean(filepath.Dir(exe)), grouteInstallTarget())
+}
+
+func runningInstalledGRoute() bool {
+	exe, err := os.Executable()
+	return err == nil && isPortableBuild() && installedGRoute(exe)
+}
 
 type windowsPaths struct {
 	data       string
@@ -25,6 +36,13 @@ func pathsForBuild(exe string, portable, elevated bool) (windowsPaths, error) {
 			return windowsPaths{}, errors.New("не удалось определить папку GRoute.exe")
 		}
 		data := filepath.Join(filepath.Dir(exe), "Data")
+		if installedGRoute(exe) {
+			var err error
+			data, err = installedGRouteData()
+			if err != nil {
+				return windowsPaths{}, err
+			}
+		}
 		components := filepath.Join(data, "Components")
 		if elevated {
 			// ProtectDir secures the component directory and its parent.

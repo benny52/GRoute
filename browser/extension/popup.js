@@ -1,10 +1,10 @@
-// HyRoute popup: the names of the current tab, how HyRoute sends each of
+// GRoute popup: the names of the current tab, how GRoute sends each of
 // them now, and buttons to change that: the whole page at once or the
-// checked names. What is sent from a page is kept in HyRoute as the rules
-// of that page's site. HyRoute is reached through its native messaging
-// host (hyroutectl.exe), installed from HyRoute's settings.
+// checked names. What is sent from a page is kept in GRoute as the rules
+// of that page's site. GRoute is reached through its native messaging
+// host (groute-browser-host.exe), installed from GRoute's settings.
 
-const HOST = 'com.hyroute.browser';
+const HOST = 'com.groute.browser';
 
 const $ = (id) => document.getElementById(id);
 
@@ -12,7 +12,7 @@ const state = {
   tabId: -1,
   top: '', // the tab's host
   hosts: {}, // host -> {n, err} from the background worker
-  info: null, // HyRoute's answer
+  info: null, // GRoute's answer
   whole: true, // rows are whole sites
   onlyErr: false, // only the rows that failed are shown
   shown: [], // keys of the rows shown
@@ -22,7 +22,7 @@ const state = {
   busy: false,
 };
 
-// ---- HyRoute ----
+// ---- GRoute ----
 
 class HostError extends Error {
   constructor(code, message) {
@@ -38,7 +38,7 @@ function hy(cmd, args) {
       const le = chrome.runtime.lastError;
       if (le) return reject(new HostError('host', le.message || String(le)));
       if (!r) return reject(new HostError('host', 'empty reply'));
-      if (!r.ok) return reject(new HostError(r.code || 'failed', r.error || 'Ошибка HyRoute'));
+      if (!r.ok) return reject(new HostError(r.code || 'failed', r.error || 'Ошибка GRoute'));
       resolve(r.result);
     });
   });
@@ -86,7 +86,7 @@ function plural(n, one, few, many) {
 
 // ---- rows ----
 
-// rows groups HyRoute's answer: by whole site, or one row per name. The
+// rows groups GRoute's answer: by whole site, or one row per name. The
 // tab's own site first, then the ones that failed, then by use.
 function rows() {
   const out = new Map();
@@ -167,7 +167,7 @@ function render() {
   const main = $('main');
   main.replaceChildren();
   if (!state.top) {
-    main.append(el('p', { class: 'muted center' }, 'Откройте сайт: здесь появятся его адреса и то, как HyRoute их отправляет.'));
+    main.append(el('p', { class: 'muted center' }, 'Откройте сайт: здесь появятся его адреса и то, как GRoute их отправляет.'));
     $('actions').hidden = true;
     return;
   }
@@ -248,22 +248,22 @@ function problemOf(err) {
   const m = String(err?.message || err);
   if (err?.code === 'host') {
     if (/not found/i.test(m)) {
-      return ['Браузер не связан с HyRoute.', [
-        'Откройте HyRoute → «Настройки» → «Расширение для браузера».',
+      return ['Браузер не связан с GRoute.', [
+        'Откройте GRoute → «Настройки» → «Расширение для браузера».',
         'Нажмите «Установить в браузер».',
         'Откройте это окно снова.',
       ]];
     }
     if (/forbidden/i.test(m)) {
-      return ['HyRoute не узнал это расширение. Удалите его на странице расширений и установите заново из HyRoute.'];
+      return ['GRoute не узнал это расширение. Удалите его на странице расширений и установите заново из GRoute.'];
     }
-    return ['Не удалось запустить hyroutectl.exe из папки HyRoute (' + m + ').', [
-      'Проверьте, что HyRoute на месте и запущен.',
-      'В HyRoute → «Настройки» → «Расширение для браузера» нажмите «Установить в браузер» ещё раз.',
+    return ['Не удалось запустить groute-browser-host.exe для связи с GRoute (' + m + ').', [
+      'Проверьте, что GRoute на месте и запущен.',
+      'В GRoute → «Настройки» → «Расширение для браузера» нажмите «Установить в браузер» ещё раз.',
     ]];
   }
-  if (err?.code === 'not-running') return ['HyRoute не запущен. Запустите его и откройте это окно снова.'];
-  if (err?.code === 'browser-off') return ['Расширение выключено в HyRoute: «Настройки» → «Расширение для браузера».'];
+  if (err?.code === 'not-running') return ['GRoute не запущен. Запустите его и откройте это окно снова.'];
+  if (err?.code === 'browser-off') return ['Расширение выключено в GRoute: «Настройки» → «Расширение для браузера».'];
   return [m];
 }
 
@@ -308,7 +308,7 @@ async function send(to, word, all) {
     if (res.raised) text += ` Правила из браузера подняты наверх: выше стояло правило «${res.raised}», оно решало сайт.`;
     $('done-text').textContent = text;
     $('done-lost').replaceChildren(...res.lost.map((l) =>
-      el('li', {}, `${l.pattern.replace(/^\./, '')}: всё ещё решает правило «${l.rule}» выше. Поднимите правила «Из браузера» в HyRoute.`)));
+      el('li', {}, `${l.pattern.replace(/^\./, '')}: всё ещё решает правило «${l.rule}» выше. Поднимите правила «Из браузера» в GRoute.`)));
     $('done').hidden = false;
     chrome.runtime.sendMessage({ type: 'clear-errors', tabId: state.tabId }).then((t) => { if (t) state.hosts = t.hosts; }).catch(() => {});
     state.touched = false;

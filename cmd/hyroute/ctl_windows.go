@@ -26,6 +26,7 @@ import (
 type cliState struct {
 	mu          sync.Mutex
 	owner, self *windows.SID
+	browserOnly bool
 	run         windows.Handle // run event (0 when it could not be created)
 	runErr      error
 	srv         *ctlserver.Server
@@ -42,8 +43,8 @@ const cliRetry = 30 * time.Second
 // initCLI runs right after the instance claim, before the controller
 // exists: the owner (the interactive user of this session) and the run
 // event, non-signalled («запускается») until startCLI.
-func initCLI() *cliState {
-	cs := &cliState{}
+func initCLI(browserOnly bool) *cliState {
+	cs := &cliState{browserOnly: browserOnly}
 	if u, err := windows.GetCurrentProcessToken().GetTokenUser(); err == nil {
 		cs.self, _ = u.User.Sid.Copy()
 	}
@@ -55,7 +56,15 @@ func initCLI() *cliState {
 		cs.runErr = errors.New("no user SID")
 		return cs
 	}
-	cs.run, cs.runErr = ctl.CreateRunEvent(ctl.RunEventName(cs.owner.String()), []*windows.SID{cs.owner, cs.self}, nil)
+	name := ctl.RunEventName(cs.owner.String())
+	var kernelOwner *windows.SID
+	if browserOnly {
+		name = ctl.BrowserRunEventName(cs.owner.String())
+		if !windows.GetCurrentProcessToken().IsElevated() {
+			kernelOwner = cs.self
+		}
+	}
+	cs.run, cs.runErr = ctl.CreateRunEvent(name, []*windows.SID{cs.owner, cs.self}, kernelOwner)
 	return cs
 }
 
@@ -131,6 +140,12 @@ func (g *GUI) applyCLI(mode string) {
 	if cs == nil || cs.owner == nil {
 		return
 	}
+	if cs.browserOnly {
+		mode = "off"
+		if g.ctl.BrowserOn() {
+			mode = "browser"
+		}
+	}
 	cs.mu.Lock()
 	if cs.closed {
 		cs.mu.Unlock()
@@ -162,8 +177,18 @@ func (g *GUI) applyCLI(mode string) {
 	if cs.self != nil {
 		self = cs.self.String()
 	}
-	ln, err := ctl.Listen(ctl.ListenConfig{Name: ctl.PipeName(owner), Users: []*windows.SID{cs.owner, cs.self},
-		Allow: allowClient(owner, self), MaxInstances: 8})
+	cfg := ctl.ListenConfig{Name: ctl.PipeName(owner), Users: []*windows.SID{cs.owner, cs.self},
+		Allow: allowClient(owner, self), MaxInstances: 8}
+	var backend ctlserver.API = ctlBackend{g}
+	if cs.browserOnly {
+		cfg.Name = ctl.BrowserPipeName(owner)
+		backend = browserBackend{ctlBackend{g}}
+		if !windows.GetCurrentProcessToken().IsElevated() {
+			cfg.Owner = cs.self
+			cfg.FullAccess = []*windows.SID{cs.self}
+		}
+	}
+	ln, err := ctl.Listen(cfg)
 	cs.mu.Lock()
 	cs.starting = false
 	if cs.closed || cs.off {
@@ -192,13 +217,19 @@ func (g *GUI) applyCLI(mode string) {
 		g.emitStatus()
 		return
 	}
-	srv := ctlserver.New(ctlBackend{g})
+	srv := ctlserver.New(backend)
 	cs.srv, cs.err = srv, ""
 	cs.mu.Unlock()
 	go srv.Serve(ln)
 	g.ctl.Log.Info("command line: listening")
 	g.emitStatus()
 }
+
+// The native host can use the three browser methods, even when imported
+// preferences had enabled the general command line.
+type browserBackend struct{ ctlBackend }
+
+func (browserBackend) Mode() string { return "off" }
 
 // stopCLI runs first in OnShutdown: from now on hyroutectl reports «не
 // запущен».
@@ -240,6 +271,9 @@ type CLIInfo struct {
 }
 
 func (g *GUI) CLIInfo() CLIInfo {
+	if g.cli != nil && g.cli.browserOnly {
+		return CLIInfo{Mode: "off", Dir: g.dllDir}
+	}
 	mode, perr := g.ctl.CLIMode()
 	in := CLIInfo{Mode: mode, Dir: g.dllDir}
 	if perr != nil {

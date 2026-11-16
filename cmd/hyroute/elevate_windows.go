@@ -17,7 +17,16 @@ func canRestartAsAdmin() bool {
 // RestartAsAdmin takes no path or arguments from the window. Only this
 // backend can choose which executable to elevate and which PID it waits for.
 func (g *GUI) RestartAsAdmin() error {
-	return g.restartAsAdmin(canRestartAsAdmin(), launchAsAdmin)
+	return g.restartAsAdmin(canRestartAsAdmin(), func(exe string, pid int) error {
+		return launchAsAdmin(exe, pid, false)
+	})
+}
+
+// Only the DPI button asks the new window to resume its submitted form.
+func (g *GUI) RestartForDPI() error {
+	return g.restartAsAdmin(canRestartAsAdmin(), func(exe string, pid int) error {
+		return launchAsAdmin(exe, pid, true)
+	})
 }
 
 func (g *GUI) restartAsAdmin(available bool, launch func(string, int) error) error {
@@ -42,7 +51,7 @@ func (g *GUI) restartAsAdmin(available bool, launch func(string, int) error) err
 	return nil
 }
 
-func launchAsAdmin(exe string, pid int) error {
+func launchAsAdmin(exe string, pid int, resumeDPI bool) error {
 	// All strings come from Windows or this process (no user input or NUL).
 	file, err := windows.UTF16PtrFromString(exe)
 	if err != nil {
@@ -50,6 +59,14 @@ func launchAsAdmin(exe string, pid int) error {
 	}
 	verb, _ := windows.UTF16PtrFromString("runas")
 	cwd, _ := windows.UTF16PtrFromString(filepath.Dir(exe))
-	args, _ := windows.UTF16PtrFromString("--wait-pid=" + strconv.Itoa(pid))
+	options := "--wait-pid=" + strconv.Itoa(pid)
+	if resumeDPI {
+		user, err := windows.GetCurrentProcessToken().GetTokenUser()
+		if err != nil {
+			return fmt.Errorf("не удалось определить владельца настроек GRoute: %w", err)
+		}
+		options += " --resume-dpi=" + user.User.Sid.String()
+	}
+	args, _ := windows.UTF16PtrFromString(options)
 	return windows.ShellExecute(0, verb, file, args, cwd, windows.SW_SHOWNORMAL)
 }

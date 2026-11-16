@@ -19,7 +19,7 @@ import (
 // over stdin and stdout: each message is a uint32 length in the machine's
 // byte order (little-endian on Windows) and that many bytes of UTF-8 JSON.
 // A message is a request {id, cmd, args}; the answer {id, ok, result} or
-// {id, ok: false, code, error}. Only ctl.BrowserCommands go on to HyRoute,
+// {id, ok: false, code, error}. Only ctl.BrowserCommands go on to GRoute,
 // the same way any hyroutectl command does.
 
 // Native messaging limits: the browser refuses a message to it over 1 MB;
@@ -29,9 +29,9 @@ const (
 	maxNativeOut = 1 << 20
 )
 
-const msgBrowserOff = "Расширение для браузера выключено в HyRoute: «Настройки» → «Расширение для браузера»"
+const msgBrowserOff = "Расширение для браузера выключено в GRoute: «Настройки» → «Расширение для браузера»"
 
-// nativeTimeout bounds one request, waiting for a starting HyRoute
+// nativeTimeout bounds one request, waiting for a starting GRoute
 // included.
 const nativeTimeout = 20 * time.Second
 
@@ -61,7 +61,7 @@ type nativeReply struct {
 // request's args. It returns the exit code.
 func NativeHost(ctx context.Context, argv []string, in io.Reader, out io.Writer, app string, d *Deps) int {
 	if !slices.Contains(ctl.BrowserOrigins, argv[0]) {
-		writeNative(out, nativeReply{Code: ctl.CodeDenied, Error: "Это расширение не может управлять HyRoute"})
+		writeNative(out, nativeReply{Code: ctl.CodeDenied, Error: "Это расширение не может управлять GRoute"})
 		return ctl.ExitCode(ctl.CodeDenied)
 	}
 	dd := *d
@@ -112,7 +112,7 @@ func nativeOne(ctx context.Context, body []byte, app string, d *Deps) nativeRepl
 		rep.Code, rep.Error = f.code, f.msg
 		switch f.code {
 		case ctl.CodeNotRunning:
-			rep.Error = "HyRoute не запущен"
+			rep.Error = "GRoute не запущен"
 		case ctl.CodeOff:
 			// No pipe, or one for neither: the extension is off as well
 			// (the pipe runs while it is on).
@@ -145,7 +145,7 @@ func writeNative(w io.Writer, rep nativeReply) error {
 		return err
 	}
 	if len(b) > maxNativeOut {
-		b, _ = ctl.Marshal(nativeReply{ID: rep.ID, Code: ctl.CodeTooBig, Error: "Ответ HyRoute слишком большой для браузера"})
+		b, _ = ctl.Marshal(nativeReply{ID: rep.ID, Code: ctl.CodeTooBig, Error: "Ответ GRoute слишком большой для браузера"})
 	}
 	buf := make([]byte, 4+len(b))
 	binary.LittleEndian.PutUint32(buf, uint32(len(b)))

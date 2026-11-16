@@ -86,7 +86,7 @@ var tgBridgeConfig = func(c *Controller) tgws.Config {
 // port); the proxy listens when its port is free.
 func (c *Controller) tgApplyLocked() {
 	want := c.zapretCfg.Telegram
-	if c.zapretErr != nil {
+	if c.zapretErr != nil || c.zapretLife.Err() != nil {
 		want.Enabled = false
 	}
 	if c.tgBridge != nil && want.Enabled && want.Equal(c.tgOn) && c.tgProxy != nil {

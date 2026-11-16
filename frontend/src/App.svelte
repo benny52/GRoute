@@ -130,7 +130,8 @@
   onMount(() => {
     api.Platform().then((p) => {
       ui.mac = p === 'macos';
-      ui.portable = p === 'windows-portable';
+      ui.installed = p === 'windows-groute-installed';
+      ui.portable = p === 'windows-portable' || ui.installed;
     }).catch(() => {});
     applyTheme();
     refresh();
@@ -272,7 +273,7 @@
   <aside>
     <div class="brand">
       <img class="logo" src={brandIcon} alt="" width="30" height="30" />
-      {ui.portable ? 'GRoute Portable' : 'GRoute'}
+      {ui.portable && !ui.installed ? 'GRoute Portable' : 'GRoute'}
     </div>
     <nav>
       {#each shown as p (p.id)}

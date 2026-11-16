@@ -24,9 +24,30 @@ var files embed.FS
 // DirName is the extension's folder next to HyRoute.exe, HostFile its
 // native messaging host manifest.
 const (
-	DirName  = "browser-extension"
-	HostFile = "browser-host.json"
+	DirName         = "browser-extension"
+	HostFile        = "browser-host.json"
+	WindowsHost     = "groute-browser-host.exe"
+	WindowsManifest = "com.groute.browser.json"
 )
+
+// InstallWindows copies the host and extension into the interactive user's
+// stable folder. Chromium can keep loading it after the portable copy is moved.
+func InstallWindows(root, shippedHost string) error {
+	if !filepath.IsAbs(root) {
+		return errors.New("не удалось определить папку расширения")
+	}
+	host, err := os.ReadFile(shippedHost)
+	if err != nil {
+		return err
+	}
+	if err = Write(filepath.Join(root, "extension")); err != nil {
+		return err
+	}
+	if err = writeFile(filepath.Join(root, WindowsHost), host); err != nil {
+		return err
+	}
+	return WriteHostManifest(filepath.Join(root, WindowsManifest), WindowsHost)
+}
 
 // ExtensionID is the ID Chromium gives an extension with this manifest
 // "key" (base64 of the public key): the first 32 hex digits of its
@@ -127,7 +148,7 @@ func writeFile(path string, b []byte) error {
 func HostManifest(exe string) []byte {
 	b, _ := json.MarshalIndent(map[string]any{
 		"name":            ctl.BrowserHost,
-		"description":     "HyRoute",
+		"description":     "GRoute",
 		"path":            exe,
 		"type":            "stdio",
 		"allowed_origins": ctl.BrowserOrigins,

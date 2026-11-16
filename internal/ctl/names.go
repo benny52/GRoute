@@ -14,6 +14,10 @@ func PipeName(sid string) string { return `\\.\pipe\` + PipePrefix + sid }
 // user's HyRoute runs, signalled once its command line has settled.
 func RunEventName(sid string) string { return `Global\HyRoute-7f3c1a52-run-` + sid }
 
+// GRoute's browser host must never discover a HyRoute pipe or another user's session.
+func BrowserPipeName(sid string) string     { return `\\.\pipe\GRoute-browser-` + sid }
+func BrowserRunEventName(sid string) string { return `Global\GRoute-browser-run-` + sid }
+
 // RunState is what a run event says about HyRoute.
 type RunState int
 

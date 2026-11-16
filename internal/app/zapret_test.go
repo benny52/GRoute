@@ -114,6 +114,57 @@ func waitZapret(t *testing.T, c *Controller, state string) ZapretView {
 	return ZapretView{}
 }
 
+func TestZapretFirstEnableRequiresVerifiedComponent(t *testing.T) {
+	c, _ := zapFixture(t)
+	attempts := 0
+	c.ZapretPrepare = func(context.Context) (string, error) {
+		attempts++
+		return "", fmt.Errorf("контрольная сумма архива не совпадает")
+	}
+	in := ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}
+	c.zapretApply()
+	if attempts != 0 {
+		t.Fatal("disabled bypass downloaded a component")
+	}
+	if err := c.SaveZapret(in); err == nil || !strings.Contains(err.Error(), "контрольная сумма") {
+		t.Fatalf("expected preparation error, got %v", err)
+	}
+	saved, err := c.Store.LoadZapret()
+	if err != nil || saved.Enabled || len(zapretRuleNames(c)) > 0 || attempts != 1 {
+		t.Fatalf("failed preparation changed settings, rules, or retried: %+v, %v, %d", saved, err, attempts)
+	}
+}
+
+func TestZapretShutdownStopsAndDoesNotRestart(t *testing.T) {
+	c, args := zapFixture(t)
+	if err := c.SaveZapret(ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.YouTube}}); err != nil {
+		t.Fatal(err)
+	}
+	waitZapret(t, c, zapret.Running)
+	c.Shutdown()
+	c.zapretApply() // a queued network or profile change after exit
+	if v := c.ZapretInfo(); v.Status.State != zapret.Off || args(-1) != "" {
+		t.Fatalf("shutdown left bypass running: %+v", v.Status)
+	}
+}
+
+func TestZapretNeedsAdminKeepsCurrentSettings(t *testing.T) {
+	c, _ := zapFixture(t)
+	c.ZapretPrepare = nil
+	c.ZapretNeedsAdmin = true
+	if v := c.ZapretInfo(); !v.Available || !v.NeedsAdmin {
+		t.Fatalf("the DPI page must offer UAC: %+v", v)
+	}
+	in := ZapretInput{Enabled: true, Targets: []zapret.Target{zapret.Discord}}
+	if err := c.SaveZapret(in); err == nil || !strings.Contains(err.Error(), "администратора") {
+		t.Fatalf("expected UAC requirement, got %v", err)
+	}
+	saved, err := c.Store.LoadZapret()
+	if err != nil || saved.Enabled || len(zapretRuleNames(c)) != 0 {
+		t.Fatalf("unelevated attempt changed settings: %+v %v", saved, err)
+	}
+}
+
 func zapretRuleNames(c *Controller) []string {
 	var out []string
 	for _, r := range c.Settings().Rules {

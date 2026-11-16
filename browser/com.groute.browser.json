@@ -1,0 +1,9 @@
+{
+  "name": "com.groute.browser",
+  "description": "GRoute",
+  "path": "groute-browser-host.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://lkcpjafokjfjegcdifknkijchmjdjgdc/"
+  ]
+}

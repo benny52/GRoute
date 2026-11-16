@@ -3,6 +3,7 @@ package zapret_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"os"
@@ -15,10 +16,22 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/windows"
+
 	buildfiles "github.com/lardan099/hyroute/build"
 	"github.com/lardan099/hyroute/internal/runtimefiles"
 	"github.com/lardan099/hyroute/internal/zapret"
 )
+
+func TestZapretAntivirusError(t *testing.T) {
+	for _, code := range []error{windows.ERROR_VIRUS_INFECTED, windows.ERROR_VIRUS_DELETED} {
+		err := fmt.Errorf("install: %w", &os.PathError{Op: "rename", Path: "winws2.exe", Err: code})
+		msg := zapret.FileError(err)
+		if !strings.Contains(msg, "заблокировали") || !strings.Contains(msg, "карантин") {
+			t.Fatalf("missing protection history guidance: %s", msg)
+		}
+	}
+}
 
 // TestWinws2Runs downloads the pinned zapret2 release and runs the real
 // winws2 with every command line HyRoute builds: each method alone and

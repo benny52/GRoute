@@ -4,7 +4,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -12,6 +14,8 @@ import (
 	"github.com/lardan099/hyroute/browser"
 	"github.com/lardan099/hyroute/internal/ctl"
 )
+
+var browserInstallMu sync.Mutex
 
 // The browser extension (browser/): «Настройки» → «Расширение для
 // браузера». Installing writes the extension next to HyRoute.exe (the user
@@ -58,8 +62,50 @@ var browserKinds = []browserKind{
 	{"chromium", "Chromium", "chrome://extensions/", []string{`Chromium`}, []string{`Chromium\Application\chrome.exe`}},
 }
 
-func (g *GUI) browserDir() string      { return filepath.Join(g.dllDir, browser.DirName) }
-func (g *GUI) browserManifest() string { return filepath.Join(g.dllDir, browser.HostFile) }
+func (g *GUI) browserRoot() string {
+	sid, err := g.browserHive()
+	if err != nil {
+		return ""
+	}
+	token := windows.GetCurrentProcessToken()
+	user, err := token.GetTokenUser()
+	if err != nil {
+		return ""
+	}
+	if user.User.Sid.String() != sid {
+		token, err = shellToken()
+		if err != nil || token == 0 {
+			return ""
+		}
+		defer token.Close()
+		user, err = token.GetTokenUser()
+		if err != nil || user.User.Sid.String() != sid {
+			return ""
+		}
+	}
+	if local := localAppData(token); filepath.IsAbs(local) {
+		return filepath.Join(local, "GRoute", "Browser")
+	}
+	return ""
+}
+func (g *GUI) browserDir() string {
+	if isPortableBuild() {
+		if root := g.browserRoot(); root != "" {
+			return filepath.Join(root, "extension")
+		}
+		return ""
+	}
+	return filepath.Join(g.dllDir, browser.DirName)
+}
+func (g *GUI) browserManifest() string {
+	if isPortableBuild() {
+		if root := g.browserRoot(); root != "" {
+			return filepath.Join(root, browser.WindowsManifest)
+		}
+		return ""
+	}
+	return filepath.Join(g.dllDir, browser.HostFile)
+}
 
 // browserHive is the interactive user's registry (HKEY_USERS\<SID>): under
 // over-the-shoulder UAC HyRoute's own HKCU is another account's.
@@ -77,9 +123,16 @@ func hostKey(sid, vendor string) string {
 // BrowserExtInfo is the card's state.
 func (g *GUI) BrowserExtInfo() BrowserExtView {
 	v := BrowserExtView{On: g.ctl.BrowserOn(), Dir: g.browserDir(), Browsers: []BrowserApp{}}
-	v.Version = browser.DiskVersion(v.Dir)
+	manifest := g.browserManifest()
+	if v.Dir != "" {
+		v.Version = browser.DiskVersion(v.Dir)
+	}
 	v.Host = fileExists(filepath.Join(g.dllDir, "hyroutectl.exe"))
-	v.Installed = v.Version != "" && fileExists(g.browserManifest())
+	v.Installed = v.Version != "" && fileExists(manifest)
+	if isPortableBuild() {
+		v.Host = fileExists(filepath.Join(g.dllDir, "browser", browser.WindowsHost))
+		v.Installed = filepath.IsAbs(v.Dir) && v.Installed && fileExists(filepath.Join(filepath.Dir(manifest), browser.WindowsHost))
+	}
 	if t := g.ctl.BrowserSeen(); !t.IsZero() {
 		v.Seen = t.Unix()
 	}
@@ -89,7 +142,7 @@ func (g *GUI) BrowserExtInfo() BrowserExtView {
 		b := BrowserApp{ID: k.id, Name: k.name, Exe: findBrowser(k, local)}
 		b.Linked = sid != "" && v.Installed
 		for _, key := range k.keys {
-			b.Linked = b.Linked && registryPoints(hostKey(sid, key), g.browserManifest())
+			b.Linked = b.Linked && registryPoints(hostKey(sid, key), manifest)
 		}
 		if b.Exe != "" || b.Linked {
 			v.Browsers = append(v.Browsers, b)
@@ -101,6 +154,8 @@ func (g *GUI) BrowserExtInfo() BrowserExtView {
 // InstallBrowserExt puts the extension and its host in place, links every
 // known browser to the host and lets the extension in.
 func (g *GUI) InstallBrowserExt() (BrowserExtView, error) {
+	browserInstallMu.Lock()
+	defer browserInstallMu.Unlock()
 	if err := g.writeBrowserExt(true); err != nil {
 		return g.BrowserExtInfo(), err
 	}
@@ -115,6 +170,19 @@ func (g *GUI) InstallBrowserExt() (BrowserExtView, error) {
 // writeBrowserExt writes the folder, the host manifest and the registry
 // keys (link: create the keys of browsers not linked yet).
 func (g *GUI) writeBrowserExt(link bool) error {
+	sid, err := g.browserHive()
+	if err != nil {
+		return err
+	}
+	if isPortableBuild() {
+		root := g.browserRoot()
+		return asBrowserUser(sid, func() error {
+			if err := browser.InstallWindows(root, filepath.Join(g.dllDir, "browser", browser.WindowsHost)); err != nil {
+				return err
+			}
+			return linkBrowserHosts(sid, filepath.Join(root, browser.WindowsManifest), true)
+		})
+	}
 	exe := filepath.Join(g.dllDir, "hyroutectl.exe")
 	if !fileExists(exe) {
 		return errors.New("hyroutectl.exe нет рядом с HyRoute.exe: он есть в архиве с программой")
@@ -125,10 +193,10 @@ func (g *GUI) writeBrowserExt(link bool) error {
 	if err := browser.WriteHostManifest(g.browserManifest(), exe); err != nil {
 		return errors.New("не удалось записать " + browser.HostFile + ": " + err.Error())
 	}
-	sid, err := g.browserHive()
-	if err != nil {
-		return err
-	}
+	return linkBrowserHosts(sid, g.browserManifest(), link)
+}
+
+func linkBrowserHosts(sid, manifest string, link bool) error {
 	done := map[string]bool{}
 	var errs []error
 	for _, k := range browserKinds {
@@ -141,7 +209,7 @@ func (g *GUI) writeBrowserExt(link bool) error {
 			if !link && !registryExists(path) {
 				continue
 			}
-			if err := registrySet(path, g.browserManifest()); err != nil {
+			if err := registrySet(path, manifest); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -166,6 +234,8 @@ func (g *GUI) syncBrowserExt() {
 
 // SetBrowserExtOn lets the extension in or keeps it out (the files stay).
 func (g *GUI) SetBrowserExtOn(on bool) (BrowserExtView, error) {
+	browserInstallMu.Lock()
+	defer browserInstallMu.Unlock()
 	if err := g.ctl.SetBrowserOn(on); err != nil {
 		return g.BrowserExtInfo(), err
 	}
@@ -177,29 +247,91 @@ func (g *GUI) SetBrowserExtOn(on bool) (BrowserExtView, error) {
 // RemoveBrowserExt unlinks the browsers and deletes the files; the
 // extension itself is removed in the browser.
 func (g *GUI) RemoveBrowserExt() (BrowserExtView, error) {
+	browserInstallMu.Lock()
+	defer browserInstallMu.Unlock()
 	var errs []error
 	if err := g.ctl.SetBrowserOn(false); err != nil {
 		errs = append(errs, err)
 	}
 	g.applyCLI(g.cliMode())
-	if sid, err := g.browserHive(); err == nil {
+	sid, err := g.browserHive()
+	if err != nil {
+		return g.BrowserExtInfo(), errors.Join(append(errs, err)...)
+	}
+	dir, manifest := g.browserDir(), g.browserManifest()
+	if !filepath.IsAbs(dir) || !filepath.IsAbs(manifest) {
+		return g.BrowserExtInfo(), errors.New("не удалось определить папку расширения")
+	}
+	remove := func() error {
+		var removeErrs []error
 		for _, k := range browserKinds {
 			for _, vendor := range k.keys {
 				path := hostKey(sid, vendor)
 				// Only a key that points at this HyRoute's host.
-				if registryPoints(path, g.browserManifest()) {
+				if registryPoints(path, manifest) {
 					if err := registry.DeleteKey(registry.USERS, path); err != nil && !errors.Is(err, registry.ErrNotExist) {
-						errs = append(errs, err)
+						removeErrs = append(removeErrs, err)
 					}
 				}
 			}
 		}
+		if isPortableBuild() {
+			if err := os.Remove(filepath.Join(filepath.Dir(manifest), browser.WindowsHost)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				removeErrs = append(removeErrs, err)
+			}
+		}
+		return errors.Join(append(removeErrs, browser.Remove(dir, manifest))...)
 	}
-	if err := browser.Remove(g.browserDir(), g.browserManifest()); err != nil {
-		errs = append(errs, err)
+	if isPortableBuild() {
+		errs = append(errs, asBrowserUser(sid, remove))
+	} else {
+		errs = append(errs, remove())
 	}
 	g.ctl.Log.Info("browser extension removed")
 	return g.BrowserExtInfo(), errors.Join(errs...)
+}
+
+// Install or remove in LocalAppData and HKEY_USERS with the desktop user's
+// ordinary rights, including when GRoute was elevated as another account.
+func asBrowserUser(sid string, f func() error) error {
+	proc := windows.GetCurrentProcessToken()
+	user, err := proc.GetTokenUser()
+	if err != nil {
+		return err
+	}
+	if !proc.IsElevated() && user.User.Sid.String() == sid {
+		return f()
+	}
+	shell, err := shellToken()
+	if err != nil || shell == 0 {
+		return errors.New("не удалось получить права пользователя рабочего стола")
+	}
+	defer shell.Close()
+	user, err = shell.GetTokenUser()
+	if err != nil || user.User.Sid.String() != sid || shell.IsElevated() {
+		return errors.New("для установки расширения откройте GRoute без прав администратора")
+	}
+	var imp windows.Token
+	if err := windows.DuplicateTokenEx(shell, windows.TOKEN_IMPERSONATE|windows.TOKEN_QUERY, nil, windows.SecurityImpersonation, windows.TokenImpersonation, &imp); err != nil {
+		return err
+	}
+	defer imp.Close()
+	done := make(chan error, 1)
+	go func() {
+		runtime.LockOSThread()
+		if err := windows.SetThreadToken(nil, imp); err != nil {
+			runtime.UnlockOSThread()
+			done <- err
+			return
+		}
+		err := f()
+		revertErr := windows.RevertToSelf()
+		if revertErr == nil {
+			runtime.UnlockOSThread()
+		}
+		done <- errors.Join(err, revertErr)
+	}()
+	return <-done
 }
 
 // OpenBrowserExtensions opens the browser's extensions page and shows the

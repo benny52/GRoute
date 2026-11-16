@@ -32,13 +32,19 @@ import (
 
 // zapretState is the Controller's part (zapretMu unless noted).
 type zapretState struct {
-	zapretMu   sync.Mutex // serializes apply and pick; taken before c.mu
-	zapretCfg  zapret.Settings
-	zapretErr  error // zapret.json did not load: nothing is written
-	zapretRun  *zapret.Runner
-	zapretDir  string // winws2's folder once staged
-	zapretPrep string // why it could not be staged
-	zapretArgs []string
+	// Set by the Windows entry point before exposing the controller to the UI.
+	ZapretNeedsAdmin bool
+	ZapretResume     bool
+	zapretLife       context.Context
+	zapretEnd        context.CancelFunc
+	zapretRunOnce    sync.Once
+	zapretMu         sync.Mutex // serializes apply and pick; taken before c.mu
+	zapretCfg        zapret.Settings
+	zapretErr        error // zapret.json did not load: nothing is written
+	zapretRun        *zapret.Runner
+	zapretDir        string // winws2's folder once staged
+	zapretPrep       string // why it could not be staged
+	zapretArgs       []string
 	// zapretExtra: HyRoute's own hosts in the running bypass's lists (the
 	// Cloudflare domains of «Telegram без VPN»; nil: none).
 	zapretExtra map[zapret.Target][]string
@@ -104,9 +110,11 @@ var (
 // ZapretView is the «Обход DPI» page.
 type ZapretView struct {
 	// Available: this build can run the bypass (Windows).
-	Available bool            `json:"available"`
-	Settings  zapret.Settings `json:"settings"`
-	Status    zapret.Status   `json:"status"`
+	Available  bool            `json:"available"`
+	NeedsAdmin bool            `json:"needsAdmin,omitempty"`
+	Resume     bool            `json:"resume,omitempty"`
+	Settings   zapret.Settings `json:"settings"`
+	Status     zapret.Status   `json:"status"`
 	// Preparing: winws2 is being downloaded; PrepareError: why it could not.
 	PrepareError string `json:"prepareError,omitempty"`
 	LoadError    string `json:"loadError,omitempty"`
@@ -237,15 +245,40 @@ func (c *Controller) StartZapret() {
 	go c.zapretApply()
 }
 
-func (c *Controller) zapretRunner() *zapret.Runner {
-	if c.zapretRun == nil {
-		c.zapretRun = &zapret.Runner{Log: c.Log, OnChange: c.changed, Spawn: zapretSpawn}
+// A GRoute start restores only a bypass the user previously enabled.
+func (c *Controller) StartSavedZapret() {
+	c.zapretMu.Lock()
+	enabled := c.zapretCfg.Enabled
+	c.zapretMu.Unlock()
+	if enabled && !c.ZapretNeedsAdmin {
+		c.StartZapret()
 	}
+}
+
+func (c *Controller) stopZapret() {
+	c.zapretEnd()
+	c.zapretMu.Lock()
+	c.zapretRunner().Stop()
+	c.zapretArgs = nil
+	c.zapretWatchLocked(zapret.Settings{})
+	c.zapretHealLocked(zapret.Settings{})
+	c.tgApplyLocked()
+	c.zapretMu.Unlock()
+	c.healWG.Wait()
+}
+
+func (c *Controller) zapretRunner() *zapret.Runner {
+	c.zapretRunOnce.Do(func() {
+		c.zapretRun = &zapret.Runner{Log: c.Log, OnChange: c.changed, Spawn: zapretSpawn}
+	})
 	return c.zapretRun
 }
 
 // zapretReady stages winws2 (once) and returns its folder.
 func (c *Controller) zapretReady(ctx context.Context) (string, error) {
+	if c.ZapretNeedsAdmin {
+		return "", errors.New("для обхода DPI нужны права администратора. Нажмите «Включить обход DPI»")
+	}
 	if c.zapretDir != "" {
 		return c.zapretDir, nil
 	}
@@ -256,7 +289,7 @@ func (c *Controller) zapretReady(ctx context.Context) (string, error) {
 	dir, err := c.ZapretPrepare(ctx)
 	c.setZapretBusy("")
 	if err != nil {
-		c.zapretPrep = "Не удалось скачать zapret2: " + err.Error()
+		c.zapretPrep = "Не удалось подготовить zapret2. " + zapret.FileError(err)
 		c.changed()
 		return "", errors.New(c.zapretPrep)
 	}
@@ -335,6 +368,9 @@ func (c *Controller) zapretApply() {
 }
 
 func (c *Controller) zapretApplyLocked() {
+	if c.zapretLife.Err() != nil {
+		return
+	}
 	cfg := c.zapretCfg
 	run := c.zapretRunner()
 	c.syncZapretRules(cfg)
@@ -354,13 +390,14 @@ func (c *Controller) zapretApplyLocked() {
 		key, name = c.zapretNetKey()
 	}
 	c.zapretKey, c.zapretNet = key, name
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(c.zapretLife, 5*time.Minute)
 	defer cancel()
 	dir, err := c.zapretReady(ctx)
 	if err != nil {
 		run.Stop()
 		return
 	}
+	c.zapretPrep = ""
 	plans := map[zapret.Target]zapret.Plan{}
 	for _, t := range cfg.Targets {
 		if p, ok := cfg.PlanFor(t, key); ok {
@@ -375,17 +412,19 @@ func (c *Controller) zapretApplyLocked() {
 	}
 	extra := c.cloudflareListsLocked(plans)
 	if err := zapret.WriteLists(c.ZapretLists, cfg.Sites, c.zapretServers(), extra); err != nil {
+		c.zapretPrep = "Не удалось записать списки обхода DPI. " + zapret.FileError(err)
 		c.Log.Error("zapret: lists not written", "err", err)
 		run.Stop()
 		return
 	}
 	args, err := zapret.Build(zapret.BuildConfig{Dir: dir, Lists: c.ZapretLists, Plans: plans, Sites: cfg.Sites, Filter: zapret.ProbeExclude()})
 	if err != nil {
+		c.zapretPrep = "Не удалось подготовить параметры обхода DPI. " + err.Error()
 		c.Log.Error("zapret: command line not built", "err", err)
 		run.Stop()
 		return
 	}
-	if slices.Equal(args, c.zapretArgs) && run.Status().State != zapret.Off {
+	if slices.Equal(args, c.zapretArgs) && run.Status().State == zapret.Running {
 		c.zapretExtra = extra
 		return
 	}
@@ -617,7 +656,7 @@ func (c *Controller) ZapretInfo() ZapretView {
 	if !c.zapretMu.TryLock() {
 		// An apply or a pick holds the settings: their last view, with
 		// what moves now.
-		v := ZapretView{Available: c.ZapretPrepare != nil}
+		v := ZapretView{Available: c.ZapretPrepare != nil || c.ZapretNeedsAdmin, NeedsAdmin: c.ZapretNeedsAdmin, Resume: c.ZapretResume}
 		if shown != nil {
 			v = *shown
 		}
@@ -631,7 +670,7 @@ func (c *Controller) ZapretInfo() ZapretView {
 
 // zapretInfoLocked builds the view (zapretMu held).
 func (c *Controller) zapretInfoLocked(pick *ZapretPickView, busy string) ZapretView {
-	v := ZapretView{Available: c.ZapretPrepare != nil, Pick: pick, Busy: busy}
+	v := ZapretView{Available: c.ZapretPrepare != nil || c.ZapretNeedsAdmin, NeedsAdmin: c.ZapretNeedsAdmin, Resume: c.ZapretResume, Pick: pick, Busy: busy}
 	v.HealNote, v.HealAt = c.healState()
 	v.Telegram = c.telegramViewLocked()
 	c.mu.Lock()
@@ -767,6 +806,9 @@ func cloneMap[K comparable, V any](m map[K]V) map[K]V {
 
 // SaveZapret saves the page and applies it.
 func (c *Controller) SaveZapret(in ZapretInput) error {
+	if !in.Enabled {
+		c.ZapretPickCancel()
+	}
 	c.zapretMu.Lock()
 	defer c.zapretMu.Unlock()
 	if c.zapretErr != nil {
@@ -779,9 +821,8 @@ func (c *Controller) SaveZapret(in ZapretInput) error {
 			return fmt.Errorf("«%s» — не имя сайта и не адрес. Адрес или сеть должны быть внешними (не локальными) и не шире /8 (IPv6 — /16)", strings.TrimSpace(d))
 		}
 	}
-	next := c.zapretCfg
+	next := cloneZapretSettings(c.zapretCfg)
 	next.Enabled, next.Targets, next.Sites, next.Methods = in.Enabled, in.Targets, in.Sites, in.Methods
-	next.Via = cloneMap(next.Via)
 	if in.AutoHeal != nil {
 		v := *in.AutoHeal
 		next.AutoHeal = &v
@@ -790,10 +831,16 @@ func (c *Controller) SaveZapret(in ZapretInput) error {
 		}
 	}
 	next.Normalize()
+	if next.Enabled && len(next.Targets) == 0 {
+		return errors.New("выберите хотя бы один сервис для обхода DPI")
+	}
 	if next.On(zapret.Sites) && len(next.Sites) == 0 {
 		return errors.New("добавьте хотя бы один сайт или снимите «Свои сайты»")
 	}
 	if err := next.Validate(); err != nil {
+		return err
+	}
+	if err := c.prepareZapretEnable(next.Enabled); err != nil {
 		return err
 	}
 	if err := c.Store.SaveZapret(next); err != nil {
@@ -803,7 +850,27 @@ func (c *Controller) SaveZapret(in ZapretInput) error {
 	c.Log.Info("zapret: settings saved", "on", next.Enabled, "targets", len(next.Targets), "sites", len(next.Sites))
 	c.zapretApplyLocked()
 	c.changed()
+	if next.Enabled && c.zapretPrep != "" {
+		return errors.New(c.zapretPrep)
+	}
 	return nil
+}
+
+func (c *Controller) prepareZapretEnable(on bool) error {
+	if err := c.zapretLife.Err(); err != nil {
+		return err
+	}
+	if !on {
+		c.zapretDir, c.zapretPrep = "", ""
+		return nil
+	}
+	if c.zapretRunner().Status().State == zapret.Failed {
+		c.zapretDir = "" // check the protected files again, including quarantined ones
+	}
+	ctx, cancel := context.WithTimeout(c.zapretLife, 5*time.Minute)
+	defer cancel()
+	_, err := c.zapretReady(ctx)
+	return err
 }
 
 // ZapretPickCancel stops an auto-pick under way.
@@ -835,6 +902,13 @@ func (c *Controller) ZapretPick() (ZapretView, error) {
 // zapretPickLocked is the pick; why is set when self-healing started it.
 func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 	cfg := c.zapretCfg
+	if err := c.zapretLife.Err(); err != nil || !cfg.Enabled {
+		p, b, _ := c.pickState()
+		if err == nil {
+			err = errors.New("сначала включите обход DPI")
+		}
+		return c.zapretInfoLocked(p, b), err
+	}
 	if c.zapretErr != nil || len(cfg.Targets) == 0 {
 		p, b, _ := c.pickState()
 		if c.zapretErr != nil {
@@ -842,7 +916,7 @@ func (c *Controller) zapretPickLocked(why string) (ZapretView, error) {
 		}
 		return c.zapretInfoLocked(p, b), errors.New("выберите, что обходить")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(c.zapretLife)
 	defer cancel()
 	pick := &ZapretPickView{Running: true, Step: "Готовлю zapret2…", Total: len(zapret.Methods) + 1,
 		Results: map[zapret.Target]string{}, Diagnosis: map[zapret.Target]ZapretDiag{}, Auto: why != "", Why: why}

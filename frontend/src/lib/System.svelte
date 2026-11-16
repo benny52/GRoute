@@ -340,11 +340,9 @@
     {/if}
   </section>
 
-  {#if !ui.portable}
   <BrowserExtension />
 
-  {#if ui.expert}<CLISettings />{/if}
-  {/if}
+  {#if ui.expert && !ui.portable}<CLISettings />{/if}
 
   {#if routing && !ui.portable}
     <section class="card">

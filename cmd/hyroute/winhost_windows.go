@@ -208,8 +208,8 @@ func (h *winHost) answer(method string, args []json.RawMessage) (any, error) {
 	if !strings.HasPrefix(method, "window.") {
 		if isPortableBuild() {
 			switch method {
-			case "SetAutostart", "MoveToProgramFiles", "SetCLIMode", "SetBrowserExtOn", "InstallBrowserExt", "RemoveBrowserExt",
-				"OpenBrowserExtensions", "ReleaseKillSwitch", "RemoveFirewallRule", "DeleteStaleDriverService", "OpenServerPanel", "ApplyAppUpdate":
+			case "SetAutostart", "SetCLIMode", "ReleaseKillSwitch", "RemoveFirewallRule",
+				"DeleteStaleDriverService", "OpenServerPanel", "ApplyAppUpdate":
 				return nil, errors.New("Эта функция недоступна в портативной сборке GRoute")
 			}
 		}

@@ -377,7 +377,14 @@
     <div class="note warn">Kill switch не включился: {hide(st.killSwitchError)}</div>
   {/if}
 
-  {#if sys && !ui.portable && !sys.protectedLocation && inMoveTarget}
+  {#if sys && ui.portable && !ui.installed}
+    <section class="card">
+      <h2>Установка на компьютер</h2>
+      <p class="muted small">GRoute добавит ярлык в «Пуск» и откроется из {sys.moveTarget}. При первой установке скопирует подписки, серверы и все профили правил. При повторной сохранит настройки установленной копии.</p>
+      {#if online}<p class="muted small">При перезапуске текущее VPN-соединение завершится.</p>{/if}
+      <button class="primary" onclick={move} disabled={moving}><Icon name="download" size={16} /> {moving ? 'Установка…' : 'Установить GRoute'}</button>
+    </section>
+  {:else if sys && !ui.portable && !sys.protectedLocation && inMoveTarget}
     <section class="card unsafe">
       <Icon name="alert" size={22} />
       <div class="grow">

@@ -25,6 +25,7 @@ import (
 
 // Stamped by scripts/build.ps1 (the release tag, as in HyRoute.exe).
 var version = "v0.0.0-dev"
+var browserOnly = "false"
 
 var procAllowSetForegroundWindow = windows.NewLazySystemDLL("user32.dll").NewProc("AllowSetForegroundWindow")
 
@@ -52,6 +53,22 @@ func main() {
 		},
 	}
 	var code int
+	if browserOnly == "true" {
+		if !cli.IsNativeHost(os.Args[1:]) || sid == "" {
+			stop()
+			os.Exit(ctl.ExitCode(ctl.CodeDenied))
+		}
+		// The settings window runs at the owner's normal rights or elevated.
+		trusted := append(append([]string(nil), ctl.Trusted...), sid)
+		d.Dial = func(_ string, busy time.Duration) (net.Conn, uint32, error) {
+			return ctl.Dial(ctl.BrowserPipeName(sid), busy, trusted)
+		}
+		d.Probe = func(string) (ctl.RunState, error) {
+			return ctl.ProbeRunEvent(ctl.BrowserRunEventName(sid), trusted)
+		}
+		d.FindPipes = func() ([]string, error) { return nil, nil }
+		d.Poll = 200 * time.Millisecond
+	}
 	if cli.IsNativeHost(os.Args[1:]) {
 		// Started by a browser for the HyRoute extension: binary messages
 		// on stdin and stdout, never the console.

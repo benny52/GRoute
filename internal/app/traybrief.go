@@ -104,6 +104,9 @@ func (c *Controller) ZapretBrief() ZapretBrief {
 // SetZapretEnabled turns the DPI bypass on or off with its settings as
 // they are (the tray's switch; the page saves the whole of them).
 func (c *Controller) SetZapretEnabled(on bool) error {
+	if !on {
+		c.ZapretPickCancel()
+	}
 	c.zapretMu.Lock()
 	defer c.zapretMu.Unlock()
 	if c.zapretErr != nil {
@@ -111,6 +114,9 @@ func (c *Controller) SetZapretEnabled(on bool) error {
 	}
 	if c.zapretCfg.Enabled == on {
 		return nil
+	}
+	if err := c.prepareZapretEnable(on); err != nil {
+		return err
 	}
 	next := c.zapretCfg
 	next.Enabled = on

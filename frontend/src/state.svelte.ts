@@ -27,6 +27,7 @@ export const ui = $state({
   // browser extension) are hidden.
   mac: false,
   portable: false,
+  installed: false,
   privacy: get('privacy') === '1',
   profiles: [] as ProfileSummary[],
   status: null as Status | null,

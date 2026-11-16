@@ -120,6 +120,13 @@ func accessOf(path string, user windows.Token) (uint32, error) {
 }
 
 func moveTarget() string {
+	if isPortableBuild() {
+		return grouteInstallTarget()
+	}
+	return upstreamMoveTarget()
+}
+
+func upstreamMoveTarget() string {
 	if p, err := windows.KnownFolderPath(windows.FOLDERID_ProgramFiles, 0); err == nil && p != "" {
 		return filepath.Join(p, "HyRoute")
 	}
@@ -140,6 +147,9 @@ var runtimeFilesList = []string{"hysteria.exe", "xray.exe", "WinDivert.dll", "Wi
 // copy connects again, and the kill switch keeps the internet closed
 // until it does.
 func (g *GUI) MoveToProgramFiles() error {
+	if isPortableBuild() {
+		return g.installGRoute()
+	}
 	target := moveTarget()
 	if strings.EqualFold(filepath.Clean(g.dllDir), filepath.Clean(target)) {
 		// Here only when the permissions of the folder or its files let the

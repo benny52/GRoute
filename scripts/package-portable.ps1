@@ -61,7 +61,25 @@ try {
     $awgHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $helper).Hash
     $pins['groute-awg.exe'] = $awgHash
     $files['groute-awg.exe'] = $helper
-    $ldflags = "-H windowsgui -X main.portableBuild=true -X main.version=$version -X main.build=$buildNumber -X main.updateRepo= -X main.bundledAWGSHA256=$awgHash"
+    $browserHost = Join-Path $stage 'groute-browser-host.exe'
+    & $go build -trimpath -buildvcs=false -ldflags '-X main.browserOnly=true' -o $browserHost ./cmd/hyroutectl
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to build groute-browser-host.exe' }
+    & $go run "github.com/tc-hib/go-winres@$($deps.tools.goWinres)" patch --delete --no-backup --in browser/windows-host-resources.json --file-version $version --product-version $version $browserHost
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to embed GRoute browser host resources' }
+    $files['browser/groute-browser-host.exe'] = $browserHost
+    $browserRoot = Join-Path $root 'browser'
+    $files['browser/com.groute.browser.json'] = Join-Path $browserRoot 'com.groute.browser.json'
+    foreach ($file in Get-ChildItem -LiteralPath (Join-Path $browserRoot 'extension') -Recurse -File) {
+        $entryName = 'browser/' + $file.FullName.Substring($browserRoot.Length + 1).Replace('\', '/')
+        $files[$entryName] = $file.FullName
+    }
+    $files['LICENSE.txt'] = Join-Path $root 'LICENSE'
+    $files['THIRD-PARTY-NOTICES.txt'] = Join-Path $root 'THIRD-PARTY-NOTICES.txt'
+    foreach ($name in $files.Keys) {
+        if (!$pins.Contains($name)) { $pins[$name] = (Get-FileHash -Algorithm SHA256 -LiteralPath $files[$name]).Hash }
+    }
+    $manifest = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($pins | ConvertTo-Json -Compress)))
+    $ldflags = "-H windowsgui -X main.portableBuild=true -X main.version=$version -X main.build=$buildNumber -X main.updateRepo= -X main.bundledAWGSHA256=$awgHash -X main.installManifest=$manifest"
     & $go build -trimpath -buildvcs=false -tags desktop,production -ldflags $ldflags -o $exe ./cmd/hyroute
     if ($LASTEXITCODE -ne 0) { throw 'Failed to build GRoute.exe' }
     # Apply resources only to the staged executable. Existing .syso resources
@@ -69,8 +87,6 @@ try {
     & $go run "github.com/tc-hib/go-winres@$($deps.tools.goWinres)" patch --delete --no-backup --in build/windows/groute-portable.json --file-version $version --product-version $version $exe
     if ($LASTEXITCODE -ne 0) { throw 'Failed to embed GRoute resources' }
     $files['GRoute.exe'] = $exe
-    $files['LICENSE.txt'] = Join-Path $root 'LICENSE'
-    $files['THIRD-PARTY-NOTICES.txt'] = Join-Path $root 'THIRD-PARTY-NOTICES.txt'
 
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem

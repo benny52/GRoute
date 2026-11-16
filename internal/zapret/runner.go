@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/lardan099/hyroute/internal/hysteria"
@@ -82,7 +85,7 @@ func (r *Runner) Start(args []string) {
 	r.restarts, r.lastErr, r.lines, r.switches = 0, "", nil, nil
 	r.mu.Unlock()
 	kill(old, done)
-	go r.supervise(gen, args)
+	go r.supervise(gen, r.Exe, args)
 }
 
 // Stop stops winws2.
@@ -135,7 +138,25 @@ func DLLInitFailed(err error) bool {
 // dllInitFailed is DLLInitFailed (tests replace it).
 var dllInitFailed = DLLInitFailed
 
-func (r *Runner) supervise(gen uint64, args []string) {
+// Windows reports ERROR_VIRUS_INFECTED (225) or ERROR_VIRUS_DELETED (226)
+// even when the failed operation is a write or rename during staging.
+func virusBlocked(err error) bool {
+	return runtime.GOOS == "windows" && (errors.Is(err, syscall.Errno(225)) || errors.Is(err, syscall.Errno(226)))
+}
+
+// FileError explains Windows protection errors during staging or process start.
+func FileError(err error) string {
+	switch {
+	case virusBlocked(err):
+		return "Защита Windows или антивирус заблокировали файл zapret2. Проверьте журнал защиты или карантин. Защиту отключать не требуется."
+	case errors.Is(err, os.ErrPermission), errors.Is(err, os.ErrNotExist):
+		return "Файл zapret2 недоступен. Проверьте права доступа и журнал защиты антивируса. " + err.Error()
+	default:
+		return err.Error()
+	}
+}
+
+func (r *Runner) supervise(gen uint64, exe string, args []string) {
 	backoff := 2 * time.Second
 	fast := 0 // quick retries after a failed initialization
 	for r.current(gen) {
@@ -145,20 +166,24 @@ func (r *Runner) supervise(gen uint64, args []string) {
 			start = hysteria.StartChild
 		}
 		began := time.Now()
-		child, err := start(r.Exe, args, nil, out)
+		child, err := start(exe, args, nil, out)
 		r.mu.Lock()
 		if r.gen != gen {
 			r.mu.Unlock()
 			if child != nil {
 				child.Kill()
+				child.Wait()
 			}
 			return
 		}
 		if err != nil {
-			r.state, r.lastErr = Failed, "winws2 не запустился: "+err.Error()
+			r.state, r.lastErr = Failed, "winws2 не запустился: "+FileError(err)
 			r.mu.Unlock()
 			r.log().Error("zapret: winws2 not started", "err", err)
 			r.changed()
+			if virusBlocked(err) || errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+				return // the user can retry after addressing the file or access error
+			}
 		} else {
 			done := make(chan struct{})
 			r.child, r.exited, r.state = child, done, Running

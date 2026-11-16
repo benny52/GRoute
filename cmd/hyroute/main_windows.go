@@ -52,12 +52,14 @@ var (
 
 func main() {
 	stub := flag.Bool("stub", false, "use an in-process SOCKS5 stub instead of Hysteria (testing)")
+	installFiles := flag.Bool("install-groute-files", false, "install the verified GRoute program files")
 	verbose := flag.Bool("v", false, "debug logging")
 	updEvent := flag.String("update-event", "", "set by hyroute-updater: signal this event once running")
 	updFrom := flag.String("updated-from", "", "set by hyroute-updater: version replaced")
 	updFailed := flag.String("update-failed", "", "set by hyroute-updater: the update to this version failed")
 	updError := flag.String("update-error", "", "set by hyroute-updater: why")
 	waitPID := flag.Uint("wait-pid", 0, "wait for the previous instance to exit before restarting")
+	resumeDPI := flag.String("resume-dpi", "", "resume the DPI page for the original Windows user")
 	movedFrom := flag.String("moved-from", "", "set after a move to Program Files: the old folder")
 	reconnect := flag.Bool("reconnect", false, "set by hyroute-updater (then report healthy) and after a move to Program Files: connect again")
 	atLogon := flag.Bool("autostart", false, "set by the sign-in task: start minimized")
@@ -68,6 +70,16 @@ func main() {
 	winPanel := flag.Bool("window-panel", false, "set by HyRoute: the window process is the panel by the tray icon")
 	winPanelAt := flag.String("window-panel-at", "", "set by HyRoute: where the tray icon was clicked (x,y)")
 	flag.Parse()
+	if *installFiles {
+		if !isPortableBuild() || !windows.GetCurrentProcessToken().IsElevated() {
+			os.Exit(1)
+		}
+		if err := installGRouteProgram(); err != nil {
+			messageBox("Установка GRoute", err.Error())
+			os.Exit(1)
+		}
+		return
+	}
 
 	// The window process (window_windows.go): nothing below is its part.
 	if *winPipes != "" {
@@ -77,6 +89,12 @@ func main() {
 
 	portable := isPortableBuild()
 	elevated := windows.GetCurrentProcessToken().IsElevated()
+	if *resumeDPI != "" {
+		user, err := windows.GetCurrentProcessToken().GetTokenUser()
+		if !portable || !elevated || *waitPID == 0 || err != nil || user.User.Sid.String() != *resumeDPI {
+			fatalBox(errors.New("обход DPI не включён. Для доступа к сохранённым настройкам GRoute нужны права администратора той же учётной записи Windows. Откройте GRoute снова под исходной учётной записью"))
+		}
+	}
 	if !elevated && !portable {
 		messageBox("HyRoute", "HyRoute нужны права администратора (драйвер WinDivert). Запустите программу от имени администратора.")
 		os.Exit(1)
@@ -84,7 +102,7 @@ func main() {
 	// Started at sign-in by the kill switch check: without a block to show
 	// HyRoute ends here, before anything with an effect (the instance
 	// claim would bring a running copy's window up).
-	if portable && (*ksCheck || *atLogon || *updEvent != "" || *updFrom != "" || *updFailed != "" || *movedFrom != "" || (*waitPID != 0 && !elevated) || *reconnect) {
+	if portable && (*ksCheck || *atLogon || *updEvent != "" || *updFrom != "" || *updFailed != "" || *movedFrom != "" || (*waitPID != 0 && !elevated && !runningInstalledGRoute()) || *reconnect) {
 		// Neither HyRoute's scheduled tasks nor its updater are entry
 		// points to the portable client. Never apply a restore on startup.
 		return
@@ -113,15 +131,13 @@ func main() {
 		os.Exit(0)
 	}
 	// cli: hyroutectl sees HyRoute starting from here on.
-	var cs *cliState
 	if portable {
 		if inst == nil {
 			fatalBox(errors.New("не удалось занять блокировку GRoute. Закройте ранее открытый GRoute через меню значка в трее и повторите запуск"))
 		}
 		fwrule.UseGRouteNames()
-	} else {
-		cs = initCLI()
 	}
+	cs := initCLI(portable)
 	if *atLogon {
 		// Before the packet engine and hysteria.exe start: a task from an
 		// earlier version starts HyRoute at background priority.
@@ -309,7 +325,9 @@ func main() {
 	// programs often flag it); it is downloaded from the release pinned in
 	// deps.json and verified when the bypass is first turned on, and runs
 	// from the protected runtime folder.
-	if zfiles, err := runtimefiles.ZapretFromDeps(buildfiles.Deps); err == nil && !portable {
+	ctl.ZapretNeedsAdmin = portable && !elevated
+	ctl.ZapretResume = *resumeDPI != ""
+	if zfiles, err := runtimefiles.ZapretFromDeps(buildfiles.Deps); err == nil && elevated {
 		ctl.ZapretLists = filepath.Join(paths.components, "zapret")
 		ctl.ZapretPrepare = func(ctx context.Context) (string, error) {
 			if err := core.ProtectDir(ctl.ZapretLists); err != nil {
@@ -322,6 +340,9 @@ func main() {
 			}
 			if len(res.Downloaded) > 0 {
 				ctl.Log.Info("zapret2 downloaded and verified", "files", len(res.Downloaded))
+			}
+			if err := runtimefiles.Verify(runtimeDir, zfiles); err != nil {
+				return "", err
 			}
 			return filepath.Join(runtimeDir, runtimefiles.ZapretDir), nil
 		}
@@ -383,6 +404,8 @@ func main() {
 		go ctl.RunUpdateChecks(schedCtx)
 		go ctl.RunGeoUpdates(schedCtx)
 		go gui.syncKillSwitchCheck()
+	} else if !ctl.ZapretResume {
+		ctl.StartSavedZapret()
 	}
 	go ctl.RunStats(schedCtx) // stats
 
@@ -443,9 +466,9 @@ func main() {
 		// does not wait for one (the updater never starts HyRoute so).
 		gui.uiUp.Store(true)
 	}
+	gui.startCLI()
 	if !portable {
-		gui.startCLI()          // cli: the control pipe for hyroutectl
-		go gui.syncBrowserExt() // browser: an installed extension follows this HyRoute
+		go gui.syncBrowserExt()
 	}
 	gui.startTray()
 	// A second start shows the window (opening it if it is closed).
@@ -477,12 +500,16 @@ func main() {
 // than the user's other programs, so the folder is the user's own, and
 // WebView2 creates it itself: HyRoute never touches it.
 func webviewDataDir() (string, error) {
+	product, folder := "HyRoute", "webview"
 	if isPortableBuild() {
 		exe, err := os.Executable()
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(filepath.Dir(exe), "Data", "WebView2"), nil
+		if !installedGRoute(exe) {
+			return filepath.Join(filepath.Dir(exe), "Data", "WebView2"), nil
+		}
+		product, folder = "GRoute", "WebView2"
 	}
 	// Before Explorer starts (sign-in) the limited token is the same user
 	// under UAC and Administrator protection.
@@ -494,7 +521,7 @@ func webviewDataDir() (string, error) {
 		local := localAppData(t)
 		t.Close()
 		if local != "" {
-			return filepath.Join(local, "HyRoute", "webview"), nil
+			return filepath.Join(local, product, folder), nil
 		}
 	}
 	// No split token (UAC off, the built-in Administrator): WebView2 runs
@@ -506,7 +533,7 @@ func webviewDataDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("папка LocalAppData для данных окна: %w", err)
 	}
-	return filepath.Join(local, "HyRoute", "webview"), nil
+	return filepath.Join(local, product, folder), nil
 }
 
 // shellToken opens the token of the desktop's shell (Explorer), whose

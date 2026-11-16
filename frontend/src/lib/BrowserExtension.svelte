@@ -46,7 +46,7 @@
   const install = () => run(() => api.InstallBrowserExt(), 'Готово. Осталось добавить расширение в браузер: шаги ниже.');
   const open = (id: string) => run(() => api.OpenBrowserExtensions(id), 'Путь к папке скопирован.');
   const remove = () =>
-    confirm('Отвязать браузеры от HyRoute и удалить папку расширения? Само расширение уберите на странице расширений браузера.') &&
+    confirm('Отвязать браузеры от GRoute и удалить папку расширения? Само расширение уберите на странице расширений браузера.') &&
     run(() => api.RemoveBrowserExt(), 'Связь с браузерами удалена.');
 
   async function copyDir() {
@@ -54,7 +54,7 @@
   }
 
   function seenText(t: number): string {
-    if (!t) return 'с запуска HyRoute расширение ещё не обращалось';
+    if (!t) return 'с запуска GRoute расширение ещё не обращалось';
     const min = Math.round((Date.now() / 1000 - t) / 60);
     if (min < 1) return 'расширение обращалось только что';
     if (min < 60) return `расширение обращалось ${min} мин назад`;
@@ -71,18 +71,18 @@
 <section class="card">
   <h2><Icon name="globe" size={17} /> Расширение для браузера</h2>
   <p class="muted small">
-    Кнопка HyRoute в Chrome, Edge, Яндекс Браузере, Brave, Opera и Vivaldi. Показывает адреса открытой страницы (и какие не загрузились) и как
-    HyRoute их отправляет, а одним нажатием отправляет весь сайт через VPN или отмеченные адреса — через VPN, напрямую или в блок. У каждого сайта своё правило «Из браузера: сайт» в начале
+    Кнопка GRoute в Chrome, Edge, Яндекс Браузере, Brave, Opera и Vivaldi. Показывает адреса открытой страницы (и какие не загрузились) и как
+    GRoute их отправляет, а одним нажатием отправляет весь сайт через VPN или отмеченные адреса — через VPN, напрямую или в блок. У каждого сайта своё правило «Из браузера: сайт» в начале
     {ui.expert ? 'активного профиля правил' : 'списка правил'}.{#if ui.expert}
-      Связь с HyRoute — через {ui.mac ? 'hyroutectl' : 'hyroutectl.exe'}, без открытых портов; список адресов страницы хранится только в памяти браузера.{/if}
+      Связь с GRoute — через {ui.portable ? 'groute-browser-host.exe' : ui.mac ? 'hyroutectl' : 'hyroutectl.exe'}, без открытых портов; список адресов страницы хранится только в памяти браузера.{/if}
   </p>
   {#if !view && !error}<p class="muted small">Загрузка…</p>{/if}
   {#if view}
     {#if !view.host}
       {#if ui.mac}
-        <div class="note warn small">hyroutectl не установлен: откройте новую версию HyRoute.app, она обновит службу.</div>
+        <div class="note warn small">hyroutectl не установлен: откройте новую версию GRoute.app, она обновит службу.</div>
       {:else}
-        <div class="note warn small">hyroutectl.exe нет рядом с HyRoute.exe: без него расширение не свяжется с HyRoute. Он есть в архиве с программой.</div>
+        <div class="note warn small">В комплекте GRoute отсутствует {ui.portable ? 'browser/groute-browser-host.exe' : 'hyroutectl.exe'}. Распакуйте полный комплект программы.</div>
       {/if}
     {/if}
     {#if !view.installed}
@@ -93,19 +93,19 @@
           onchange={(e) => settle(e, (el) => run(() => api.SetBrowserExtOn(el.checked), el.checked ? 'Расширение включено' : 'Расширение выключено'), () => view?.on ?? false)} />
         Расширение может смотреть и менять правила
       </label>
-      <p class="muted small">{view.on ? seenText(view.seen) : 'Выключено: расширение покажет, что HyRoute его не пускает.'}</p>
+      <p class="muted small">{view.on ? seenText(view.seen) : 'Выключено: расширение покажет, что GRoute его не пускает.'}</p>
 
       <h3>Как добавить в браузер</h3>
       <ol class="steps small">
         <li>Нажмите свой браузер ниже: откроется страница расширений и папка с расширением, а путь к ней скопируется.</li>
         <li>Включите «Режим разработчика» — переключатель вверху страницы расширений.</li>
-        <li>Перетащите папку <b>browser-extension</b> на страницу. Или «Загрузить распакованное расширение» → вставьте путь ({ui.mac ? '⌘V' : 'Ctrl+V'}) → «Выбор папки».</li>
-        <li>Закрепите значок HyRoute: значок пазла справа от адресной строки → булавка.</li>
+        <li>Перетащите папку <b>{ui.portable ? 'extension' : 'browser-extension'}</b> на страницу. Или «Загрузить распакованное расширение» → вставьте путь ({ui.mac ? '⌘V' : 'Ctrl+V'}) → «Выбор папки».</li>
+        <li>Закрепите значок GRoute: значок пазла справа от адресной строки → булавка.</li>
       </ol>
       {#if view.browsers.length}
         <div class="row wrap">
           {#each view.browsers as b (b.id)}
-            <button disabled={busy || !b.exe} onclick={() => open(b.id)} title={b.linked ? 'Связан с HyRoute' : 'Не связан: нажмите «Установить заново»'}>
+            <button disabled={busy || !b.exe} onclick={() => open(b.id)} title={b.linked ? 'Связан с GRoute' : 'Не связан: нажмите «Установить заново»'}>
               {#if b.linked}<Icon name="check" size={14} />{/if}
               {b.name}
             </button>
@@ -119,9 +119,12 @@
         <button onclick={copyDir} disabled={busy}><Icon name="copy" size={15} /> Копировать</button>
       </div>
       <p class="muted small">
-        Браузер может напоминать, что расширение установлено в режиме разработчика: так бывает со всеми расширениями не из магазина. HyRoute
-        обновляет файлы расширения сам; браузер подхватит их после перезапуска или кнопки «Обновить» на странице расширений.{#if !ui.mac} Если перенесли
-        HyRoute в другую папку, установите расширение заново.{/if}
+        {#if ui.portable}
+          Папка расширения находится в профиле Windows. После переноса GRoute в другую папку браузер продолжит использовать её.
+          Для обновления расширения нажмите «Установить заново», затем «Обновить» на странице расширений браузера.
+        {:else}
+          Браузер подхватит новые файлы после перезапуска или кнопки «Обновить» на странице расширений.
+        {/if}
       </p>
       <div class="row wrap">
         <button disabled={busy || !view.host} onclick={install}><Icon name="refresh" size={15} /> Установить заново</button>

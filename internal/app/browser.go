@@ -155,7 +155,7 @@ type BrowserResult struct {
 }
 
 // ErrBrowserOff: the extension is turned off in HyRoute.
-var ErrBrowserOff = sentenceError("Расширение для браузера выключено в HyRoute: «Настройки» → «Расширение для браузера»")
+var ErrBrowserOff = sentenceError("Расширение для браузера выключено в GRoute: «Настройки» → «Расширение для браузера»")
 
 // BrowserOn reports whether the extension may talk to HyRoute (prefs
 // "browser"; never while prefs.json is broken).

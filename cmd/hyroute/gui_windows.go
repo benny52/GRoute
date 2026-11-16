@@ -372,6 +372,9 @@ func windowsVersion() string {
 }
 
 func windowsProductName() string {
+	if runningInstalledGRoute() {
+		return "GRoute"
+	}
 	if isPortableBuild() {
 		return "GRoute Portable"
 	}
@@ -381,6 +384,9 @@ func windowsProductName() string {
 // Platform tells the page which system it runs on (macos: the page hides
 // what only Windows has).
 func (g *GUI) Platform() string {
+	if runningInstalledGRoute() {
+		return "windows-groute-installed"
+	}
 	if isPortableBuild() {
 		return "windows-portable"
 	}

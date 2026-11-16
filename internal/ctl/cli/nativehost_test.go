@@ -77,7 +77,7 @@ func TestNativeHost(t *testing.T) {
 	if reps[3].OK || reps[3].Code != ctl.CodeUsage {
 		t.Fatalf("%+v", reps[3])
 	}
-	// Only the two browser commands reached HyRoute.
+	// Only the two browser commands reached GRoute.
 	if len(r.hy.reqs) != 2 || r.hy.reqs[0].Cmd != "browser-info" || r.hy.reqs[1].Cmd != "browser-add" {
 		t.Fatalf("%+v", r.hy.reqs)
 	}
@@ -101,11 +101,11 @@ func TestNativeHost(t *testing.T) {
 		t.Fatalf("%+v", reps)
 	}
 	r.hy.first = nil
-	// HyRoute not running.
+	// GRoute not running.
 	r.hy.dialErr = map[string]error{}
 	out.Reset()
 	NativeHost(context.Background(), []string{origin}, nativeIn(`{"id":3,"cmd":"browser-info","args":{}}`), &out, "", r.d)
-	if reps = nativeOut(t, &out); len(reps) != 1 || reps[0].Code != ctl.CodeNotRunning || reps[0].Error != "HyRoute не запущен" {
+	if reps = nativeOut(t, &out); len(reps) != 1 || reps[0].Code != ctl.CodeNotRunning || reps[0].Error != "GRoute не запущен" {
 		t.Fatalf("%+v", reps)
 	}
 	// A frame cut short or too big: a usage error, then the host exits.

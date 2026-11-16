@@ -422,6 +422,6 @@ var BrowserCommands = []string{"browser-info", "browser-add", "browser-remove"}
 // BrowserHost is the native messaging host's name, and BrowserOrigins the
 // extensions it serves: the unpacked extension HyRoute installs (its ID
 // comes from the "key" in browser/manifest.json).
-const BrowserHost = "com.hyroute.browser"
+const BrowserHost = "com.groute.browser"
 
-var BrowserOrigins = []string{"chrome-extension://eocfmelapohehdegpedblilfdfgledai/"}
+var BrowserOrigins = []string{"chrome-extension://lkcpjafokjfjegcdifknkijchmjdjgdc/"}

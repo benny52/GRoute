@@ -3,7 +3,7 @@
   // through zapret2's winws2 (internal/app/zapret.go). One switch, ticks and
   // «Подобрать автоматически»; the methods are for the full interface.
   import { onMount } from 'svelte';
-  import { api, errText, onEvent, type ZapretTarget, type ZapretView } from '../api';
+  import { api, errText, onEvent, type ZapretInput, type ZapretTarget, type ZapretView } from '../api';
   import { ui, hide } from '../state.svelte';
   import Icon from './Icon.svelte';
   import ZapretVPN from './ZapretVPN.svelte';
@@ -22,6 +22,8 @@
   let sitesText = $state('');
   let methods = $state<Partial<Record<ZapretTarget, string>>>({});
   let loaded = false;
+  const pendingDPI = 'groute.pendingDPI';
+  let checkedResume = false;
 
   const hints: Record<ZapretTarget, string> = {
     youtube: 'сайт, приложение и видео (googlevideo)',
@@ -32,6 +34,7 @@
   async function refresh() {
     try {
       const v = await api.ZapretInfo();
+      if (!v.targets) return; // the first snapshot may still be preparing the component
       view = v;
       if (!loaded) {
         loaded = true;
@@ -44,6 +47,20 @@
         const m: Partial<Record<ZapretTarget, string>> = { ...(v.settings.methods ?? {}) };
         for (const t of v.targets) m[t.target] ??= '';
         methods = m;
+      }
+      if (!checkedResume) {
+        checkedResume = true;
+        const pending = localStorage.getItem(pendingDPI);
+        localStorage.removeItem(pendingDPI);
+        if (v.resume && !v.needsAdmin && pending) {
+          const input = JSON.parse(pending) as ZapretInput;
+          targets = [...input.targets];
+          sitesText = input.sites.join('\n');
+          for (const t of v.targets) methods[t.target] = input.methods[t.target] ?? '';
+          await apply(input);
+        } else if (v.resume) {
+          saved = 'GRoute запущен с правами администратора. Выберите сервисы и включите обход DPI.';
+        }
       }
     } catch (e) {
       error = errText(e);
@@ -92,19 +109,36 @@
     targets = on ? [...targets.filter((x) => x !== t), t] : targets.filter((x) => x !== t);
   }
 
-  async function save() {
+  async function apply(input: ZapretInput) {
     error = saved = '';
     saving = true;
     try {
-      const m = Object.fromEntries(Object.entries(methods).filter(([, v]) => v));
-      await api.SaveZapret({ enabled, targets, sites, methods: m });
+      if (input.enabled && view?.needsAdmin) {
+        localStorage.setItem(pendingDPI, JSON.stringify(input));
+        try {
+          await api.RestartForDPI();
+        } catch (e) {
+          // A successful restart can close the bridge before its reply arrives.
+          // Only the new process started for DPI consumes this request.
+          if (!errText(e).includes('нет связи с HyRoute')) localStorage.removeItem(pendingDPI);
+          throw e;
+        }
+        return;
+      }
+      await api.SaveZapret(input);
       loaded = false;
       await refresh();
-      saved = enabled ? 'Сохранено, обход работает с новыми настройками' : 'Обход выключен';
+      saved = input.enabled ? 'Настройки обхода DPI сохранены' : 'Обход выключен';
     } catch (e) {
       error = errText(e);
+    } finally {
+      saving = false;
     }
-    saving = false;
+  }
+
+  function save(on: boolean) {
+    const m = Object.fromEntries(Object.entries(methods).filter(([, v]) => v));
+    return apply({ enabled: on, targets, sites, methods: m });
   }
 
   // viaVPN sends one service through the VPN (or back to the bypass) and
@@ -210,6 +244,8 @@
   }
 
   const running = $derived(view?.status.state === 'running');
+  const savedOn = $derived(!!view?.settings.enabled);
+  const retry = $derived(!!view?.prepareError || view?.status.state === 'error');
   const pickNow = $derived(view?.pick?.running ? view.pick : null);
   function resultText(t: ZapretTarget): string {
     const m = view?.pick?.results[t];
@@ -347,20 +383,25 @@
   {/snippet}
 
   {#if view && !view.available}
-    <div class="note info">{ui.portable ? 'В этой версии GRoute Portable компонент обхода DPI (zapret2) не входит в поставку. Перенос программы в Program Files или запуск от имени администратора его не включает.' : 'Обход DPI (zapret2) пока работает только на Windows.'}</div>
+    <div class="note info">Обход DPI (zapret2) пока работает только на Windows.</div>
     {@render telegramCard(view)}
   {:else if view}
     {#if view.loadError}<div class="note error">{view.loadError}</div>{/if}
 
     <section class="card">
-      <label class="switch">
-        <input type="checkbox" bind:checked={enabled} />
-        <b>Обходить блокировки без VPN</b>
-      </label>
+      {#if ui.portable}
+        <h2>Сервисы для обхода DPI</h2>
+        <p class="muted small">При первом включении GRoute скачает zapret2 и проверит контрольные суммы файлов.{view.needsAdmin ? ' Windows запросит права администратора.' : ''}</p>
+      {:else}
+        <label class="switch">
+          <input type="checkbox" bind:checked={enabled} />
+          <b>Обходить блокировки без VPN</b>
+        </label>
+      {/if}
       <div class="tiles">
         {#each view.targets as t (t.target)}
           <label class="tile" class:on={targets.includes(t.target)}>
-            <input type="checkbox" checked={targets.includes(t.target)} disabled={!enabled} onchange={(e) => toggle(t.target, e.currentTarget.checked)} />
+            <input type="checkbox" checked={targets.includes(t.target)} disabled={saving || (!ui.portable && !enabled)} onchange={(e) => toggle(t.target, e.currentTarget.checked)} />
             <span class="grow">
               <b>{t.name}</b>
               <span class="muted small">{hints[t.target]}</span>
@@ -384,13 +425,13 @@
           </label>
         {/each}
       </div>
-      {#if enabled && targets.includes('sites')}
+      {#if (ui.portable || enabled) && targets.includes('sites')}
         <label class="lbl" for="zp-sites">Свои сайты — по одному на строку: имя (поддомены включаются сами), IP или подсеть</label>
         <textarea id="zp-sites" rows="4" class:masked={ui.privacy} bind:value={sitesText} placeholder={'example.com\n203.0.113.7\n198.51.100.0/24'}></textarea>
         <span class="muted small">Подбор проверяет только имена, адреса получают те же методы.</span>
       {/if}
 
-      {#if ui.expert && enabled && targets.length}
+      {#if ui.expert && (ui.portable || enabled) && targets.length}
         <div class="lbl">Метод для каждого сервиса</div>
         <div class="methods">
           {#each view.targets.filter((t) => targets.includes(t.target)) as t (t.target)}
@@ -413,7 +454,14 @@
       {/if}
 
       <div class="row">
-        <button class="primary" onclick={save} disabled={saving || !dirty || (enabled && targets.length === 0)}>{saving ? 'Сохраняю…' : 'Сохранить'}</button>
+        {#if ui.portable}
+          <button class="primary" onclick={() => save(true)} disabled={saving || !targets.length || (savedOn && !view.needsAdmin && !dirty && !retry)}>
+            {saving ? 'Подготовка…' : !savedOn || view.needsAdmin ? 'Включить обход DPI' : retry ? 'Повторить запуск' : 'Сохранить изменения'}
+          </button>
+          {#if savedOn}<button onclick={() => save(false)} disabled={saving}>Выключить обход DPI</button>{/if}
+        {:else}
+          <button class="primary" onclick={() => save(enabled)} disabled={saving || !dirty || (enabled && targets.length === 0)}>{saving ? 'Сохраняю…' : 'Сохранить'}</button>
+        {/if}
         {#if view.busy}<span class="muted small">{view.busy}</span>{/if}
       </div>
       {#if error}<div class="note error">{hide(error)}</div>{/if}
@@ -423,10 +471,12 @@
         <div class="state">
           {#if view.prepareError}
             <div class="note error small">{view.prepareError}</div>
+          {:else if view.needsAdmin}
+            <span class="muted">Для запуска обхода нажмите «Включить обход DPI» и подтвердите запрос Windows.</span>
           {:else if running}
             <span class="dot ok"></span> zapret2 работает
           {:else if view.status.state === 'error'}
-            <div class="note error small">{view.status.error}. GRoute запустит его снова.</div>
+            <div class="note error small">{view.status.error}</div>
           {:else if !view.busy}
             <span class="dot"></span>
             <span class="muted">zapret2 не запущен: на этой сети обход не нужен или ещё не настроен</span>
@@ -435,7 +485,7 @@
       {/if}
     </section>
 
-    {#if view.settings.enabled && (view.settings.targets ?? []).length}
+    {#if view.settings.enabled && !view.needsAdmin && (view.settings.targets ?? []).length}
       <section class="card">
         <h2>Подобрать метод</h2>
         <p class="muted small">
@@ -517,8 +567,7 @@
         {#if ui.expert}<button class="link" onclick={() => go('rules')}>Правила</button>{/if}
       </p>
       <p class="small muted">
-        zapret2 (bol-van/zapret2) скачивается с GitHub при первом включении и проверяется по контрольным суммам. Антивирусы иногда ругаются на winws2 и
-        WinDivert: это ложная тревога, они перехватывают сетевые пакеты, как и сам GRoute.
+        Источник компонента — выпуск bol-van/zapret2 на GitHub. Если антивирус заблокировал winws2 или WinDivert, причину можно посмотреть в журнале защиты.
       </p>
     </section>
 

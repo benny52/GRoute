@@ -235,6 +235,7 @@ func New(st *store.Store, start Starter, base session.Config, level slog.Leveler
 		recoverDelay: engineRecoverDelay,
 	}
 	c.Log = slog.New(logx.NewHandler(c.EngineLog, c.Redactor, level, nil))
+	c.zapretLife, c.zapretEnd = context.WithCancel(context.Background())
 	c.initGroups()
 	c.initStats()    // stats
 	c.initNetModes() // netmodes

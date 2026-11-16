@@ -1,13 +1,76 @@
 package browser
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/lardan099/hyroute/internal/ctl"
 )
+
+func TestGRouteBrowserBundle(t *testing.T) {
+	if ctl.BrowserHost != "com.groute.browser" || slices.Contains(ctl.BrowserOrigins, "chrome-extension://eocfmelapohehdegpedblilfdfgledai/") {
+		t.Fatal("extension or native host still uses HyRoute's identity")
+	}
+	raw, err := os.ReadFile("com.groute.browser.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want any
+	if err = json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(HostManifest("groute-browser-host.exe"), &want); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(got)
+	b, _ := json.Marshal(want)
+	if !bytes.Equal(a, b) {
+		t.Fatal("packaged native messaging manifest differs from host identity")
+	}
+	popup, err := files.ReadFile("extension/popup.js")
+	if err != nil || !bytes.Contains(popup, []byte("'"+ctl.BrowserHost+"'")) {
+		t.Fatal("popup does not use the packaged native host")
+	}
+}
+
+func TestWindowsExtensionSurvivesMove(t *testing.T) {
+	shipped := filepath.Join(t.TempDir(), WindowsHost)
+	root := filepath.Join(t.TempDir(), "LocalAppData", "GRoute", "Browser")
+	if err := os.WriteFile(shipped, []byte("first host"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallWindows(root, shipped); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(shipped); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, WindowsManifest))
+	if err != nil || !bytes.Equal(manifest, HostManifest(WindowsHost)) {
+		t.Fatalf("installed manifest: %v", err)
+	}
+	if DiskVersion(filepath.Join(root, "extension")) != Version() {
+		t.Fatal("browser lost the unpacked directory")
+	}
+	host := filepath.Join(root, WindowsHost)
+	if b, err := os.ReadFile(host); err != nil || string(b) != "first host" {
+		t.Fatalf("installed host: %v", err)
+	}
+	newHost := filepath.Join(t.TempDir(), WindowsHost)
+	if err := os.WriteFile(newHost, []byte("updated host"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallWindows(root, newHost); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(host); err != nil || string(b) != "updated host" {
+		t.Fatalf("reinstall from new location: %v", err)
+	}
+}
 
 func TestWrite(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), DirName)

@@ -1,7 +1,7 @@
-// HyRoute extension: remembers, per tab, the names the page loaded and the
+// GRoute extension: remembers, per tab, the names the page loaded and the
 // ones that failed, for the popup. Only in session storage (memory): gone
 // when the browser closes, never written to disk, never sent anywhere but
-// to HyRoute when the popup asks how those names go.
+// to GRoute when the popup asks how those names go.
 
 const MAX_HOSTS = 300;
 // Errors that are not the network's: the page or an ad blocker stopped

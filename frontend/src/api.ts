@@ -724,6 +724,7 @@ interface GUI {
   StartupNotice(): Promise<string>;
   System(): Promise<SystemInfo>;
   RestartAsAdmin(): Promise<void>;
+  RestartForDPI(): Promise<void>;
   // macos: "windows" or "macos".
   Platform(): Promise<string>;
   RemoveFirewallRule(): Promise<void>;
@@ -1999,6 +2000,8 @@ export interface ZapretDiag {
 
 export interface ZapretView {
   available: boolean;
+  needsAdmin?: boolean;
+  resume?: boolean;
   hasServer: boolean;
   settings: ZapretSettings;
   status: ZapretStatus;

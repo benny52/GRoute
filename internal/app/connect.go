@@ -151,6 +151,7 @@ func (c *Controller) Disconnect() {
 // lifeMu is released.
 func (c *Controller) Shutdown() {
 	c.beginShutdown() // cli: no connect after this
+	c.stopZapret()
 	c.disconnect(false)
 	c.dnsExitFlush()  // dns: the process ends next, a waiting flush runs now
 	c.statsShutdown() // stats
