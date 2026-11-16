@@ -66,7 +66,13 @@ try {
     try {
         foreach ($name in $files.Keys) {
             $entry = $archive.CreateEntry($name, 'Optimal')
-            $entry.LastWriteTime = [DateTimeOffset]::new(2000, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+            # Explorer can reuse a cached file icon when a replacement at
+            # the same path has the same modification time as its predecessor.
+            $entry.LastWriteTime = if ($name -eq 'GRoute.exe') {
+                [DateTimeOffset](Get-Item -LiteralPath $exe).LastWriteTime
+            } else {
+                [DateTimeOffset]::new(2000, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+            }
             $stream = $entry.Open()
             try {
                 $inputFile = [IO.File]::OpenRead($files[$name])
