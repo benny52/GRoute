@@ -44,8 +44,7 @@ try {
     $counter = Join-Path $root 'build/portable-build.txt'
     $buildNumber = 1 + [int]::Parse([IO.File]::ReadAllText($counter).Trim())
     if ($buildNumber -lt 1 -or $buildNumber -gt 65535) { throw 'Build number exceeds the Windows version field' }
-    $version = '0.1.0'
-    $fileVersion = "$version.$buildNumber"
+    $version = "0.1.$buildNumber"
     $go = 'go'
     if (Test-Path -LiteralPath (Join-Path $work 'go/bin/go.exe')) {
         $go = Join-Path $work 'go/bin/go.exe'
@@ -62,12 +61,12 @@ try {
     $awgHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $helper).Hash
     $pins['groute-awg.exe'] = $awgHash
     $files['groute-awg.exe'] = $helper
-    $ldflags = "-H windowsgui -X main.portableBuild=true -X main.version=v$version-dev -X main.build=$buildNumber -X main.updateRepo= -X main.bundledAWGSHA256=$awgHash"
+    $ldflags = "-H windowsgui -X main.portableBuild=true -X main.version=$version -X main.build=$buildNumber -X main.updateRepo= -X main.bundledAWGSHA256=$awgHash"
     & $go build -trimpath -buildvcs=false -tags desktop,production -ldflags $ldflags -o $exe ./cmd/hyroute
     if ($LASTEXITCODE -ne 0) { throw 'Failed to build GRoute.exe' }
     # Apply resources only to the staged executable. Existing .syso resources
     # used by the upstream builder may request elevation at startup.
-    & $go run "github.com/tc-hib/go-winres@$($deps.tools.goWinres)" patch --delete --no-backup --in build/windows/groute-portable.json --file-version $fileVersion --product-version $fileVersion $exe
+    & $go run "github.com/tc-hib/go-winres@$($deps.tools.goWinres)" patch --delete --no-backup --in build/windows/groute-portable.json --file-version $version --product-version $version $exe
     if ($LASTEXITCODE -ne 0) { throw 'Failed to embed GRoute resources' }
     $files['GRoute.exe'] = $exe
     $files['LICENSE.txt'] = Join-Path $root 'LICENSE'
@@ -108,7 +107,8 @@ try {
     } finally { $archive.Dispose() }
     New-Item -ItemType Directory -Path $dist -Force | Out-Null
     $target = Join-Path $dist $zipName
-    if ((Get-Item -LiteralPath $exe).VersionInfo.FileVersion -ne $fileVersion) { throw 'GRoute.exe has an unexpected version' }
+    $versionInfo = (Get-Item -LiteralPath $exe).VersionInfo
+    if ($versionInfo.FileVersion -ne $version -or $versionInfo.ProductVersion -ne $version) { throw 'GRoute.exe has an unexpected version' }
     # Reserve the verified number before exposing its archive. A failure to
     # replace a locked ZIP can skip a number, but cannot reuse one.
     $nextCounter = Join-Path $stage 'next-build.txt'

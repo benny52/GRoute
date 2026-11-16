@@ -493,7 +493,11 @@
         <span class="muted">Настройки и профили</span><span class="mono">{hideUserPath(info.dataDir)}</span>
         <span class="muted">Программа</span><span class="mono">{hideUserPath(info.programDir)}</span>
         <span class="muted">Ядро Hysteria</span><span class="mono">{info.hysteriaPath}</span>
-        <span class="muted">Сборка</span><span class="mono">{ui.portable && /^\d+$/.test(info.build) ? '№' + info.build + ' · ' + (updates?.current ?? '') : (updates?.current ?? '') + ' (' + info.build + ')'}</span>
+        {#if ui.portable}
+          <span class="muted">Версия</span><span class="mono">{updates?.current ?? '…'}</span>
+        {:else}
+          <span class="muted">Сборка</span><span class="mono">{updates?.current ?? ''} ({info.build})</span>
+        {/if}
       </div>
       {#if ui.mac}
       <p class="muted">Настройки, пароли профилей и ссылки подписок лежат в папке root: прочитать их могут только администраторы этого Mac.</p>
