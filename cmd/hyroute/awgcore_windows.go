@@ -47,7 +47,7 @@ func awgExecutable(src, runtimeDir, bundled string, approved func() string, prot
 		}
 		digest := hex.EncodeToString(hash.Sum(nil))
 		if !strings.EqualFold(digest, bundled) && !strings.EqualFold(digest, approved()) {
-			return "", fmt.Errorf("версия %s не подтверждена: проверьте SHA-256 выпуска (см. руководство GRoute)", name)
+			return "", fmt.Errorf("контрольная сумма комплектного %s не совпадает: распакуйте ZIP GRoute целиком", name)
 		}
 		dir := filepath.Join(runtimeDir, "awg-"+digest)
 		if err := protect(dir); err != nil {

@@ -16,7 +16,11 @@ import (
 	"github.com/lardan099/hyroute/internal/tunnels"
 )
 
-func version() string {
+// A GRoute helper can change without an upstream protocol-library release.
+// Stamp separate releases with -X main.helperVersion=vX.Y.Z.
+var helperVersion = "v1.0.0"
+
+func engineVersion() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, mod := range info.Deps {
 			if mod.Path == "github.com/amnezia-vpn/amneziawg-go/v3" {
@@ -29,7 +33,7 @@ func version() string {
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Printf("groute-awg %s ipc=%d\n", version(), awgcore.Protocol)
+		fmt.Printf("groute-awg %s engine=%s ipc=%d\n", helperVersion, engineVersion(), awgcore.Protocol)
 		return
 	}
 	if len(os.Args) != 2 || os.Args[1] != "--serve" {

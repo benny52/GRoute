@@ -16,9 +16,11 @@ import (
 
 // Updater wires the release checks into the controller.
 type Updater struct {
-	// CheckOnly is used by portable builds with pinned runtime files.
-	// They can compare core versions, but cannot replace the running package.
-	CheckOnly bool
+	// CoresOnly disables client updates while allowing independent core releases.
+	CoresOnly bool
+	// RequiresAdmin is set by the ordinary Windows portable process. The
+	// elevated instance writes the common, administrator-owned core store.
+	RequiresAdmin bool
 	// Repo is HyRoute's GitHub repository ("owner/name"); empty disables
 	// self-update.
 	Repo string
@@ -26,17 +28,17 @@ type Updater struct {
 	Dir  string
 	Core *core.Manager
 	// Xray is the core of VLESS servers (nil = no Xray updates).
-	Xray   *core.Manager
-	Client *release.Client
+	Xray             *core.Manager
+	AWG              *core.Manager
+	AWGEngineVersion func(string) (string, error)
+	Client           *release.Client
 
-	mu    sync.Mutex
-	state UpdatesState
-	app   *update.Available
-	core  *core.Update
-	// coreSess is the session that ran when the core changed: its
-	// profiles keep the old core until a reconnect replaces it.
-	coreSess Session
-	xraySess Session // the same for Xray
+	mu                                     sync.Mutex
+	state                                  UpdatesState
+	hysteria                               CoreState // projected onto the legacy Core* fields for the UI
+	engineMu                               sync.Mutex
+	enginePath, engineBuild, engineVersion string
+	engineRetry                            time.Time
 }
 
 // UpdatesState is shown in the UI.
@@ -61,19 +63,27 @@ type UpdatesState struct {
 	CoreNeedsReconn bool         `json:"coreNeedsReconnect"`
 
 	// Xray, the core of VLESS servers: the same as the Core fields.
-	Xray XrayState `json:"xray"`
+	Xray CoreState `json:"xray"`
+	AWG  CoreState `json:"awg"`
 
 	staging string
 }
 
-// XrayState is the Xray core in UpdatesState.
-type XrayState struct {
-	Info           core.Info    `json:"info"`
-	Update         *core.Update `json:"update"`
-	Error          string       `json:"error"`
-	Busy           bool         `json:"busy"`
-	Progress       float64      `json:"progress"`
-	NeedsReconnect bool         `json:"needsReconnect"`
+// CoreState is the release check and installation state for one engine.
+type CoreState struct {
+	EngineVersion   string `json:"engineVersion,omitempty"`
+	UpstreamVersion string `json:"upstreamVersion,omitempty"`
+	UpstreamError   string `json:"upstreamError,omitempty"`
+	UpstreamNewer   bool   `json:"upstreamNewer,omitempty"`
+	revision        uint64
+	Unpublished     bool `json:"unpublished,omitempty"`
+	session         Session
+	Info            core.Info    `json:"info"`
+	Update          *core.Update `json:"update"`
+	Error           string       `json:"error"`
+	Busy            bool         `json:"busy"`
+	Progress        float64      `json:"progress"`
+	NeedsReconnect  bool         `json:"needsReconnect"`
 }
 
 // IsDev reports builds that are not a release (no "vX.Y.Z" tag).
@@ -87,41 +97,32 @@ func (c *Controller) Updates() UpdatesState {
 	if u == nil {
 		return UpdatesState{Current: c.Version, Dev: IsDev(c.Version)}
 	}
+	c.mu.Lock()
+	session := c.sess
 	u.mu.Lock()
+	for _, cs := range []*CoreState{&u.hysteria, &u.state.Xray, &u.state.AWG} {
+		if cs.session != session {
+			cs.session = nil
+		}
+		cs.NeedsReconnect = cs.session != nil
+	}
 	st := u.state
-	coreSess, xraySess := u.coreSess, u.xraySess
+	hy := u.hysteria
 	u.mu.Unlock()
-	if st.Xray.NeedsReconnect {
-		c.mu.Lock()
-		st.Xray.NeedsReconnect = c.sess != nil && c.sess == xraySess
-		c.mu.Unlock()
-		if !st.Xray.NeedsReconnect {
-			u.set(func(s *UpdatesState) {
-				if u.xraySess == xraySess {
-					s.Xray.NeedsReconnect, u.xraySess = false, nil
-				}
-			})
-		}
-	}
-	if st.CoreNeedsReconn {
-		// After a reconnect or a disconnect no profile runs the old core.
-		c.mu.Lock()
-		st.CoreNeedsReconn = c.sess != nil && c.sess == coreSess
-		c.mu.Unlock()
-		if !st.CoreNeedsReconn {
-			u.set(func(s *UpdatesState) {
-				if u.coreSess == coreSess {
-					s.CoreNeedsReconn, u.coreSess = false, nil
-				}
-			})
-		}
-	}
+	c.mu.Unlock()
 	st.Current, st.Dev, st.Repo = c.Version, IsDev(c.Version), u.Repo
+	st.CoreUpdate, st.CoreError, st.CoreBusy = hy.Update, hy.Error, hy.Busy
+	st.CoreProgress, st.CoreNeedsReconn = hy.Progress, hy.NeedsReconnect
 	if u.Core != nil {
 		st.Core = u.Core.Info()
 	}
 	if u.Xray != nil {
 		st.Xray.Info = u.Xray.Info()
+	}
+	if u.AWG != nil {
+		st.AWG.Info = u.AWG.Info()
+		st.AWG.EngineVersion = u.awgLibraryVersion(st.AWG.Info)
+		st.AWG.UpstreamNewer = st.AWG.EngineVersion != "" && release.Compare(st.AWG.UpstreamVersion, st.AWG.EngineVersion) > 0
 	}
 	if st.App != nil {
 		st.AppSkipped = c.Prefs().SkipVersion == st.App.Version
@@ -135,25 +136,52 @@ func (u *Updater) set(f func(*UpdatesState)) {
 	u.mu.Unlock()
 }
 
-// CheckUpdates looks for a newer HyRoute, Hysteria core and Xray core.
+// CheckUpdates queries each configured engine independently.
 func (c *Controller) CheckUpdates() UpdatesState {
 	u := c.Updater
 	if u == nil {
 		return c.Updates()
 	}
-	u.set(func(s *UpdatesState) { s.Checking = true })
+	u.mu.Lock()
+	if u.state.Checking {
+		u.mu.Unlock()
+		return c.Updates()
+	}
+	u.state.Checking = true
+	u.mu.Unlock()
 	c.changed()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	var wg sync.WaitGroup
-	wg.Add(3)
+	if u.AWG != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			version, err := u.Client.LatestStableTag(ctx, "amnezia-vpn/amneziawg-go", 3)
+			u.set(func(s *UpdatesState) {
+				s.AWG.UpstreamVersion, s.AWG.UpstreamError = version, ""
+				if err != nil {
+					s.AWG.UpstreamError = err.Error()
+				}
+			})
+		}()
+	}
+	for _, item := range []struct {
+		manager *core.Manager
+		state   *CoreState
+	}{{u.Core, &u.hysteria}, {u.Xray, &u.state.Xray}, {u.AWG, &u.state.AWG}} {
+		if item.manager != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				u.checkCore(ctx, item.manager, item.state)
+			}()
+		}
+	}
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c.checkXray(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		if u.CheckOnly {
+		if u.CoresOnly {
 			return
 		}
 		if u.Repo == "" {
@@ -187,27 +215,6 @@ func (c *Controller) CheckUpdates() UpdatesState {
 			c.Log.Info("HyRoute update available", "current", c.Version, "new", a.Version)
 		}
 	}()
-	go func() {
-		defer wg.Done()
-		if u.Core == nil {
-			return
-		}
-		cu, ok, err := u.Core.Check(ctx)
-		u.set(func(s *UpdatesState) {
-			s.CoreError = ""
-			if err != nil {
-				s.CoreError = err.Error()
-			}
-			if ok {
-				s.CoreUpdate = &cu
-			} else if err == nil {
-				s.CoreUpdate = nil
-			}
-		})
-		if ok {
-			c.Log.Info("Hysteria core update available", "new", cu.Version)
-		}
-	}()
 	wg.Wait()
 	u.set(func(s *UpdatesState) { s.Checking, s.Checked = false, time.Now() })
 	c.changed()
@@ -219,69 +226,6 @@ func (c *Controller) channel() string {
 		return ch
 	}
 	return "stable"
-}
-
-// InstallCore downloads and activates the offered Hysteria core. Running
-// profiles keep their process; new starts use the new core.
-func (c *Controller) InstallCore() error {
-	u := c.Updater
-	if u == nil || u.CheckOnly || u.Core == nil {
-		return errors.New("обновление ядра недоступно")
-	}
-	u.mu.Lock()
-	cu := u.state.CoreUpdate
-	if cu == nil || u.state.CoreBusy {
-		u.mu.Unlock()
-		return errors.New("нет доступного обновления ядра")
-	}
-	u.state.CoreBusy, u.state.CoreProgress, u.state.CoreError = true, 0, ""
-	u.mu.Unlock()
-	c.changed()
-	// No overall limit: a slow line takes long, and the download gives up
-	// only when no data comes for a while (release.Client.Download).
-	err := u.Core.Install(context.Background(), *cu, func(done, total int64) {
-		if total > 0 {
-			u.set(func(s *UpdatesState) { s.CoreProgress = float64(done) / float64(total) })
-		}
-	})
-	c.mu.Lock()
-	sess := c.sess
-	c.mu.Unlock()
-	u.set(func(s *UpdatesState) {
-		s.CoreBusy = false
-		if err != nil {
-			s.CoreError = err.Error()
-			return
-		}
-		s.CoreUpdate, s.CoreNeedsReconn, u.coreSess = nil, sess != nil, sess
-	})
-	if err != nil {
-		c.Log.Error("Hysteria core update failed, the current core stays", "err", err)
-	} else {
-		c.Log.Info("Hysteria core updated: profiles use it from their next start", "version", cu.Version)
-		c.refreshKillSwitchApps()
-	}
-	c.changed()
-	return err
-}
-
-// RollbackCore returns to the previous Hysteria core.
-func (c *Controller) RollbackCore() error {
-	u := c.Updater
-	if u == nil || u.CheckOnly || u.Core == nil {
-		return errors.New("обновление ядра недоступно")
-	}
-	if err := u.Core.Rollback(); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	sess := c.sess
-	c.mu.Unlock()
-	u.set(func(s *UpdatesState) { s.CoreNeedsReconn, u.coreSess = sess != nil, sess })
-	c.Log.Info("Hysteria core rolled back", "version", u.Core.Info().Version)
-	c.refreshKillSwitchApps()
-	c.changed()
-	return nil
 }
 
 // refreshKillSwitchApps: the block lets HyRoute's programs through, and a
@@ -308,7 +252,7 @@ func (c *Controller) refreshKillSwitchApps() {
 // DownloadAppUpdate downloads and verifies the offered HyRoute package.
 func (c *Controller) DownloadAppUpdate() error {
 	u := c.Updater
-	if u == nil || u.CheckOnly {
+	if u == nil || u.CoresOnly {
 		return errors.New("обновление недоступно")
 	}
 	u.mu.Lock()
@@ -355,7 +299,7 @@ func (c *Controller) DownloadAppUpdate() error {
 // ReadyUpdate returns the verified staging directory and its version.
 func (c *Controller) ReadyUpdate() (dir, version string, err error) {
 	u := c.Updater
-	if u == nil || u.CheckOnly {
+	if u == nil || u.CoresOnly {
 		return "", "", errors.New("обновление недоступно")
 	}
 	u.mu.Lock()

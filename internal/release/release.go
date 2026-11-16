@@ -113,20 +113,19 @@ func (c *Client) get(ctx context.Context, url string) (*http.Response, error) {
 
 // Releases lists the newest releases of owner/repo (drafts skipped).
 func (c *Client) Releases(ctx context.Context, repo string) ([]Release, error) {
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-	api := c.API
-	if api == "" {
-		api = "https://api.github.com"
-	}
-	resp, err := c.get(ctx, api+"/repos/"+repo+"/releases?per_page=30")
+	return c.listReleases(ctx, repo, false)
+}
+
+// AllReleases also reads older pages, for repositories which publish
+// multiple independently versioned products under different tags.
+func (c *Client) AllReleases(ctx context.Context, repo string) ([]Release, error) {
+	return c.listReleases(ctx, repo, true)
+}
+
+func (c *Client) listReleases(ctx context.Context, repo string, all bool) ([]Release, error) {
+	list, err := listPages[Release](ctx, c, repo, "releases", 30, all)
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-	var list []Release
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&list); err != nil {
-		return nil, fmt.Errorf("ответ GitHub не разобран: %w", err)
 	}
 	out := list[:0]
 	for _, r := range list {
@@ -137,19 +136,77 @@ func (c *Client) Releases(ctx context.Context, repo string) ([]Release, error) {
 	return out, nil
 }
 
+// LatestStableTag finds the latest stable version of a module major line.
+// Some Go modules publish tags without creating GitHub release objects.
+func (c *Client) LatestStableTag(ctx context.Context, repo string, major int) (string, error) {
+	type tag struct {
+		Name string `json:"name"`
+	}
+	tags, err := listPages[tag](ctx, c, repo, "tags", 100, true)
+	if err != nil {
+		return "", err
+	}
+	var latest string
+	for _, t := range tags {
+		v, err := Parse(t.Name)
+		if err == nil && fmt.Sprintf("v%d.%d.%d", v.Major, v.Minor, v.Patch) == t.Name && v.Major == major && (latest == "" || Compare(t.Name, latest) > 0) {
+			latest = t.Name
+		}
+	}
+	if latest == "" {
+		return "", fmt.Errorf("стабильных тегов v%d в %s не найдено", major, repo)
+	}
+	return latest, nil
+}
+
+func listPages[T any](ctx context.Context, c *Client, repo, resource string, perPage int, all bool) ([]T, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	api := c.API
+	if api == "" {
+		api = "https://api.github.com"
+	}
+	var out []T
+	for page := 1; ; page++ {
+		url := api + "/repos/" + repo + "/" + resource + "?per_page=" + strconv.Itoa(perPage)
+		if page > 1 {
+			url += "&page=" + strconv.Itoa(page)
+		}
+		resp, err := c.get(ctx, url)
+		if err != nil {
+			return nil, err
+		}
+		var list []T
+		err = json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&list)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("ответ GitHub не разобран: %w", err)
+		}
+		out = append(out, list...)
+		if !all || !strings.Contains(resp.Header.Get("Link"), `rel="next"`) {
+			return out, nil
+		}
+	}
+}
+
 // Latest picks the newest release whose tag passes accept (by version, not
 // by date). Prereleases are skipped unless pre is set.
 func Latest(list []Release, pre bool, accept func(tag string) bool) (Release, bool) {
+	return LatestByVersion(list, pre, accept, func(tag string) string { return tag })
+}
+
+// LatestByVersion compares product versions while preserving the source release tag.
+func LatestByVersion(list []Release, pre bool, accept func(tag string) bool, version func(tag string) string) (Release, bool) {
 	var best Release
 	found := false
 	for _, r := range list {
 		if (r.Prerelease && !pre) || (accept != nil && !accept(r.Tag)) {
 			continue
 		}
-		if _, err := Parse(r.Tag); err != nil {
+		if _, err := Parse(version(r.Tag)); err != nil {
 			continue
 		}
-		if !found || Compare(r.Tag, best.Tag) > 0 {
+		if !found || Compare(version(r.Tag), version(best.Tag)) > 0 {
 			best, found = r, true
 		}
 	}

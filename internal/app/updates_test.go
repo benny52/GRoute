@@ -41,10 +41,36 @@ func coreUpdated(t *testing.T) *core.Manager {
 	}}
 }
 
+func TestAWGHelperUpdateAvailableWithUpstreamOffline(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/amnezia-vpn/amneziawg-go/tags" {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		json.NewEncoder(w).Encode([]release.Release{{Tag: "awg-v3.0.0", Assets: []release.Asset{{
+			Name: "groute-awg.exe", URL: "https://example.invalid/groute-awg.exe", Digest: "sha256:" + strings.Repeat("1", 64),
+		}}}})
+	}))
+	defer api.Close()
+	a := coreUpdated(t)
+	a.Kind = core.AWG
+	a.Client = &release.Client{API: api.URL, HTTP: api.Client()}
+	c, _ := newCtl(t)
+	c.Updater = &Updater{AWG: a, Client: a.Client, CoresOnly: true}
+	st := c.CheckUpdates()
+	if st.AWG.Error != "" || st.AWG.UpstreamError == "" || st.AWG.Update == nil || st.AWG.Update.Version != "v3.0.0" {
+		t.Fatalf("upstream outage suppressed helper: %+v", st.AWG)
+	}
+}
+
 func TestPortableCoreVersionCheck(t *testing.T) {
-	hits := make(chan string, 3)
+	hits := make(chan string, 4)
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits <- r.URL.Path
+		if strings.HasSuffix(r.URL.Path, "/tags") {
+			json.NewEncoder(w).Encode([]map[string]string{{"name": "v4.0.0"}, {"name": "v3.99.9-beta.1"}, {"name": "v3.1.1"}, {"name": "v3.10.0"}})
+			return
+		}
 		tag := "v2.1.0"
 		if strings.Contains(r.URL.Path, "hysteria") {
 			tag = "app/" + tag
@@ -52,26 +78,48 @@ func TestPortableCoreVersionCheck(t *testing.T) {
 		_ = json.NewEncoder(w).Encode([]map[string]string{{"tag_name": tag}})
 	}))
 	defer api.Close()
-	h, x := coreUpdated(t), coreUpdated(t)
-	x.Kind = core.Xray
+	h, x, a := coreUpdated(t), coreUpdated(t), coreUpdated(t)
+	x.Kind, a.Kind = core.Xray, core.AWG
 	cl := &release.Client{API: api.URL, HTTP: api.Client()}
-	h.Client, x.Client = cl, cl
+	h.Client, x.Client, a.Client = cl, cl, cl
 	c, _ := newCtl(t)
-	c.Updater = &Updater{Core: h, Xray: x, Repo: "example/client", Client: cl, CheckOnly: true}
+	c.Updater = &Updater{Core: h, Xray: x, AWG: a, Repo: "example/client", Client: cl, CoresOnly: true}
+	probes := 0
+	c.Updater.AWGEngineVersion = func(string) (string, error) {
+		probes++
+		return "v3.1.1", nil
+	}
 	st := c.CheckUpdates()
-	if st.AppError != "" || st.CoreError != "" || st.Xray.Error != "" || st.Checked.IsZero() {
+	if st.AppError != "" || st.CoreError != "" || st.Xray.Error != "" || !st.AWG.Unpublished || st.AWG.Error != "" || st.Checked.IsZero() {
 		t.Fatalf("core release check: %+v", st)
+	}
+	if !st.AWG.UpstreamNewer || st.AWG.UpstreamVersion != "v3.10.0" || st.AWG.EngineVersion != "v3.1.1" || st.AWG.Update != nil {
+		t.Fatalf("upstream library update was confused with an installable helper: %+v", st.AWG)
+	}
+	_ = c.Updates()
+	if probes != 1 {
+		t.Fatalf("polled helper version %d times", probes)
 	}
 	close(hits)
 	checked := map[string]int{}
 	for path := range hits {
 		checked[path]++
 	}
-	if len(checked) != 2 || checked["/repos/apernet/hysteria/releases"] != 1 || checked["/repos/XTLS/Xray-core/releases"] != 1 {
+	if len(checked) != 4 || checked["/repos/apernet/hysteria/releases"] != 1 || checked["/repos/XTLS/Xray-core/releases"] != 1 || checked["/repos/benny52/GRoute/releases"] != 1 || checked["/repos/amnezia-vpn/amneziawg-go/tags"] != 1 {
 		t.Fatalf("unexpected requests: %v", checked)
 	}
-	if c.InstallCore() == nil || c.InstallXray() == nil || c.RollbackCore() == nil || c.RollbackXray() == nil || c.DownloadAppUpdate() == nil {
-		t.Fatal("portable check allowed an installation or rollback")
+	if c.DownloadAppUpdate() == nil {
+		t.Fatal("portable allowed a client update")
+	}
+	c.Updater.RequiresAdmin = true
+	for _, change := range []func() error{c.RollbackCore, c.RollbackXray, c.RollbackAWG, c.InstallCore, c.InstallXray, c.InstallAWG} {
+		if err := change(); err == nil || !strings.Contains(err.Error(), "администратора") {
+			t.Fatalf("expected elevation notice, got %v", err)
+		}
+	}
+	c.Updater.RequiresAdmin = false
+	if err := c.RollbackCore(); err != nil {
+		t.Fatalf("portable rollback: %v", err)
 	}
 }
 

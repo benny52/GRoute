@@ -242,6 +242,12 @@
   let xrayInstalling = $state(false);
   let xrayLater = $state(false);
   const hasVLESS = $derived(ui.profiles.some((p) => p.protocol === 'vless'));
+  const availableUpdates = $derived([
+    !ui.portable && updates?.app,
+    !updates?.coreError && updates?.coreUpdate,
+    !updates?.xray?.error && updates?.xray?.update,
+    !updates?.awg?.error && updates?.awg?.update,
+  ].filter(Boolean).length);
   async function installXray() {
     xrayInstalling = true;
     try {
@@ -274,7 +280,7 @@
           <Icon name={p.icon} />
           <span>{p.label}</span>
           {#if p.id === 'rules' && st?.warnings?.length}<span class="count warn">{st.warnings.length}</span>{/if}
-          {#if p.id === 'settings' && (updates?.app || updates?.coreUpdate || (updates?.xray?.update && hasVLESS))}<span class="count">1</span>{/if}
+          {#if p.id === 'settings' && availableUpdates}<span class="count">{availableUpdates}</span>{/if}
           {#if p.id === 'subs' && subAlerts().length}<span class="count warn" title="Подписки, которые скоро закончатся или закончились">{subAlerts().length}</span>{/if}
         </button>
       {/each}

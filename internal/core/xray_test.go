@@ -63,17 +63,17 @@ func TestXrayCheckInstall(t *testing.T) {
 	os.WriteFile(bundled, []byte("v26.10.31"), 0o755)
 	tested := ""
 	m := &Manager{Kind: Xray, Dir: filepath.Join(dir, "xray"), Bundled: bundled, Client: &release.Client{API: srv.URL}, Version: fakeVersion,
-		Test: func(p string) error { tested = p; return nil }}
+		Test: func(p string) error { var err error; tested, err = fakeVersion(p); return err }}
 
 	u, ok, err := m.Check(context.Background())
 	if err != nil || !ok || u.Version != "v26.11.20" || len(u.sha256) != 1 || u.sha256[0] != hexSum {
 		t.Fatalf("%+v %v %v", u, ok, err)
 	}
-	if err := m.Install(context.Background(), u, nil); err != nil {
+	if err := installTestRelease(t, m, u); err != nil {
 		t.Fatal(err)
 	}
 	want := filepath.Join(m.Dir, "v26.11.20", "xray.exe")
-	if m.Path() != want || tested != want || m.Info().Version != "v26.11.20" {
+	if m.Path() != want || tested != "v26.11.20" || m.Info().Version != "v26.11.20" {
 		t.Fatalf("%s %s %+v", m.Path(), tested, m.Info())
 	}
 	// Only xray.exe came out of the archive; the zip itself is gone.
@@ -104,7 +104,7 @@ func TestXrayTestRefuses(t *testing.T) {
 	m := &Manager{Kind: Xray, Dir: filepath.Join(dir, "xray"), Bundled: bundled, Client: &release.Client{API: srv.URL}, Version: fakeVersion,
 		Test: func(string) error { return errors.New("«NL»: unknown field") }}
 	u := Update{Version: "v26.11.20", url: srv.URL + "/zip", sha256: []string{hex.EncodeToString(sum[:])}}
-	err := m.Install(context.Background(), u, nil)
+	err := installTestRelease(t, m, u)
 	if err == nil || !strings.Contains(err.Error(), "не принимает настройки ваших серверов") || !strings.Contains(err.Error(), "«NL»") {
 		t.Fatalf("%v", err)
 	}
@@ -117,7 +117,7 @@ func TestXrayTestRefuses(t *testing.T) {
 	// A zip that is not the one of the sums is not opened at all.
 	u.sha256 = []string{strings.Repeat("0", 64)}
 	m.Test = nil
-	if err := m.Install(context.Background(), u, nil); err == nil {
+	if err := installTestRelease(t, m, u); err == nil {
 		t.Fatal("a zip with another checksum installed")
 	}
 }

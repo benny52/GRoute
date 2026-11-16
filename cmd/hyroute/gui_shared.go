@@ -351,6 +351,10 @@ func (g *GUI) InstallXray() error { return g.ctl.InstallXray() }
 
 func (g *GUI) RollbackXray() error { return g.ctl.RollbackXray() }
 
+func (g *GUI) InstallAWG() error { return g.ctl.InstallAWG() }
+
+func (g *GUI) RollbackAWG() error { return g.ctl.RollbackAWG() }
+
 func (g *GUI) DownloadAppUpdate() error { return g.ctl.DownloadAppUpdate() }
 
 func (g *GUI) SkipAppVersion(v string) error { return g.ctl.SkipAppVersion(v) }

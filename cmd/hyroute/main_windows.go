@@ -26,6 +26,7 @@ import (
 	buildfiles "github.com/lardan099/hyroute/build"
 	"github.com/lardan099/hyroute/internal/app"
 	"github.com/lardan099/hyroute/internal/autostart"
+	"github.com/lardan099/hyroute/internal/awgcore"
 	"github.com/lardan099/hyroute/internal/core"
 	"github.com/lardan099/hyroute/internal/fwrule"
 	"github.com/lardan099/hyroute/internal/hysteria"
@@ -263,8 +264,14 @@ func main() {
 
 	ctl.Version = version
 	ctl.Device = deviceInfo
+	// The unelevated settings window must see the same installed core that
+	// the elevated VPN session will actually use after a UAC restart.
+	coreRoot := paths.components
+	if portable {
+		coreRoot = core.ProductDir("GRoute")
+	}
 	coreMgr := &core.Manager{
-		Dir:     filepath.Join(paths.components, "core"),
+		Dir:     filepath.Join(coreRoot, "core"),
 		Bundled: filepath.Join(runtimeDir, "hysteria.exe"),
 		Client:  &release.Client{UserAgent: "HyRoute/" + version},
 		Version: hysteria.ExeVersion,
@@ -274,7 +281,7 @@ func main() {
 	// take the configs of the user's servers first (TestXray).
 	xrayMgr := &core.Manager{
 		Kind:    core.Xray,
-		Dir:     filepath.Join(paths.components, "xray"),
+		Dir:     filepath.Join(coreRoot, "xray"),
 		Bundled: filepath.Join(runtimeDir, "xray.exe"),
 		Client:  coreMgr.Client,
 		Version: hysteria.XrayVersion,
@@ -320,7 +327,25 @@ func main() {
 		}
 	}
 	ctl.ProxyFirewall = func(tcp, udp []int) error { return fwrule.SetProxyPorts(exe, tcp, udp) }
-	ctl.Updater = &app.Updater{Core: coreMgr, Xray: xrayMgr, Client: coreMgr.Client, CheckOnly: portable}
+	ctl.Updater = &app.Updater{Core: coreMgr, Xray: xrayMgr, Client: coreMgr.Client, CoresOnly: portable, RequiresAdmin: portable && !elevated}
+	if portable {
+		// Only run --version on the verified helper. Failure to stage AWG
+		// must leave Xray and Hysteria usable.
+		bundled, stageErr := ctl.Base.AWG()
+		awgMgr := &core.Manager{
+			Kind: core.AWG, Dir: filepath.Join(coreRoot, "awg"),
+			Bundled: bundled, Version: awgcore.HelperVersion, Client: coreMgr.Client,
+		}
+		ctl.Updater.AWG = awgMgr
+		ctl.Updater.AWGEngineVersion = awgcore.EngineVersion
+		ctl.Base.AWG = func() (string, error) {
+			path := awgMgr.Path()
+			if path == "" {
+				return "", stageErr
+			}
+			return path, nil
+		}
+	}
 	if !portable {
 		ctl.LegacyProxyUDP = fwrule.LegacyProxyUDP
 		ctl.KeepV12ProxyUDP() // before the window can show a proxy

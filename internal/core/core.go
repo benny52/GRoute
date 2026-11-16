@@ -110,6 +110,22 @@ var Xray = Kind{
 
 var dgstSHA256 = regexp.MustCompile(`(?m)^SHA2-256=\s*([0-9a-fA-F]{64})\s*$`)
 
+var awgTag = regexp.MustCompile(`^awg-v[0-9]+\.[0-9]+\.[0-9]+$`)
+var ErrNoAWGRelease = errors.New("отдельные стабильные выпуски groute-awg.exe ещё не опубликованы")
+
+// AWG releases version the GRoute helper independently of the bundled VPN library.
+var AWG = Kind{
+	Name: "AmneziaWG", Repo: "benny52/GRoute", Exe: "groute-awg.exe", Asset: "groute-awg.exe",
+	Accept:  awgTag.MatchString,
+	Version: func(tag string) string { return strings.TrimPrefix(tag, "awg-") },
+	Sums: func(_ context.Context, _ *release.Client, _ release.Release, asset release.Asset) []string {
+		if digest := asset.SHA256(); digest != "" {
+			return []string{digest}
+		}
+		return nil
+	},
+}
+
 type entry struct {
 	Version string `json:"version"`
 	SHA256  string `json:"sha256"`
@@ -360,12 +376,19 @@ type Update struct {
 // in use. ok is false when the core is up to date.
 func (m *Manager) Check(ctx context.Context) (u Update, ok bool, err error) {
 	k := m.kind()
-	list, err := m.Client.Releases(ctx, k.Repo)
+	releases := m.Client.Releases
+	if k.Exe == AWG.Exe {
+		releases = m.Client.AllReleases
+	}
+	list, err := releases(ctx, k.Repo)
 	if err != nil {
 		return u, false, err
 	}
-	r, found := release.Latest(list, false, k.Accept)
+	r, found := release.LatestByVersion(list, false, k.Accept, k.Version)
 	if !found {
+		if k.Exe == AWG.Exe {
+			return u, false, ErrNoAWGRelease
+		}
 		return u, false, fmt.Errorf("стабильных релизов %s не найдено", k.Name)
 	}
 	cur := m.version(m.Path())
@@ -373,7 +396,7 @@ func (m *Manager) Check(ctx context.Context) (u Update, ok bool, err error) {
 		// Unknown is not older: the release may be the very core in use.
 		return u, false, fmt.Errorf("версия текущего ядра неизвестна (%s)", cur)
 	}
-	if release.Compare(r.Tag, cur) <= 0 {
+	if release.Compare(k.Version(r.Tag), cur) <= 0 {
 		return u, false, nil
 	}
 	a, has := r.Asset(k.Asset)
@@ -399,28 +422,39 @@ func (m *Manager) Install(ctx context.Context, u Update, progress func(done, tot
 	if err := ProtectDir(m.Dir); err != nil {
 		return fmt.Errorf("папка ядра: %w", err)
 	}
+	return m.installPrepared(ctx, u, progress)
+}
+
+// Download and probe a private candidate first. An interrupted retry,
+// including a re-install of a rolled-back version, leaves both working
+// versions intact.
+func (m *Manager) installPrepared(ctx context.Context, u Update, progress func(done, total int64)) error {
+	if !filepath.IsLocal(u.Version) || filepath.Base(u.Version) != u.Version {
+		return errors.New("некорректная версия ядра")
+	}
 	k := m.kind()
 	dir := filepath.Join(m.Dir, u.Version)
-	dst := filepath.Join(dir, k.Exe)
+	staging, err := os.MkdirTemp(m.Dir, ".install-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
+	dst := filepath.Join(staging, k.Exe)
 	var sum string
-	var err error
 	if k.Member == "" {
 		sum, err = m.Client.Download(ctx, u.url, dst, 200<<20, progress, u.sha256...)
 	} else {
-		sum, err = m.downloadMember(ctx, u, dir, dst, progress)
+		sum, err = m.downloadMember(ctx, u, staging, dst, progress)
 	}
 	if err != nil {
-		os.RemoveAll(dir)
 		return err
 	}
 	// A downloaded exe has no execute bit (macOS needs one).
 	if err := os.Chmod(dst, 0o755); err != nil {
-		os.RemoveAll(dir)
 		return err
 	}
 	got, err := m.Version(dst)
 	if err != nil || release.Compare(got, u.Version) != 0 {
-		os.RemoveAll(dir)
 		if err == nil {
 			err = fmt.Errorf("сообщает версию %s", got)
 		}
@@ -428,7 +462,6 @@ func (m *Manager) Install(ctx context.Context, u Update, progress func(done, tot
 	}
 	if m.Test != nil {
 		if err := m.Test(dst); err != nil {
-			os.RemoveAll(dir)
 			return fmt.Errorf("ядро %s %s не принимает настройки ваших серверов, обновление отменено: %v", k.Name, u.Version, err)
 		}
 	}
@@ -436,6 +469,20 @@ func (m *Manager) Install(ctx context.Context, u Update, progress func(done, tot
 	defer m.mu.Unlock()
 	m.load()
 	old := m.st
+	target := filepath.Join(dir, k.Exe)
+	if existing, _ := fileSHA256(target); existing != sum {
+		for _, e := range []*entry{old.Current, old.Previous} {
+			if e != nil && e.Version == u.Version && m.verified(e) {
+				return fmt.Errorf("выпуск %s уже сохранён с другой контрольной суммой", u.Version)
+			}
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		if err := os.Rename(dst, target); err != nil {
+			return err
+		}
+	}
 	m.st.Previous, m.st.Current = old.Current, &entry{Version: u.Version, SHA256: sum}
 	if err := m.save(); err != nil {
 		// core.json is unchanged: so is the state, and the new core's
@@ -480,7 +527,7 @@ func (m *Manager) prune() {
 	}
 	ents, _ := os.ReadDir(m.Dir)
 	for _, e := range ents {
-		if e.IsDir() && !keep[e.Name()] {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".install-") && !keep[e.Name()] {
 			os.RemoveAll(filepath.Join(m.Dir, e.Name()))
 		}
 	}

@@ -24,6 +24,19 @@ func fakeVersion(p string) (string, error) {
 	return strings.TrimSpace(string(b)), err
 }
 
+func installTestRelease(t *testing.T, m *Manager, u Update) error {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		// ACL preparation has separate Windows tests. Replacing the DACL of
+		// t.TempDir would make the rest of the fixture read-only for a user.
+		if err := os.MkdirAll(m.Dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		return m.installPrepared(context.Background(), u, nil)
+	}
+	return m.Install(context.Background(), u, nil)
+}
+
 func TestCheckInstallRollback(t *testing.T) {
 	bin := []byte("v2.99.0")
 	sum := sha256.Sum256(bin)
@@ -56,7 +69,7 @@ func TestCheckInstallRollback(t *testing.T) {
 	if err != nil || !ok || u.Version != "v2.99.0" || u.Notes != "changes" || len(u.sha256) != 2 {
 		t.Fatalf("%+v %v %v", u, ok, err)
 	}
-	if err := m.Install(context.Background(), u, nil); err != nil {
+	if err := installTestRelease(t, m, u); err != nil {
 		t.Fatal(err)
 	}
 	if in := m.Info(); !in.Updated || in.Version != "v2.99.0" || in.Previous != "встроенное v2.12.3" {
@@ -77,7 +90,7 @@ func TestCheckInstallRollback(t *testing.T) {
 	// A new core that does not start is not activated.
 	bin = []byte("garbage")
 	u.sha256 = []string{hex.EncodeToString(func() []byte { s := sha256.Sum256(bin); return s[:] }())}
-	if err := m.Install(context.Background(), u, nil); err == nil || !strings.Contains(err.Error(), "не запускается") {
+	if err := installTestRelease(t, m, u); err == nil || !strings.Contains(err.Error(), "не запускается") {
 		t.Fatalf("broken core installed: %v", err)
 	}
 	if m.Path() != bundled {
@@ -288,7 +301,7 @@ func TestSaveFailureKeepsState(t *testing.T) {
 	}
 	s := sha256.Sum256(bin)
 	u := Update{Version: "v2.12.6", url: srv.URL, sha256: []string{hex.EncodeToString(s[:])}}
-	if err := m.Install(context.Background(), u, nil); err == nil {
+	if err := installTestRelease(t, m, u); err == nil {
 		t.Fatal("install without a saved core.json")
 	}
 	if in := m.Info(); in.Version != "v2.12.5" || in.Previous != "v2.12.4" {

@@ -1,8 +1,6 @@
 package app
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -10,94 +8,6 @@ import (
 	"github.com/lardan099/hyroute/internal/hysteria"
 	"github.com/lardan099/hyroute/internal/vless"
 )
-
-// Xray core updates (core.Xray), as the Hysteria core's: a check with the
-// others, an install the user asks for, a rollback. Xray changes its
-// config without a new major version, so a new core must first take the
-// configs HyRoute writes (TestXray).
-
-func (c *Controller) checkXray(ctx context.Context) {
-	u := c.Updater
-	if u.Xray == nil {
-		return
-	}
-	xu, ok, err := u.Xray.Check(ctx)
-	u.set(func(s *UpdatesState) {
-		s.Xray.Error = ""
-		if err != nil {
-			s.Xray.Error = err.Error()
-		}
-		if ok {
-			s.Xray.Update = &xu
-		} else if err == nil {
-			s.Xray.Update = nil
-		}
-	})
-	if ok {
-		c.Log.Info("Xray core update available", "new", xu.Version)
-	}
-}
-
-// InstallXray downloads, tests and activates the offered Xray core.
-// Running VLESS servers keep their process; new starts use the new core.
-func (c *Controller) InstallXray() error {
-	u := c.Updater
-	if u == nil || u.CheckOnly || u.Xray == nil {
-		return errors.New("обновление Xray недоступно")
-	}
-	u.mu.Lock()
-	xu := u.state.Xray.Update
-	if xu == nil || u.state.Xray.Busy {
-		u.mu.Unlock()
-		return errors.New("нет доступного обновления Xray")
-	}
-	u.state.Xray.Busy, u.state.Xray.Progress, u.state.Xray.Error = true, 0, ""
-	u.mu.Unlock()
-	c.changed()
-	err := u.Xray.Install(context.Background(), *xu, func(done, total int64) {
-		if total > 0 {
-			u.set(func(s *UpdatesState) { s.Xray.Progress = float64(done) / float64(total) })
-		}
-	})
-	c.mu.Lock()
-	sess := c.sess
-	c.mu.Unlock()
-	u.set(func(s *UpdatesState) {
-		s.Xray.Busy = false
-		if err != nil {
-			s.Xray.Error = err.Error()
-			return
-		}
-		s.Xray.Update, s.Xray.NeedsReconnect, u.xraySess = nil, sess != nil, sess
-	})
-	if err != nil {
-		c.Log.Error("Xray core update failed, the current core stays", "err", err)
-	} else {
-		c.Log.Info("Xray core updated: VLESS servers use it from their next start", "version", xu.Version)
-		c.refreshKillSwitchApps()
-	}
-	c.changed()
-	return err
-}
-
-// RollbackXray returns to the previous Xray core.
-func (c *Controller) RollbackXray() error {
-	u := c.Updater
-	if u == nil || u.CheckOnly || u.Xray == nil {
-		return errors.New("обновление Xray недоступно")
-	}
-	if err := u.Xray.Rollback(); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	sess := c.sess
-	c.mu.Unlock()
-	u.set(func(s *UpdatesState) { s.Xray.NeedsReconnect, u.xraySess = sess != nil, sess })
-	c.Log.Info("Xray core rolled back", "version", u.Xray.Info().Version)
-	c.refreshKillSwitchApps()
-	c.changed()
-	return nil
-}
 
 // xraySamples are VLESS settings of the kinds HyRoute writes, checked
 // whether or not the user has such servers: a core that does not take

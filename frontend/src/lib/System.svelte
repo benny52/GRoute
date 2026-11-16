@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { api, errText, fmtDateTime, optionsOf, type SystemInfo, type Prefs, type Updates, type Settings, type AutostartInfo, type EngineOptions } from '../api';
+  import { api, errText, optionsOf, type SystemInfo, type Prefs, type Updates, type Settings, type AutostartInfo, type EngineOptions } from '../api';
   import { ui, hide, hideUserPath, setTheme, setAccent, settle, setExpert, resetHelp, type Theme, type Accent } from '../state.svelte';
   import Icon from './Icon.svelte';
   import GeoSettings from './GeoSettings.svelte';
   import Backup from './Backup.svelte';
+  import CoreUpdates from './CoreUpdates.svelte';
   import DNSSettings from './DNSSettings.svelte'; // dns
   import CLISettings from './CLISettings.svelte'; // cli
   import BrowserExtension from './BrowserExtension.svelte'; // browser
@@ -18,7 +19,7 @@
     onsetup,
   }: {
     updates: Updates | null;
-    onupdates: () => void;
+    onupdates: () => Promise<void>;
     oninstall: () => void;
     installCore: () => Promise<void>;
     coreInstalling: boolean;
@@ -252,94 +253,26 @@
   <section class="card">
     <h2><Icon name="download" size={17} /> {ui.portable ? 'Обновления ядер' : 'Обновления'}</h2>
     {#if updates}
-      <div class="kv">
-        {#if !ui.portable}
+      {#if !ui.portable}
+        <div class="kv">
           <span class="muted">GRoute</span>
           <span>
             <b>{updates.current}</b>
             {#if updates.app}
               → доступна <b>{updates.app.version}</b>
               {#if updates.appStage === 'downloading'}(загрузка {Math.round(updates.appProgress * 100)}%){/if}
+              <button onclick={oninstall}>Установить GRoute {updates.app.version}…</button>
             {:else if checkedUpdates && !updates.appError}
               <span class="muted">— последняя версия</span>
             {/if}
             {#if updates.dev}<span class="muted"> (сборка без релизного тега)</span>{/if}
           </span>
-          {#if updates.appError}<span></span><span class="err">{updates.appError}</span>{/if}
-        {/if}
-
-        <span class="muted">Ядро Hysteria</span>
-        <span>
-          <b>{updates.core.version}</b>
-          <span class="muted">{updates.core.updated ? '(обновлённое)' : '(из комплекта)'}</span>
-          {#if updates.coreUpdate && !updates.coreError}
-            → доступно <b>{updates.coreUpdate.version}</b>
-          {:else if ui.portable && checkedUpdates && !updates.coreError}
-            <span class="muted">— обновлений нет</span>
-          {/if}
-          {#if updates.coreBusy}(загрузка {Math.round(updates.coreProgress * 100)}%){/if}
-        </span>
-        {#if updates.core.error}<span></span><span class="err">{updates.core.error}</span>{/if}
-        {#if updates.coreError}<span></span><span class="err">{updates.coreError}</span>{/if}
-
-        {#if updates.xray}
-          <span class="muted">Ядро Xray (VLESS)</span>
-          <span>
-            <b>{updates.xray.info.version}</b>
-            <span class="muted">{updates.xray.info.updated ? '(обновлённое)' : '(из комплекта)'}</span>
-            {#if updates.xray.update && !updates.xray.error}
-              → доступно <b>{updates.xray.update.version}</b>
-            {:else if ui.portable && checkedUpdates && !updates.xray.error}
-              <span class="muted">— обновлений нет</span>
-            {/if}
-            {#if updates.xray.busy}(загрузка и проверка {Math.round(updates.xray.progress * 100)}%){/if}
-          </span>
-          {#if updates.xray.info.error}<span></span><span class="err">{updates.xray.info.error}</span>{/if}
-          {#if updates.xray.error}<span></span><span class="err">{updates.xray.error}</span>{/if}
-        {/if}
-
-        <span class="muted">Проверено</span><span>{fmtDateTime(updates.checked)}</span>
-      </div>
-      {#if updates.coreNeedsReconnect && !offline}
-        <div class="note warn">Новое ядро Hysteria будет использовано после переподключения.</div>
+          {#if updates.appError}<span></span><span class="err">{hide(updates.appError)}</span>{/if}
+        </div>
       {/if}
-      {#if updates.xray?.needsReconnect && !offline}
-        <div class="note warn">Новое ядро Xray будет использовано после переподключения.</div>
-      {/if}
-      <div class="row">
-        <button class="primary" onclick={() => run(() => api.CheckUpdates(), '')} disabled={updates.checking}>
-          {updates.checking ? 'Проверка…' : 'Проверить обновления'}
-        </button>
-        {#if !ui.portable}
-          {#if updates.app}
-            <button onclick={oninstall}>Установить HyRoute {updates.app.version}…</button>
-          {/if}
-          {#if updates.coreUpdate}
-            <button onclick={() => run(installCore, 'Ядро Hysteria обновлено')} disabled={updates.coreBusy || coreInstalling}>Обновить ядро Hysteria</button>
-          {/if}
-          {#if updates.core.previous}
-            <button onclick={() => confirm(`Вернуть ядро ${updates!.core.previous}?`) && run(() => api.RollbackCore(), 'Ядро возвращено')}>
-              Откатить ядро ({updates.core.previous})
-            </button>
-          {/if}
-          {#if updates.xray?.update}
-            <button
-              onclick={() => run(() => api.InstallXray(), 'Ядро Xray обновлено')}
-              disabled={updates.xray.busy}
-              title="Перед переключением новое ядро проверяет настройки ваших серверов VLESS: если оно их не принимает, остаётся прежнее"
-              >Обновить ядро Xray</button
-            >
-          {/if}
-          {#if updates.xray?.info.previous}
-            <button onclick={() => confirm(`Вернуть ядро Xray ${updates!.xray.info.previous}?`) && run(() => api.RollbackXray(), 'Ядро Xray возвращено')}>
-              Откатить Xray ({updates.xray.info.previous})
-            </button>
-          {/if}
-        {/if}
-      </div>
-      {#if ui.portable}
-        <p class="muted small">Проверка сравнивает установленные версии с официальными выпусками apernet/hysteria и XTLS/Xray-core. Новые версии этих ядер поставляются в ZIP GRoute.</p>
-      {:else}
+      <CoreUpdates {updates} {onupdates} installHysteria={installCore} hysteriaInstalling={coreInstalling}
+        needsAdmin={info ? !!info.canRestartAsAdmin : undefined} online={!offline} />
+      {#if !ui.portable}
         <div class="opts">
           <label class="check"><input type="radio" name="upd" value="auto" checked={updateMode === 'auto'} disabled={!prefsLoaded} onchange={(e) => settle(e, () => savePrefs({ updateCheck: 'auto' }), () => updateMode)} /> Проверять автоматически</label>
           <span class="muted">При запуске и раз в 12 часов. Устанавливается только после вашего подтверждения.</span>
@@ -560,7 +493,7 @@
         <span class="muted">Настройки и профили</span><span class="mono">{hideUserPath(info.dataDir)}</span>
         <span class="muted">Программа</span><span class="mono">{hideUserPath(info.programDir)}</span>
         <span class="muted">Ядро Hysteria</span><span class="mono">{info.hysteriaPath}</span>
-        <span class="muted">Сборка</span><span class="mono">{updates?.current ?? ''} ({info.build})</span>
+        <span class="muted">Сборка</span><span class="mono">{ui.portable && /^\d+$/.test(info.build) ? '№' + info.build + ' · ' + (updates?.current ?? '') : (updates?.current ?? '') + ' (' + info.build + ')'}</span>
       </div>
       {#if ui.mac}
       <p class="muted">Настройки, пароли профилей и ссылки подписок лежат в папке root: прочитать их могут только администраторы этого Mac.</p>

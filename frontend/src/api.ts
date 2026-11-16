@@ -528,6 +528,23 @@ export interface CoreInfo {
   error: string;
 }
 
+export interface CoreUpdateState {
+  info: CoreInfo;
+  update: CoreUpdate | null;
+  error: string;
+  busy: boolean;
+  progress: number;
+  needsReconnect: boolean;
+  unpublished?: boolean;
+}
+
+export interface AWGUpdateState extends CoreUpdateState {
+  engineVersion?: string;
+  upstreamVersion?: string;
+  upstreamError?: string;
+  upstreamNewer?: boolean;
+}
+
 export interface Updates {
   current: string;
   dev: boolean;
@@ -545,15 +562,8 @@ export interface Updates {
   coreBusy: boolean;
   coreProgress: number;
   coreNeedsReconnect: boolean;
-  // The Xray core of VLESS servers, the same as the core* fields.
-  xray: {
-    info: CoreInfo;
-    update: CoreUpdate | null;
-    error: string;
-    busy: boolean;
-    progress: number;
-    needsReconnect: boolean;
-  };
+  xray: CoreUpdateState;
+  awg?: AWGUpdateState;
 }
 
 export interface Subscription {
@@ -706,6 +716,8 @@ interface GUI {
   RollbackCore(): Promise<void>;
   InstallXray(): Promise<void>;
   RollbackXray(): Promise<void>;
+  InstallAWG(): Promise<void>;
+  RollbackAWG(): Promise<void>;
   DownloadAppUpdate(): Promise<void>;
   ApplyAppUpdate(): Promise<void>;
   SkipAppVersion(v: string): Promise<void>;
